@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import ReactMarkdown from "react-markdown";
 
 interface Message {
   role: "user" | "assistant";
@@ -53,7 +54,7 @@ export default function Home() {
     if (!prompt.trim() || isProcessing) return;
 
     const currentPrompt = prompt;
-    setMessages((prev) => [...prev, { role: "user", content: currentPrompt }]);
+    setMessages((prev) =>[...prev, { role: "user", content: currentPrompt }]);
     setPrompt("");
     setIsProcessing(true);
 
@@ -141,11 +142,44 @@ export default function Home() {
                   <span className="opacity-50 mr-2 select-none">
                     {msg.role === "user" ? "orbital@forge:~$" : "pryzm-ai@node:~#"}
                   </span>
-                  <span className="whitespace-pre-wrap leading-relaxed">{msg.content}</span>
+                
+                  <div className="mt-1 leading-relaxed">
+                    {msg.role === "user" ? (
+                      <span className="whitespace-pre-wrap">{msg.content}</span>
+                    ) : (
+                      <ReactMarkdown
+                        components={{
+                          code({ className, children, ...rest }) {
+                            const match = /language-(\w+)/.exec(className || "");
+                            return match ? (
+                              <div className="bg-black text-emerald-400 p-3 rounded-md border border-slate-700 my-3 overflow-x-auto font-mono text-xs shadow-inner">
+                                <code {...rest} className={className}>
+                                  {children}
+                                </code>
+                              </div>
+                            ) : (
+                              <code {...rest} className="bg-slate-800 text-emerald-300 px-1.5 py-0.5 rounded text-xs">
+                                {children}
+                              </code>
+                            );
+                          },
+                          strong({ children }) {
+                            return <strong className="font-bold text-white">{children}</strong>;
+                          },
+                          ul({ children }) {
+                            return <ul className="list-disc list-inside my-2 ml-4">{children}</ul>;
+                          }
+                        }}
+                      >
+                        {msg.content}
+                      </ReactMarkdown>
+                    )}
+                  </div>
+
                 </div>
               ))}
               {isProcessing && (
-                <div className="text-slate-500 animate-pulse">
+                <div className="text-slate-500 animate-pulse mt-6">
                   <span className="opacity-50 mr-2">pryzm-ai@node:~#</span>
                   _awaiting inference...
                 </div>
@@ -173,8 +207,8 @@ export default function Home() {
             disabled={isProcessing || !prompt.trim()}
             className={`px-6 py-3 rounded-lg font-semibold shadow-lg transition-colors duration-500 ease-in-out ${
               isProcessing || !prompt.trim()
-                ? (isIT ? 'bg-slate-800 text-slate-500' : 'bg-stone-800 text-stone-500') // Disabled State
-                : (isIT ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-orange-600 hover:bg-orange-500 text-white') // Active State
+                ? (isIT ? 'bg-slate-800 text-slate-500' : 'bg-stone-800 text-stone-500') 
+                : (isIT ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-orange-600 hover:bg-orange-500 text-white') 
             }`}
           >
             Execute

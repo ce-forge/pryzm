@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, List
 import json
 import database
@@ -12,7 +12,7 @@ router = APIRouter(tags=["AI Chat"])
 
 class InferenceRequest(BaseModel):
     session_id: Optional[str] = None
-    prompt: str
+    prompt: str = Field(..., max_length=5000) 
     mode: str = "it_copilot"  
 
 class SessionInfo(BaseModel):
