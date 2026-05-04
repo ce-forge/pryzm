@@ -45,7 +45,7 @@ export default function Home() {
     loadHistory();
   }, [urlSessionId]);
 
-  const handleInference = async (e: React.FormEvent) => {
+const handleInference = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isProcessing) return;
 
@@ -66,19 +66,50 @@ export default function Home() {
 
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
-      const data = await res.json();
-      
-      if (!urlSessionId && data.session_id) {
-        router.push(`/?session=${data.session_id}`);
+      // Add an empty assistant message to the screen that we will "fill up"
+      setMessages((prev) =>[...prev, { role: "assistant", content: "" }]);
+      setIsProcessing(false); // We can stop the 'loading' pulse because text is arriving!
+
+      // Connect to the stream
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder("utf-8");
+      let buffer = "";
+      let fullAssistantMessage = "";
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const parsed = JSON.parse(line);
+              
+              if (parsed.chunk) {
+                fullAssistantMessage += parsed.chunk;
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  newMsgs[newMsgs.length - 1] = { role: "assistant", content: fullAssistantMessage };
+                  return newMsgs;
+                });
+              }
+              
+              if (parsed.done && !urlSessionId) {
+                router.push(`/?session=${parsed.session_id}`);
+              }
+            } catch (err) {
+              console.error("Error parsing stream:", err);
+            }
+          }
+        }
       }
-      
-      setMessages((prev) =>[
-        ...prev,
-        { role: "assistant", content: data.response },
-      ]);
     } catch (error) {
-      setMessages((prev) => [...prev, { role: "assistant", content: `Connection Failure: ${error}` }]);
-    } finally {
+      setMessages((prev) =>[...prev, { role: "assistant", content: `Connection Failure: ${error}` }]);
       setIsProcessing(false);
     }
   };
@@ -88,13 +119,13 @@ export default function Home() {
       <header className="mb-6 flex justify-between items-end border-b border-slate-800 pb-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-emerald-400">DaiNamik Pryzm</h1>
-          <p className="text-sm text-slate-400">IT Operations & Diagnostic Copilot</p>
+          <p className="text-sm text-slate-400">IT Service Coordinator</p>
         </div>
       </header>
 
       <div className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-4 font-mono text-sm overflow-y-auto shadow-2xl mb-4 custom-scrollbar">
         {messages.length === 0 ? (
-          <div className="text-slate-500">// System online. Awaiting operational input.</div>
+          <div className="text-slate-500">// System online</div>
         ) : (
           <div className="space-y-6">
             {messages.map((msg, idx) => (
@@ -122,7 +153,7 @@ export default function Home() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           disabled={isProcessing}
-          placeholder="Enter diagnostic prompt or logic request..."
+          placeholder="Ask anything here..."
           className="flex-1 px-4 py-3 rounded-lg bg-slate-800 border border-slate-600 focus:outline-none focus:border-emerald-500 transition-colors text-slate-100 font-mono text-sm"
         />
         <button

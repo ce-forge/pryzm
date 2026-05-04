@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 
 interface SessionInfo {
   id: string;
@@ -12,6 +12,7 @@ interface SessionInfo {
 export default function Sidebar() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const searchParams = useSearchParams();
+  const router = useRouter();
   const currentSessionId = searchParams.get("session");
 
   useEffect(() => {
@@ -21,8 +22,26 @@ export default function Sidebar() {
       .catch((err) => console.error("Error loading sessions:", err));
   }, [currentSessionId]);
 
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
+    e.preventDefault();
+    if (!confirm("Delete this terminal log?")) return;
+    
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/sessions/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setSessions((prev) => prev.filter((s) => s.id !== id));
+        if (currentSessionId === id) {
+          router.push("/"); 
+        }
+      }
+    } catch (err) {
+      console.error("Failed to delete session", err);
+    }
+  };
+
   return (
     <div className="w-64 bg-slate-950 border-r border-slate-800 flex flex-col h-screen shrink-0 shadow-xl">
+      
       <div className="p-4 border-b border-slate-800">
         <Link 
           href="/" 
@@ -40,34 +59,35 @@ export default function Sidebar() {
           <div className="text-xs text-slate-600 px-2 italic">No logs found.</div>
         ) : (
           sessions.map((s) => (
-            <Link
-              key={s.id}
-              href={`/?session=${s.id}`}
-              className={`block px-3 py-2 rounded-md text-sm truncate transition-colors ${
+            <div 
+              key={s.id} 
+              className={`group flex justify-between items-center px-3 py-2 rounded-md text-sm transition-colors ${
                 currentSessionId === s.id 
                   ? "bg-slate-800 text-emerald-400 border border-slate-700" 
                   : "text-slate-400 hover:bg-slate-800 hover:text-slate-200 border border-transparent"
               }`}
             >
-              {s.title}
-            </Link>
+              <Link href={`/?session=${s.id}`} className="truncate flex-1">
+                {s.title}
+              </Link>
+              
+              <button 
+                onClick={(e) => handleDelete(e, s.id)}
+                className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-red-400 transition-opacity ml-2"
+                title="Delete Session"
+              >
+                ✕
+              </button>
+            </div>
           ))
         )}
       </div>
       
       <div className="p-3 border-t border-slate-800 space-y-1 bg-slate-900/50">
-        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-2">
-          System Overview
-        </h3>
-        <Link href="/analytics" className="block px-3 py-2 rounded-md text-sm text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition-colors">
-          📊 Analytics & Metrics
-        </Link>
-        <Link href="/integrations" className="block px-3 py-2 rounded-md text-sm text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition-colors">
-          🔌 API Integrations
-        </Link>
-        <Link href="/settings" className="block px-3 py-2 rounded-md text-sm text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition-colors">
-          ⚙️ Settings
-        </Link>
+        <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2 px-2">System Overview</h3>
+        <Link href="/analytics" className="block px-3 py-2 rounded-md text-sm text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition-colors">📊 Analytics & Metrics</Link>
+        <Link href="/integrations" className="block px-3 py-2 rounded-md text-sm text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition-colors">🔌 API Integrations</Link>
+        <Link href="/settings" className="block px-3 py-2 rounded-md text-sm text-slate-400 hover:bg-slate-800 hover:text-emerald-400 transition-colors">⚙️ Settings</Link>
       </div>
 
       <div className="p-4 border-t border-slate-800 text-xs text-slate-500 flex justify-between items-center bg-slate-950">
