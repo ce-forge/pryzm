@@ -13,6 +13,9 @@ export default function Home() {
   const searchParams = useSearchParams();
   
   const urlSessionId = searchParams.get("session");
+  const workspace = searchParams.get("workspace") || "it_copilot";
+  
+  const isIT = workspace === "it_copilot";
 
   const [messages, setMessages] = useState<Message[]>([]);
   const [prompt, setPrompt] = useState("");
@@ -22,7 +25,7 @@ export default function Home() {
 
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isProcessing]);
+  },[messages, isProcessing]);
 
   useEffect(() => {
     async function loadHistory() {
@@ -43,9 +46,9 @@ export default function Home() {
     }
     
     loadHistory();
-  }, [urlSessionId]);
+  },[urlSessionId]);
 
-const handleInference = async (e: React.FormEvent) => {
+  const handleInference = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prompt.trim() || isProcessing) return;
 
@@ -60,17 +63,16 @@ const handleInference = async (e: React.FormEvent) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           prompt: currentPrompt,
-          session_id: urlSessionId 
+          session_id: urlSessionId,
+          mode: workspace
         }),
       });
 
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
-      // Add an empty assistant message to the screen that we will "fill up"
       setMessages((prev) =>[...prev, { role: "assistant", content: "" }]);
-      setIsProcessing(false); // We can stop the 'loading' pulse because text is arriving!
+      setIsProcessing(false); 
 
-      // Connect to the stream
       const reader = res.body?.getReader();
       const decoder = new TextDecoder("utf-8");
       let buffer = "";
@@ -100,7 +102,7 @@ const handleInference = async (e: React.FormEvent) => {
               }
               
               if (parsed.done && !urlSessionId) {
-                router.push(`/?session=${parsed.session_id}`);
+                router.push(`/?workspace=${workspace}&session=${parsed.session_id}`);
               }
             } catch (err) {
               console.error("Error parsing stream:", err);
@@ -115,55 +117,70 @@ const handleInference = async (e: React.FormEvent) => {
   };
 
   return (
-    <div className="flex flex-col h-full p-6 max-w-4xl mx-auto w-full">
-      <header className="mb-6 flex justify-between items-end border-b border-slate-800 pb-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-emerald-400">DaiNamik Pryzm</h1>
-          <p className="text-sm text-slate-400">IT Service Coordinator</p>
-        </div>
-      </header>
-
-      <div className="flex-1 bg-slate-950 border border-slate-700 rounded-lg p-4 font-mono text-sm overflow-y-auto shadow-2xl mb-4 custom-scrollbar">
-        {messages.length === 0 ? (
-          <div className="text-slate-500">// System online</div>
-        ) : (
-          <div className="space-y-6">
-            {messages.map((msg, idx) => (
-              <div key={idx} className={msg.role === "user" ? "text-emerald-400" : "text-slate-300"}>
-                <span className="opacity-50 mr-2 select-none">
-                  {msg.role === "user" ? "orbital@forge:~$" : "pryzm-ai@node:~#"}
-                </span>
-                <span className="whitespace-pre-wrap leading-relaxed">{msg.content}</span>
-              </div>
-            ))}
-            {isProcessing && (
-              <div className="text-slate-500 animate-pulse">
-                <span className="opacity-50 mr-2">pryzm-ai@node:~#</span>
-                _awaiting inference...
-              </div>
-            )}
-            <div ref={terminalEndRef} />
+    <div className={`flex flex-col h-full w-full transition-colors duration-500 ease-in-out ${isIT ? 'bg-slate-900' : 'bg-stone-900'}`}>
+      <div className="flex flex-col h-full p-6 max-w-4xl mx-auto w-full">
+        
+        <header className={`mb-6 flex justify-between items-end border-b pb-4 transition-colors duration-500 ease-in-out ${isIT ? 'border-slate-800' : 'border-stone-800'}`}>
+          <div>
+            <h1 className={`text-2xl font-bold tracking-tight transition-colors duration-500 ease-in-out ${isIT ? 'text-blue-400' : 'text-orange-400'}`}>
+              {isIT ? 'DaiNamik Pryzm' : 'Personal AI'}
+            </h1>
+            <p className="text-sm text-slate-400">
+              {isIT ? 'IT Service Coordinator' : 'General Purpose Assistant'}
+            </p>
           </div>
-        )}
-      </div>
+        </header>
 
-      <form onSubmit={handleInference} className="flex gap-4 shrink-0">
-        <input
-          type="text"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          disabled={isProcessing}
-          placeholder="Ask anything here..."
-          className="flex-1 px-4 py-3 rounded-lg bg-slate-800 border border-slate-600 focus:outline-none focus:border-emerald-500 transition-colors text-slate-100 font-mono text-sm"
-        />
-        <button
-          type="submit"
-          disabled={isProcessing || !prompt.trim()}
-          className="px-6 py-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 disabled:text-slate-500 font-semibold transition-colors shadow-lg"
-        >
-          Execute
-        </button>
-      </form>
+        <div className={`flex-1 border rounded-lg p-4 font-mono text-sm overflow-y-auto shadow-2xl mb-4 custom-scrollbar transition-colors duration-500 ease-in-out ${isIT ? 'bg-slate-950 border-slate-700' : 'bg-stone-950 border-stone-700'}`}>
+          {messages.length === 0 ? (
+            <div className="text-slate-500">// System online</div>
+          ) : (
+            <div className="space-y-6">
+              {messages.map((msg, idx) => (
+                <div key={idx} className={msg.role === "user" ? (isIT ? "text-blue-400" : "text-orange-400") : "text-slate-300"}>
+                  <span className="opacity-50 mr-2 select-none">
+                    {msg.role === "user" ? "orbital@forge:~$" : "pryzm-ai@node:~#"}
+                  </span>
+                  <span className="whitespace-pre-wrap leading-relaxed">{msg.content}</span>
+                </div>
+              ))}
+              {isProcessing && (
+                <div className="text-slate-500 animate-pulse">
+                  <span className="opacity-50 mr-2">pryzm-ai@node:~#</span>
+                  _awaiting inference...
+                </div>
+              )}
+              <div ref={terminalEndRef} />
+            </div>
+          )}
+        </div>
+
+        <form onSubmit={handleInference} className="flex gap-4 shrink-0">
+          <input
+            type="text"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            disabled={isProcessing}
+            placeholder="Ask anything here..."
+            className={`flex-1 px-4 py-3 rounded-lg border focus:outline-none text-slate-100 font-mono text-sm transition-colors duration-500 ease-in-out ${
+              isIT 
+                ? 'bg-slate-800 border-slate-600 focus:border-blue-500' 
+                : 'bg-stone-800 border-stone-600 focus:border-orange-500'
+            }`}
+          />
+          <button
+            type="submit"
+            disabled={isProcessing || !prompt.trim()}
+            className={`px-6 py-3 rounded-lg font-semibold shadow-lg transition-colors duration-500 ease-in-out ${
+              isProcessing || !prompt.trim()
+                ? (isIT ? 'bg-slate-800 text-slate-500' : 'bg-stone-800 text-stone-500') // Disabled State
+                : (isIT ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-orange-600 hover:bg-orange-500 text-white') // Active State
+            }`}
+          >
+            Execute
+          </button>
+        </form>
+      </div>
     </div>
   );
 }

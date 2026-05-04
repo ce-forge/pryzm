@@ -13,6 +13,7 @@ router = APIRouter(tags=["AI Chat"])
 class InferenceRequest(BaseModel):
     session_id: Optional[str] = None
     prompt: str
+    mode: str = "it_copilot"  
 
 class SessionInfo(BaseModel):
     id: str
@@ -23,8 +24,8 @@ class MessageHistory(BaseModel):
     content: str
 
 @router.get("/sessions", response_model=List[SessionInfo])
-def get_all_sessions(db: Session = Depends(database.get_db)):
-    sessions = db.query(models.Session).order_by(models.Session.created_at.desc()).all()
+def get_all_sessions(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
+    sessions = db.query(models.Session).filter(models.Session.mode == workspace).order_by(models.Session.created_at.desc()).all()
     return [{"id": s.id, "title": s.title} for s in sessions]
 
 @router.get("/sessions/{session_id}", response_model=List[MessageHistory])
@@ -53,7 +54,7 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
         chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
         
     if not chat_session:
-        chat_session = models.Session(title="New Diagnostic Session")
+        chat_session = models.Session(title="New Diagnostic Session", mode=request.mode)
         is_new = True
         db.add(chat_session)
         db.commit()
@@ -68,7 +69,7 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
 
     def generate():
         full_response = ""
-        for chunk in ai_engine.stream_chat(safe_messages):
+        for chunk in ai_engine.stream_chat(safe_messages, request.mode):
             full_response += chunk
             yield json.dumps({"chunk": chunk}) + "\n"
             

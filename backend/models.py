@@ -13,6 +13,9 @@ class Session(Base):
 
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     title = Column(String, default="New Diagnostic Session")
+
+    mode = Column(String, default="it_copilot") 
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")
