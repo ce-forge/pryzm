@@ -7,7 +7,7 @@ services:
     restart: always
 
   postgres:
-    image: postgres:15-alpine
+    image: pgvector/pgvector:pg15
     container_name: pryzm_db
     environment:
       POSTGRES_USER: pryzm_admin
@@ -16,7 +16,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./pgdata:/var/lib/postgresql/data
     restart: always
 
   ollama:
@@ -25,7 +25,7 @@ services:
     ports:
       - "127.0.0.1:11434:11434"
     volumes:
-      - ollama_models:/root/.ollama
+      - ./ollama_models:/root/.ollama
     deploy:
       resources:
         reservations:
@@ -34,7 +34,3 @@ services:
               count: 1
               capabilities: [gpu]
     restart: always
-
-volumes:
-  pgdata:
-  ollama_models:

@@ -3,6 +3,9 @@ import requests
 import json
 import inspect
 import time
+import database
+import knowledge
+import re
 from config import settings
 
 from tools import AVAILABLE_TOOLS, TOOL_DEFINITIONS
@@ -23,7 +26,7 @@ def get_system_prompt(mode: str, tool_names: str) -> str:
         return "You are an AI assistant. Please configure your prompt files."
 
 
-def stream_chat(messages: list, mode: str = "it_copilot"):
+def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None):
     url = f"{BASE_OLLAMA_URL}/api/chat"
     
     if mode == "it_copilot":
@@ -35,8 +38,32 @@ def stream_chat(messages: list, mode: str = "it_copilot"):
         system_msg = {"role": "system", "content": get_system_prompt(mode, "")}
         tools_payload = None 
        
-    full_messages =[system_msg] + messages
-    
+    recent_messages = messages[-20:] if len(messages) > 20 else messages
+
+    if recent_messages and recent_messages[-1].get("role") == "user":
+        last_query = recent_messages[-1].get("content", "")
+        
+        db = database.SessionLocal()
+        try:
+            rag_data = knowledge.retrieve_relevant_chunks(db, query=last_query, workspace=mode, session_id=session_id)
+            
+            if rag_data and rag_data.get("context"):
+                rag_context = rag_data["context"]
+                sources_list = rag_data["sources"]
+                
+                recent_messages[-1]["content"] = f"{last_query}\n{rag_context}"
+                
+                sources_str = ", ".join(sources_list)
+                
+                yield f"\n\n> 📚 *Retrieved local documentation from: `{sources_str}`*\n\n"
+                
+        except Exception as rag_err:
+            yield f"\n\n> ⚠️ *Knowledge Base RAG Failed: {str(rag_err)}*\n\n"
+        finally:
+            db.close()
+
+    full_messages = [system_msg] + recent_messages
+
     max_loops = 5
     loop_count = 0
     
@@ -76,6 +103,12 @@ def stream_chat(messages: list, mode: str = "it_copilot"):
                         valid_params = inspect.signature(func).parameters.keys()
                         safe_args = {k: v for k, v in args.items() if k in valid_params}
                         
+                        if "workspace" in valid_params:
+                            safe_args["workspace"] = mode
+                            
+                        if "session_id" in valid_params:
+                            safe_args["session_id"] = session_id
+                        
                         yield f"\n\n> ⚙️ *Executing `{func_name}` on `{safe_args}`...*\n\n"
                         
                         try:
@@ -94,7 +127,19 @@ def stream_chat(messages: list, mode: str = "it_copilot"):
                 continue
                 
             else:
-                content = message.get("content", "")
+                content = message.get("content")
+                if content is None:
+                    content = ""
+                
+                content = re.sub(r'<[^>]+>', '', content).strip()
+                if content.startswith("thought") or "I must wait for the search results" in content:
+                    content = "I don't have enough local context to answer that right now. Could you provide more details or upload the relevant documentation?"
+                
+                if not content.strip():
+                    if loop_count > 1:
+                        content = "I executed the search tools, but I couldn't find a definitive answer in the results."
+                    else:
+                        content = "I'm sorry, I don't have enough local context to answer that right now."
                 
                 words = content.split(" ")
                 for i, word in enumerate(words):

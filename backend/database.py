@@ -1,7 +1,7 @@
 import requests
 import redis
 from config import settings
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from models import Base
 
@@ -15,6 +15,9 @@ engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db():
+    with engine.connect() as conn:
+        conn.execute(text("Create EXTENSION IF NOT EXISTS vector;"))
+        conn.commit()
     Base.metadata.create_all(bind=engine)
 
 def get_db():

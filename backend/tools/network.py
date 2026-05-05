@@ -3,43 +3,98 @@ import platform
 import socket
 import requests
 import time
+import ssl
+from datetime import datetime
+from .registry import tool
 
+@tool(
+    properties={"hostname": {"type": "string", "description": "The hostname or IP. Append '.com' if it's a known web brand."}},
+    required=["hostname"]
+)
 def execute_ping(hostname: str) -> str:
-    """Pings a host and returns the raw terminal result."""
+    """Ping an IP address or hostname to check network connectivity and latency."""
     param = '-n' if platform.system().lower() == 'windows' else '-c'
-    command =['ping', param, '3', hostname]
+    command = ['ping', param, '3', hostname]
     try:
         output = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True, timeout=10)
         return f"Ping successful:\n{output}"
     except subprocess.TimeoutExpired:
-        return f"Ping failed: The request timed out after 10 seconds. The host is likely offline or blocking ICMP."
+        return "Ping failed: The request timed out after 10 seconds."
     except subprocess.CalledProcessError as e:
         return f"Ping failed:\n{e.output}"
 
+@tool(
+    properties={
+        "hostname": {"type": "string", "description": "The hostname or IP"},
+        "port": {"type": "integer", "description": "The port number to check (e.g. 80, 443, 3389)"}
+    },
+    required=["hostname", "port"]
+)
 def check_port(hostname: str, port: int) -> str:
-    """Checks if a specific TCP port is open."""
+    """Check if a specific TCP port is open on a target host."""
     try:
         with socket.create_connection((hostname, int(port)), timeout=3):
             return f"Port {port} on {hostname} is OPEN and accepting connections."
     except Exception as e:
         return f"Port {port} on {hostname} is CLOSED or unreachable. Details: {str(e)}"
 
-def check_website_status(url: str) -> str:
-    """Checks if a website is online and returns the HTTP status code."""
-    if not url.startswith("http"):
-        url = "https://" + url
-    try:
-        start_time = time.time()
-        response = requests.get(url, timeout=5)
-        elapsed = round((time.time() - start_time) * 1000)
-        return f"Website {url} is UP. Status code: {response.status_code}. Response time: {elapsed}ms."
-    except requests.exceptions.RequestException as e:
-        return f"Website {url} is DOWN or unreachable. Error: {str(e)}"
-
+@tool(
+    properties={"domain": {"type": "string", "description": "The domain name to resolve."}},
+    required=["domain"]
+)
 def dns_lookup(domain: str) -> str:
-    """Resolves a domain name to its IP address."""
+    """Perform a DNS lookup to find the IPv4 address of a domain name."""
     try:
         ip_address = socket.gethostbyname(domain)
         return f"DNS Lookup successful: The IP address for {domain} is {ip_address}"
     except socket.gaierror as e:
         return f"DNS Lookup failed for {domain}: {str(e)}"
+
+@tool(
+    properties={"hostname": {"type": "string", "description": "The target domain or IP."}},
+    required=["hostname"]
+)
+def traceroute(hostname: str) -> str:
+    """Trace the network path (hops) to a destination server."""
+    is_windows = platform.system().lower() == 'windows'
+    command = ['tracert', '-h', '15', hostname] if is_windows else ['traceroute', '-m', '15', hostname]
+    
+    try:
+        output = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True, timeout=20)
+        return f"Traceroute complete:\n{output}"
+    except subprocess.TimeoutExpired:
+        return "Traceroute failed: Timed out after 20 seconds."
+    except Exception as e:
+        return f"Traceroute failed. (Note: traceroute may not be installed on this host). Details: {str(e)}"
+
+@tool(
+    properties={"hostname": {"type": "string", "description": "The domain name to check (e.g., google.com)"}},
+    required=["hostname"]
+)
+def ssl_inspect(hostname: str) -> str:
+    """Inspects a domain's SSL/TLS certificate to see if it is valid and when it expires."""
+    try:
+        context = ssl.create_default_context()
+        with socket.create_connection((hostname, 443), timeout=5) as sock:
+            with context.wrap_socket(sock, server_hostname=hostname) as ssock:
+                cert = ssock.getpeercert()
+                
+                expire_str = cert.get('notAfter')
+                expire_date = datetime.strptime(expire_str, "%b %d %H:%M:%S %Y %Z")
+                days_left = (expire_date - datetime.utcnow()).days
+                
+                return (f"SSL Certificate for {hostname} is VALID.\n"
+                        f"Expires on: {expire_date.strftime('%Y-%m-%d')} ({days_left} days remaining).\n"
+                        f"Issued to: {cert.get('subject')[0][0][1]}\n"
+                        f"Issuer: {cert.get('issuer')[1][0][1]}")
+    except Exception as e:
+        return f"SSL inspection failed for {hostname}. The cert may be invalid or the host is down. Details: {str(e)}"
+
+@tool(properties={}, required=[])
+def get_public_ip() -> str:
+    """Fetches the external Public IP Address of the network you are currently running on."""
+    try:
+        ip = requests.get('https://api.ipify.org', timeout=5).text
+        return f"Your current Public IP Address is: {ip}"
+    except Exception as e:
+        return f"Failed to retrieve public IP. Details: {str(e)}"
