@@ -1,4 +1,4 @@
-# backend/ai_engine.py
+import os
 import requests
 import json
 import inspect
@@ -8,34 +8,33 @@ from config import settings
 from tools import AVAILABLE_TOOLS, TOOL_DEFINITIONS
 
 BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
-MODEL_NAME = "llama3.1"
+MODEL_NAME = "gemma4:e4b"
+
+def get_system_prompt(mode: str, tool_names: str) -> str:
+    """Reads the system prompt from the text files dynamically."""
+    base_dir = os.path.dirname(__file__)
+    prompt_path = os.path.join(base_dir, "prompts", f"{mode}.txt")
+    
+    try:
+        with open(prompt_path, "r") as f:
+            content = f.read()
+        return content.replace("{tool_names}", tool_names)
+    except FileNotFoundError:
+        return "You are an AI assistant. Please configure your prompt files."
+
 
 def stream_chat(messages: list, mode: str = "it_copilot"):
     url = f"{BASE_OLLAMA_URL}/api/chat"
     
     if mode == "it_copilot":
         tool_names = ", ".join(AVAILABLE_TOOLS.keys())
-        system_msg = {
-            "role": "system", 
-            "content": (
-                f"You are DaiNamik Pryzm, an elite IT Copilot. You have access to these tools: {tool_names}. "
-                "CRITICAL DIRECTIVES: "
-                "1. CASUAL CONVERSATION: If the user asks a general knowledge question (e.g., 'What is an orange?'), answer it normally and conversationally. DO NOT use tools for non-IT questions. "
-                "2. FINDING IPs: If you need to find an IP address, ALWAYS use 'dns_lookup'. Do not try to extract IPs from ping results. "
-                "3. SEQUENTIAL EXECUTION: If you need an IP address to check a port, run 'dns_lookup' FIRST, wait for the result, and then run 'check_port'. Do not guess IPs (like 192.168.1.1). "
-                "4. NO RAW JSON: NEVER output raw JSON in your final conversational response. "
-                "5. SUMMARIZE: Always read the tool results carefully and provide a clean, human-readable summary."
-            )
+        system_msg = {"role": "system", "content": get_system_prompt(mode, tool_names)
         }
         tools_payload = TOOL_DEFINITIONS
     else:
-        system_msg = {"role": "system",
-                      "content": (
-                "You are a helpful assistant. You can answer questions and provide information. "
-                "If you don't know the answer, say you don't know. Do not try to make up answers."
-            )}
+        system_msg = {"role": "system", "content": get_system_prompt(mode, "")}
         tools_payload = None 
-        
+       
     full_messages =[system_msg] + messages
     
     max_loops = 5
@@ -45,7 +44,11 @@ def stream_chat(messages: list, mode: str = "it_copilot"):
         while loop_count < max_loops:
             loop_count += 1
             
-            payload = {"model": MODEL_NAME, "messages": full_messages, "stream": False}
+            payload = {"model": MODEL_NAME, 
+                       "messages": full_messages, 
+                       "stream": False,
+                       "option": {"num_ctx": 8192}
+                       }
             if tools_payload:
                 payload["tools"] = tools_payload
                 
@@ -114,7 +117,14 @@ def generate_title(prompt: str) -> str:
         "Return ONLY the title text. Do not use quotes or punctuation. "
         f"Message: {prompt}"
     )
-    payload = {"model": MODEL_NAME, "prompt": system_prompt, "stream": False}
+
+    payload = {
+        "model": MODEL_NAME, 
+        "prompt": system_prompt, 
+        "stream": False,
+        "options": {"num_ctx": 4096}
+        }    
+    
     try:
         response = requests.post(url, json=payload, timeout=5)
         response.raise_for_status()

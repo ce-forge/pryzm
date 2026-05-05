@@ -1,0 +1,6 @@
+[
+"Find the IP address for reddit.com, check if port 443 is open on it, and then check the website status for it.",
+  "Based on what we just did, was the reddit website working properly?",
+  "Who is the CEO of Apple, and is apple.com online right now?",
+  "Check if port 99999 is open on google.com"
+]
