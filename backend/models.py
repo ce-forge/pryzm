@@ -13,9 +13,11 @@ class Session(Base):
     __tablename__ = "sessions"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     title = Column(String, default="New Diagnostic Session")
-    mode = Column(String, default="it_copilot") 
+    mode = Column(String, default="it_copilot")
+    folder_id = Column(String, nullable=True) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="session", cascade="all, delete-orphan")
 
 class Message(Base):
     __tablename__ = "messages"
@@ -26,6 +28,12 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     session = relationship("Session", back_populates="messages")
 
+class Folder(Base):
+    __tablename__ = "folders"
+    id = Column(String, primary_key=True)
+    name = Column(String)
+    workspace = Column(String)
+
 class Document(Base):
     """Tracks files that have been uploaded to the knowledge base."""
     __tablename__ = "documents"
@@ -33,8 +41,9 @@ class Document(Base):
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     filename = Column(String, nullable=False)
     workspace = Column(String, default="it_copilot") 
-    
-    session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), nullable=True, index=True) 
+
+    session = relationship("Session", back_populates="documents")    
+    session_id = Column(String, ForeignKey("sessions.id"))
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")

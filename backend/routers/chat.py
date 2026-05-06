@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from datetime import datetime
 import json
 
 import database
@@ -17,19 +18,40 @@ class InferenceRequest(BaseModel):
     prompt: str = Field(..., max_length=100000) 
     mode: str = "it_copilot"  
 
+class SessionResponse(BaseModel):
+    id: str
+    title: str
+    mode: str
+    folder_id: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
 class SessionInfo(BaseModel):
     id: str
     title: str
+
+class SessionUpdate(BaseModel):
+    folder_id: Optional[str] = None
+    title: Optional[str] = None
+
+class FolderUpdate(BaseModel):
+    name: str
 
 class MessageHistory(BaseModel):
     role: str
     content: str
     timestamp: Optional[str] = None
 
-@router.get("/sessions", response_model=List[SessionInfo])
-def get_all_sessions(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
-    sessions = db.query(models.Session).filter(models.Session.mode == workspace).order_by(models.Session.created_at.desc()).all()
-    return [{"id": s.id, "title": s.title} for s in sessions]
+class FolderCreate(BaseModel):
+    id: str
+    name: str
+    workspace: str
+
+@router.get("/sessions", response_model=List[SessionResponse])
+def get_sessions(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
+    return db.query(models.Session).filter(models.Session.mode == workspace).order_by(models.Session.created_at.desc()).all()
 
 @router.get("/sessions/{session_id}", response_model=List[MessageHistory])
 def get_session_history(session_id: str, db: Session = Depends(database.get_db)):
@@ -44,6 +66,26 @@ def get_session_history(session_id: str, db: Session = Depends(database.get_db))
             for m in messages
     ]
 
+@router.patch("/sessions/{session_id}")
+def update_session(session_id: str, payload: SessionUpdate, db: Session = Depends(database.get_db)):
+    db_session = db.query(models.Session).filter(models.Session.id == session_id).first()
+    if db_session:
+        update_data = payload.dict(exclude_unset=True) 
+        for key, value in update_data.items():
+            setattr(db_session, key, value)
+        db.commit()
+        return {"status": "success"}
+    return {"status": "error", "message": "Session not found"}
+
+@router.patch("/folders/{folder_id}")
+def update_folder(folder_id: str, payload: FolderUpdate, db: Session = Depends(database.get_db)):
+    db_folder = db.query(models.Folder).filter(models.Folder.id == folder_id).first()
+    if db_folder:
+        db_folder.name = payload.name
+        db.commit()
+        return {"status": "success"}
+    return {"status": "error", "message": "Folder not found"}
+
 @router.delete("/sessions/{session_id}")
 def delete_session(session_id: str, db: Session = Depends(database.get_db)):
     session = db.query(models.Session).filter(models.Session.id == session_id).first()
@@ -55,16 +97,21 @@ def delete_session(session_id: str, db: Session = Depends(database.get_db)):
 
 @router.post("/analyze")
 def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_db)):
-    is_new = False
     chat_session = None
     
     if request.session_id:
         chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
         
     if not chat_session:
-        chat_session = models.Session(title="New Diagnostic Session", mode=request.mode)
-        is_new = True
+        # Generate the title synchronously BEFORE starting the stream
+        generated_title = ai_engine.generate_title(request.prompt)
+        chat_session = models.Session(title=generated_title, mode=request.mode)
         db.add(chat_session)
+        db.commit()
+        db.refresh(chat_session)
+    elif chat_session.title in["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
+        # Update the generic placeholder title once the user actually sends a real prompt!
+        chat_session.title = ai_engine.generate_title(request.prompt)
         db.commit()
         db.refresh(chat_session)
         
@@ -97,13 +144,6 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
                 try:
                     ai_msg = models.Message(session_id=chat_session.id, role="assistant", content=full_response)
                     background_db.add(ai_msg)
-                    
-                    if is_new:
-                        new_title = ai_engine.generate_title(request.prompt)
-                        bg_session = background_db.query(models.Session).filter(models.Session.id == chat_session.id).first()
-                        if bg_session:
-                            bg_session.title = new_title
-                    
                     background_db.commit()
                 except Exception as e:
                     background_db.rollback()
@@ -117,16 +157,52 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
 async def upload_document(
     file: UploadFile = File(...), 
     workspace: str = Form("it_copilot"),
-    session_id: Optional[str] = Form(None),
+    session_id: Optional[str] = Form(None), 
     db: Session = Depends(database.get_db)
 ):
-    if not session_id:
-        print("Warning: Document uploaded without session_id. It will be GLOBAL.")
     content = await file.read()
     try:
         text_content = content.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="Only UTF-8 text files are currently supported.")
         
-    result = knowledge.ingest_document(db, file.filename, text_content, workspace, session_id)
-    return {"message": f"Successfully ingested {file.filename}", "details": result}
+    active_session_id = session_id
+    
+    if active_session_id and active_session_id not in ["null", "undefined"]:
+        existing_session = db.query(models.Session).filter(models.Session.id == active_session_id).first()
+        
+        if not existing_session:
+            new_session = models.Session(id=active_session_id, title="Document Upload Session", mode=workspace)
+            db.add(new_session)
+            db.commit()
+    else:
+        new_session = models.Session(title="Document Upload Session", mode=workspace)
+        db.add(new_session)
+        db.commit()
+        db.refresh(new_session)
+        active_session_id = new_session.id
+
+    result = knowledge.ingest_document(db, file.filename, text_content, workspace, active_session_id)
+    
+    return {
+        "message": f"Successfully ingested {file.filename}", 
+        "details": result,
+        "session_id": active_session_id 
+    }
+
+@router.get("/folders")
+def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
+    return db.query(models.Folder).filter(models.Folder.workspace == workspace).all()
+
+@router.post("/folders")
+def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
+    new_folder = models.Folder(id=folder.id, name=folder.name, workspace=folder.workspace)
+    db.add(new_folder)
+    db.commit()
+    return {"status": "success"}
+
+@router.delete("/folders/{folder_id}")
+def delete_folder(folder_id: str, db: Session = Depends(database.get_db)):
+    db.query(models.Folder).filter(models.Folder.id == folder_id).delete()
+    db.commit()
+    return {"status": "success"}

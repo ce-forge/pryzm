@@ -31,8 +31,7 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
     
     if mode == "it_copilot":
         tool_names = ", ".join(AVAILABLE_TOOLS.keys())
-        system_msg = {"role": "system", "content": get_system_prompt(mode, tool_names)
-        }
+        system_msg = {"role": "system", "content": get_system_prompt(mode, tool_names)}
         tools_payload = TOOL_DEFINITIONS
     else:
         system_msg = {"role": "system", "content": get_system_prompt(mode, "")}
@@ -43,22 +42,32 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
     if recent_messages and recent_messages[-1].get("role") == "user":
         last_query = recent_messages[-1].get("content", "")
         
+        has_attachment = "[Attached_File:" in last_query
+        clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
+        
+        # Use clean text for the RAG search so hidden tags don't break the vector math
+        rag_query = clean_user_text if clean_user_text else "document overview"
+        
         db = database.SessionLocal()
         try:
-            rag_data = knowledge.retrieve_relevant_chunks(db, query=last_query, workspace=mode, session_id=session_id)
+            rag_data = knowledge.retrieve_relevant_chunks(db, query=rag_query, workspace=mode, session_id=session_id)
             
             if rag_data and rag_data.get("context"):
                 rag_context = rag_data["context"]
                 sources_list = rag_data["sources"]
                 
-                recent_messages[-1]["content"] = f"{last_query}\n{rag_context}"
+                # Format the prompt carefully based on context length
+                if has_attachment and len(clean_user_text) < 15:
+                    recent_messages[-1]["content"] = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n[System Note: Acknowledge the file reception briefly in 1 sentence. DO NOT summarize the whole file unless asked.]"
+                else:
+                    recent_messages[-1]["content"] = f"{last_query}\n\n{rag_context}\n\n[System Note: Relevant documentation has been automatically injected above. Use it to answer the prompt directly. DO NOT call additional search tools unless absolutely necessary.]"
                 
+                # Yield the citation as a Markdown Blockquote so the UI can style it beautifully!
                 sources_str = ", ".join(sources_list)
-                
-                yield f"\n\n> 📚 *Retrieved local documentation from: `{sources_str}`*\n\n"
+                yield f"> 📚 **Knowledge Base Reference:** `{sources_str}`\n\n"
                 
         except Exception as rag_err:
-            yield f"\n\n> ⚠️ *Knowledge Base RAG Failed: {str(rag_err)}*\n\n"
+            yield f"> ⚠️ **Knowledge Base Error:** `{str(rag_err)}`\n\n"
         finally:
             db.close()
 
@@ -116,7 +125,7 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                         except Exception as tool_err:
                             result = f"Tool execution failed: {str(tool_err)}"
                         
-                        yield f"```bash\n{result}\n```\n\n"
+                        yield f"```text\n{result}\n```\n\n"
                             
                         full_messages.append({
                             "role": "tool", 
@@ -157,10 +166,15 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
 
 def generate_title(prompt: str) -> str:
     url = f"{BASE_OLLAMA_URL}/api/generate"
+    
+    clean_prompt = re.sub(r'\[Attached_File:.*?\]', '', prompt).strip()
+    if not clean_prompt:
+        return "Document Analysis"
+
     system_prompt = (
         "You are a title generator. Based on the user message, generate a concise 2 to 4 word title. "
         "Return ONLY the title text. Do not use quotes or punctuation. "
-        f"Message: {prompt}"
+        f"Message: {clean_prompt}"
     )
 
     payload = {
@@ -175,9 +189,9 @@ def generate_title(prompt: str) -> str:
         response.raise_for_status()
         text = response.json().get("response", "").strip(' \n"\'*.')
         if len(text.split()) > 5:
-            words = prompt.split()
-            return " ".join(words[:3]) + "..." if len(words) > 3 else prompt
+            words = clean_prompt.split()
+            return " ".join(words[:3]) + "..." if len(words) > 3 else clean_prompt
         return text if text else "New Diagnostic"
     except Exception:
-        words = prompt.split()
+        words = clean_prompt.split()
         return " ".join(words[:3]) + "..." if len(words) > 3 else "New Diagnostic"

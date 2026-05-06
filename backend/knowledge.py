@@ -48,26 +48,20 @@ def ingest_document(db: Session, filename: str, content: str, workspace: str = "
     db.commit()
     return {"status": "success", "chunks_created": len(chunks), "document_id": new_doc.id}
 
-def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id: str = None, top_k: int = 3) -> str:
+def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id: str = None, top_k: int = 3):
     query_vector = get_embedding(query)
-    query_len = len(query.split())
-    effective_threshold = 0.6 if query_len < 4 else 0.45
-    
     if not query_vector:
-        return ""
+        return None
 
     distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
-
+    
     results = (
         db.query(models.DocumentChunk)
         .join(models.Document)
         .filter(
             models.Document.workspace == workspace,
-            or_(
-                models.Document.session_id == None, 
-                models.Document.session_id == session_id
-            ),
-            distance < effective_threshold
+            or_(models.Document.session_id == None, models.Document.session_id == session_id),
+            distance < 0.45
         )
         .order_by(distance)
         .limit(top_k)
@@ -75,11 +69,26 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
     )
 
     if not results:
+        clean_query = query.lower().replace("what is the ", "").replace("who is ", "").replace("what is ", "").strip()
+        
+        results = (
+            db.query(models.DocumentChunk)
+            .join(models.Document)
+            .filter(
+                models.Document.workspace == workspace,
+                or_(models.Document.session_id == None, models.Document.session_id == session_id),
+                models.DocumentChunk.content.ilike(f"%{clean_query}%") # Traditional SQL text match
+            )
+            .limit(top_k)
+            .all()
+        )
+
+    if not results:
         return None
 
     unique_sources = list(set([chunk.document.filename for chunk in results]))
-
     context_blocks = [chunk.content for chunk in results]
+    
     formatted_context = "\n\n=== RETRIEVED KNOWLEDGE BASE CONTEXT ===\n"
     formatted_context += "The following information was retrieved from the local documentation. Use it to inform your answer if relevant:\n\n"
     formatted_context += "\n\n---\n\n".join(context_blocks)
