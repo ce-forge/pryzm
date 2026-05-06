@@ -24,7 +24,18 @@ The application is split into two main components:
    npm run dev
    ```
 
+## Changing the AI Model
+By default, Pryzm uses `gemma4:e4b` via Ollama, but it is **fully compatible with any Ollama model** (e.g., `llama3`, `mistral`, `qwen`). 
+
+To change the active model, simply open `backend/ai_engine.py` and update the `MODEL_NAME` variable at the top of the file:
+```python
+# backend/ai_engine.py
+MODEL_NAME = "llama3" # Change this to your preferred local model
+```
+*Ensure you have run `ollama pull <model-name>` on your host machine before starting the backend.*
+
 ## Key Features
 * **Agentic Execution Loop**: Autonomously routes tasks and executes internal IT tools in sequence.
 * **Knowledge Base RAG**: Drag-and-drop local documents for automatic vector embedding and context retrieval.
+* **Dynamic Prompt Management**: Micro-prompts and failsafes are managed via a JSON template system for easy customization.
 * **Workspace Isolation**: Strict separation between "IT Copilot" and "Personal" workspaces.

@@ -1,41 +1,37 @@
-# DaiNamik Pryzm
+# Pryzm Backend
 
-DaiNamik Pryzm is a locally hosted, highly customizable AI Copilot designed for IT management. It provides a secure environment for IT managers to process client information, execute automated network diagnostics, and query internal documentation using an agentic LLM workflow.
+The backend is built with FastAPI and Python. It serves as the orchestrator between the PostgreSQL database, the local Ollama LLM, and the Python execution environment.
 
-## Architecture Overview
-The application is split into two main components:
-* **/backend**: A FastAPI application powering the agentic loop, database connections (PostgreSQL/pgvector), and RAG vector search.
-* **/frontend**: A Next.js/React application handling the UI, chat streaming state, and dynamic markdown rendering.
+## Setup Instructions
 
-## Quick Start
-
-1. Start the database infrastructure:
+1. Ensure Ollama is running locally with the required models:
    ```bash
-   docker-compose up -d
+   ollama pull gemma4:e4b
+   ollama pull nomic-embed-text
    ```
-2. Start the Backend API (see `/backend/README.md` for details):
+2. Create and activate a Python virtual environment:
    ```bash
-   cd backend
+   python -m venv venv
+   source venv/bin/activate  # Windows: venv\Scripts\activate
+   ```
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Start the server:
+   ```bash
    fastapi dev main.py
    ```
-3. Start the Frontend UI (see `/frontend/README.md` for details):
-   ```bash
-   cd frontend
-   npm run dev
-   ```
 
-## Changing the AI Model
-By default, Pryzm uses `gemma4:e4b` via Ollama, but it is **fully compatible with any Ollama model** (e.g., `llama3`, `mistral`, `qwen`). 
+## Core Components
 
-To change the active model, simply open `backend/ai_engine.py` and update the `MODEL_NAME` variable at the top of the file:
-```python
-# backend/ai_engine.py
-MODEL_NAME = "llama3" # Change this to your preferred local model
-```
-*Ensure you have run `ollama pull <model-name>` on your host machine before starting the backend.*
+* **`ai_engine.py`**: The core LLM orchestrator. Handles streaming responses, dynamic prompt construction, and the `while` loop that allows the AI to execute multiple tools sequentially before returning a final answer.
+* **`knowledge.py`**: Manages the Retrieval-Augmented Generation (RAG) pipeline. Splits text into chunks, generates vector embeddings using `nomic-embed-text`, and queries the pgvector database.
+* **`/routers/chat.py`**: Contains the REST API endpoints for session management, folder management, file uploads, and the `/analyze` stream.
 
-## Key Features
-* **Agentic Execution Loop**: Autonomously routes tasks and executes internal IT tools in sequence.
-* **Knowledge Base RAG**: Drag-and-drop local documents for automatic vector embedding and context retrieval.
-* **Dynamic Prompt Management**: Micro-prompts and failsafes are managed via a JSON template system for easy customization.
-* **Workspace Isolation**: Strict separation between "IT Copilot" and "Personal" workspaces.
+## Adding New AI Tools
+
+The AI agent can dynamically execute Python functions. To add a new capability (e.g., Active Directory lookup):
+1. Navigate to `/tools`.
+2. Write your Python function and decorate it with `@tool` from `tools.registry`.
+3. Add Google-style docstrings and type hints. The AI engine parses these automatically to understand how and when to use your tool.
