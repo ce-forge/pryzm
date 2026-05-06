@@ -3,24 +3,37 @@ import React, { useEffect, useState } from "react";
 export default function SettingsModal({ workspace, close }: { workspace: string, close: () => void }) {
   const [activeTab, setActiveTab] = useState<"general" | "behavior">("general");
   const [models, setModels] = useState<string[]>([]);
-  const[selectedModel, setSelectedModel] = useState("");
+  
+  // FIX 1: Initialize synchronously to prevent the "fake change" glitch
+  const[selectedModel, setSelectedModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
+  const[initialModel, setInitialModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
+  
   const [prompts, setPrompts] = useState<Record<string, string>>({});
+  const[initialPrompts, setInitialPrompts] = useState<Record<string, string>>({});
+  
   const [isSaving, setIsSaving] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   useEffect(() => {
-    setSelectedModel(localStorage.getItem("pryzm_model") || "gemma4:e4b");
-    
     fetch(`${API_URL}/api/models`)
       .then(r => r.json())
       .then(setModels)
-      .catch((err) => console.error("Failed to load models:", err));
+      .catch(() => {});
 
     fetch(`${API_URL}/api/prompts`)
       .then(r => r.json())
-      .then(setPrompts)
-      .catch((err) => console.error("Failed to load prompts:", err));
+      .then(data => {
+        setPrompts(data);
+        setInitialPrompts(data);
+      })
+      .catch(() => {});
   },[]);
+
+  // FIX 2: Only calculate changes IF the prompts have successfully loaded from the API
+  const isLoaded = Object.keys(initialPrompts).length > 0;
+  const hasChanges = selectedModel !== initialModel || (isLoaded && JSON.stringify(prompts) !== JSON.stringify(initialPrompts));
 
   const handleSave = async () => {
     setIsSaving(true);
@@ -31,11 +44,14 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prompts)
       });
-    } catch (e) {
-      console.error("Failed to save prompts:", e);
-    }
+      
+      setInitialModel(selectedModel);
+      setInitialPrompts(prompts);
+      
+      setShowSuccess(true);
+      setTimeout(() => setShowSuccess(false), 3000);
+    } catch (e) {}
     setIsSaving(false);
-    close();
   };
 
   return (
@@ -50,18 +66,8 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
 
         <div className="flex flex-1 overflow-hidden min-h-[400px]">
           <div className="w-48 border-r border-[#333537] bg-[#131314]/50 p-4 space-y-2 shrink-0">
-            <button 
-               onClick={() => setActiveTab("general")} 
-               className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'general' ? 'bg-[#282a2c] text-blue-400' : 'text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c]/50'}`}
-            >
-               General
-            </button>
-            <button 
-               onClick={() => setActiveTab("behavior")} 
-               className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'behavior' ? 'bg-[#282a2c] text-blue-400' : 'text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c]/50'}`}
-            >
-               AI Behavior
-            </button>
+            <button onClick={() => setActiveTab("general")} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'general' ? 'bg-[#282a2c] text-blue-400' : 'text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c]/50'}`}>General</button>
+            <button onClick={() => setActiveTab("behavior")} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'behavior' ? 'bg-[#282a2c] text-blue-400' : 'text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c]/50'}`}>AI Behavior</button>
           </div>
 
           <div className="flex-1 p-6 overflow-y-auto custom-scrollbar bg-[#1e1f20]">
@@ -70,11 +76,7 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
                 <div>
                   <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Active AI Model</label>
                   <p className="text-xs text-gray-500 mb-3">Select the local Ollama model to use for inference. Models must be pulled to your machine first.</p>
-                  <select 
-                    value={selectedModel} 
-                    onChange={(e) => setSelectedModel(e.target.value)}
-                    className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors appearance-none"
-                  >
+                  <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors appearance-none">
                     {models.length === 0 && <option value={selectedModel}>{selectedModel} (Loading...)</option>}
                     {models.map(m => <option key={m} value={m}>{m}</option>)}
                   </select>
@@ -88,15 +90,10 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
                   <h3 className="text-sm font-semibold text-[#e3e3e3]">Micro-Prompts</h3>
                   <p className="text-xs text-gray-500 mt-1">Customize the Just-In-Time (JIT) instructions injected into the engine during edge cases.</p>
                 </div>
-                
                 {Object.entries(prompts).map(([key, value]) => (
                   <div key={key} className="flex flex-col gap-1.5">
                     <label className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">{key.replace(/_/g, ' ')}</label>
-                    <textarea 
-                      value={value}
-                      onChange={(e) => setPrompts({ ...prompts,[key]: e.target.value })}
-                      className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 min-h-[60px] resize-y custom-scrollbar"
-                    />
+                    <textarea value={value} onChange={(e) => setPrompts({ ...prompts,[key]: e.target.value })} className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 min-h-[60px] resize-y custom-scrollbar" />
                   </div>
                 ))}
               </div>
@@ -104,14 +101,20 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
           </div>
         </div>
 
-        <div className="p-4 border-t border-[#333537] flex justify-end bg-[#131314] shrink-0">
-          <button onClick={close} className="px-5 py-2 text-gray-400 hover:text-white font-medium text-sm transition-colors mr-2">Cancel</button>
+        <div className="p-4 border-t border-[#333537] flex justify-end items-center bg-[#131314] shrink-0">
+          <button onClick={close} className="px-5 py-2 text-gray-400 hover:text-white font-medium text-sm transition-colors mr-2">Close</button>
+          
           <button 
             onClick={handleSave} 
-            disabled={isSaving}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 text-white font-semibold rounded-lg text-sm transition-colors flex items-center gap-2"
+            disabled={!hasChanges || isSaving}
+            className={`px-6 py-2 font-semibold rounded-lg text-sm transition-all flex items-center gap-2 
+              ${showSuccess ? 'bg-emerald-600 text-white' : 
+                hasChanges ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20' : 
+                'bg-[#282a2c] text-gray-500 cursor-not-allowed'}`}
           >
-            {isSaving ? 'Saving...' : 'Save Changes'}
+            {isSaving ? 'Saving...' : showSuccess ? (
+              <><svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg> Settings Applied</>
+            ) : 'Apply Settings'}
           </button>
         </div>
       </div>

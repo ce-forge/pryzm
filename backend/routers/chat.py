@@ -27,6 +27,7 @@ class SessionResponse(BaseModel):
     title: str
     mode: str
     folder_id: Optional[str] = None
+    is_pinned: Optional[bool] = False
     created_at: datetime
 
     class Config:
@@ -39,6 +40,7 @@ class SessionInfo(BaseModel):
 class SessionUpdate(BaseModel):
     folder_id: Optional[str] = None
     title: Optional[str] = None
+    is_pinned: Optional[bool] = None
 
 class FolderUpdate(BaseModel):
     name: str
@@ -80,6 +82,7 @@ def update_session(session_id: str, payload: SessionUpdate, db: Session = Depend
     db_session = db.query(models.Session).filter(models.Session.id == session_id).first()
     if db_session:
         update_data = payload.dict(exclude_unset=True) 
+        print(f"\n--- DEBUG UPDATE --- payload received: {update_data}\n")
         for key, value in update_data.items():
             setattr(db_session, key, value)
         db.commit()

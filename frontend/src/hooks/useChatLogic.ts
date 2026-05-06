@@ -135,7 +135,7 @@ export function useChatLogic() {
       if (activeSessionForUploads) formData.append("session_id", activeSessionForUploads);
       
       try {
-        const res = await fetch("$${API_URL}/upload", { method: "POST", body: formData });
+        const res = await fetch(`${API_URL}/upload`, { method: "POST", body: formData });
         if (res.ok) {
           const data = await res.json();
           setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "success", progress: 100 } : u)));
@@ -166,7 +166,7 @@ export function useChatLogic() {
     const activeModel = localStorage.getItem("pryzm_model") || "gemma4:e4b";
 
     try {
-      const res = await fetch("$${API_URL}/analyze", {
+      const res = await fetch(`${API_URL}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text, session_id: activeSessionId, mode: workspace, model: activeModel }),

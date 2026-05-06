@@ -9,6 +9,7 @@ interface SessionInfo {
   id: string;
   title: string;
   folder_id?: string | null; 
+  is_pinned?: boolean; // Added the missing property here
 }
 
 interface FolderInfo {
@@ -24,18 +25,17 @@ interface SidebarProps {
 
 export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const[editingId, setEditingId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   
   const [folders, setFolders] = useState<FolderInfo[]>([]);
-  const[editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const[editFolderTitle, setEditFolderTitle] = useState("");
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editFolderTitle, setEditFolderTitle] = useState("");
   const [foldersLoaded, setFoldersLoaded] = useState(false);
   
-  const[isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
-  const [pinnedSessions, setPinnedSessions] = useState<string[]>([]);
-  const[dragTarget, setDragTarget] = useState<string | null>(null);
+  const [dragTarget, setDragTarget] = useState<string | null>(null);
   
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -45,23 +45,11 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   useEffect(() => {
-    const handleClickOutside = () => setActiveDropdown(null);
-    document.addEventListener("click", handleClickOutside);
-    
-    const savedPins = localStorage.getItem(`pryzm_pinned_${workspace}`);
-    if (savedPins) {
-      try { setPinnedSessions(JSON.parse(savedPins)); } catch (e) {}
-    }
-    
-    return () => document.removeEventListener("click", handleClickOutside);
-  }, [workspace]);
-
-  useEffect(() => {
     if (foldersLoaded) {
       const openFolders = folders.filter(f => f.isOpen).map(f => f.id);
       localStorage.setItem(`pryzm_folders_open_${workspace}`, JSON.stringify(openFolders));
     }
-  },[folders, foldersLoaded, workspace]);
+  }, [folders, foldersLoaded, workspace]);
 
   const fetchFolders = () => {
     fetch(`${API_URL}/folders?workspace=${workspace}`)
@@ -115,12 +103,20 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     } catch (err) {}
   };
 
-  const togglePin = (e: React.MouseEvent, id: string) => {
+  const togglePin = async (e: React.MouseEvent, id: string, currentPinned: boolean) => {
     e.stopPropagation();
-    const newPinned = pinnedSessions.includes(id) ? pinnedSessions.filter(p => p !== id) : [...pinnedSessions, id];
-    setPinnedSessions(newPinned);
-    localStorage.setItem(`pryzm_pinned_${workspace}`, JSON.stringify(newPinned));
+    const newStatus = !currentPinned;
+    
+    setSessions(prev => prev.map(s => s.id === id ? { ...s, is_pinned: newStatus } : s));
     setActiveDropdown(null);
+
+    try {
+      await fetch(`${API_URL}/sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_pinned: newStatus })
+      });
+    } catch (err) {}
   };
 
   const handleDragStart = (e: React.DragEvent, sessionId: string) => e.dataTransfer.setData("sessionId", sessionId);
@@ -144,7 +140,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (name && name.trim()) {
       const newFolder = { id: Date.now().toString(), name: name.trim(), workspace };
       setFolders([{ ...newFolder, isOpen: true }, ...folders]);
-      await fetch("${API_URL}/folders", {
+      await fetch(`${API_URL}/folders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newFolder)
@@ -181,10 +177,11 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setFolders(folders.map(f => f.id === folderId ? { ...f, isOpen: !f.isOpen } : f));
   };
 
+  // Fixed sorting logic to use s.is_pinned
   const getSortedSessions = (folderId: string | null) => {
     const filtered = sessions.filter(s => s.folder_id === folderId || (folderId === null && !folders.find(f => f.id === s.folder_id)));
-    const pinned = filtered.filter(s => pinnedSessions.includes(s.id));
-    const unpinned = filtered.filter(s => !pinnedSessions.includes(s.id));
+    const pinned = filtered.filter(s => s.is_pinned);
+    const unpinned = filtered.filter(s => !s.is_pinned);
     return [...pinned, ...unpinned];
   };
 
@@ -207,7 +204,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       
       {editingId !== s.id && (
         <div className="flex-shrink-0 flex items-center pr-2 relative">
-          {pinnedSessions.includes(s.id) && (
+          {/* Fixed Icon logic */}
+          {s.is_pinned && (
              <svg className="w-3.5 h-3.5 text-blue-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
                <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z" />
              </svg>
@@ -228,8 +226,9 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
           {activeDropdown === s.id && (
              <div className="absolute right-0 top-[90%] mt-1 w-28 bg-[#282a2c] border border-[#333537] rounded-lg shadow-xl z-50 overflow-hidden flex flex-col py-1" onClick={e => e.stopPropagation()}>
-               <button onClick={(e) => togglePin(e, s.id)} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
-                 {pinnedSessions.includes(s.id) ? "Unpin" : "Pin to Top"}
+               {/* Fixed Dropdown button logic */}
+               <button onClick={(e) => togglePin(e, s.id, !!s.is_pinned)} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
+                 {s.is_pinned ? "Unpin" : "Pin to Top"}
                </button>
                <button onClick={(e) => { e.preventDefault(); setEditingId(s.id); setEditTitle(s.title); setActiveDropdown(null); }} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
                  Rename

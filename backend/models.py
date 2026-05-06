@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
@@ -13,6 +13,7 @@ class Session(Base):
     __tablename__ = "sessions"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     title = Column(String, default="New Diagnostic Session")
+    is_pinned = Column(Boolean, default=False)
     mode = Column(String, default="it_copilot")
     folder_id = Column(String, nullable=True) 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

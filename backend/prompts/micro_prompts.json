@@ -1,6 +1,6 @@
 {
     "rag_short_file_upload": "[System Note: Acknowledge the file reception briefly in 1 sentence. DO NOT summarize the whole file unless asked.]",
-    "rag_standard_injection": "[System Note: Relevant documentation has been automatically injected above. Use it to answer the prompt directly. DO NOT call additional search tools unless absolutely necessary.]",
+    "rag_standard_injection": "[System Note: Relevant documentation has been automatically injected above. Use it to answer the prompt directly. DO NOT call additional search tools unless absolutely necessary. Maintain a strict, clinical IT professional tone. Do NOT use emojis or LaTeX math formatting.]",
     "title_generator_system": "You are a title generator. Based on the user message, generate a concise 2 to 4 word title. Return ONLY the title text. Do not use quotes or punctuation.",
     "title_default": "New Diagnostic",
     "title_document_default": "Document Analysis",
@@ -8,5 +8,5 @@
     "fallback_tool_failure": "I executed the search tools, but I couldn't find a definitive answer in the results.",
     "fallback_generic": "I'm sorry, I don't have enough local context to answer that right now.",
     "warning_max_loops": "*[System Warning: Maximum agent loops reached. Execution stopped to prevent infinite loop.]*",
-    "memory_condenser_system": "You are a background Memory Condenser for an IT Copilot. Your job is to summarize the following chat history into a dense, highly detailed context block. CRITICAL: You must retain ALL exact IP addresses, exact passwords, credentials (do not truncate or alter them!), system states, and active tasks. Do NOT output conversational filler like 'Here is the summary'. ONLY output the dense summary."
+    "memory_condenser_system": "You are a background Memory Condenser for an IT Copilot. Your job is to summarize the following chat history into a dense, highly detailed context block. CRITICAL: You must retain ALL exact IP addresses, exact passwords, credentials (do not truncate or alter them!), system states, and active tasks. Do NOT output conversational filler like 'Here is the summary'. ONLY output the dense summary. Maintain a strict, clinical IT professional tone. Do NOT use emojis or LaTeX math formatting."
 }
