@@ -9,6 +9,7 @@ import re
 from config import settings
 
 from tools import AVAILABLE_TOOLS, TOOL_DEFINITIONS
+from prompt_manager import MICRO_PROMPTS
 
 BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 MODEL_NAME = "gemma4:e4b"
@@ -24,7 +25,6 @@ def get_system_prompt(mode: str, tool_names: str) -> str:
         return content.replace("{tool_names}", tool_names)
     except FileNotFoundError:
         return "You are an AI assistant. Please configure your prompt files."
-
 
 def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None):
     url = f"{BASE_OLLAMA_URL}/api/chat"
@@ -45,7 +45,6 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
         has_attachment = "[Attached_File:" in last_query
         clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
         
-        # Use clean text for the RAG search so hidden tags don't break the vector math
         rag_query = clean_user_text if clean_user_text else "document overview"
         
         db = database.SessionLocal()
@@ -56,15 +55,14 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                 rag_context = rag_data["context"]
                 sources_list = rag_data["sources"]
                 
-                # Format the prompt carefully based on context length
                 if has_attachment and len(clean_user_text) < 15:
-                    recent_messages[-1]["content"] = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n[System Note: Acknowledge the file reception briefly in 1 sentence. DO NOT summarize the whole file unless asked.]"
+                    recent_messages[-1]["content"] = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n{MICRO_PROMPTS['rag_short_file_upload']}"
                 else:
-                    recent_messages[-1]["content"] = f"{last_query}\n\n{rag_context}\n\n[System Note: Relevant documentation has been automatically injected above. Use it to answer the prompt directly. DO NOT call additional search tools unless absolutely necessary.]"
+                    recent_messages[-1]["content"] = f"{last_query}\n\n{rag_context}\n\n{MICRO_PROMPTS['rag_standard_injection']}"
                 
-                # Yield the citation as a Markdown Blockquote so the UI can style it beautifully!
-                sources_str = ", ".join(sources_list)
-                yield f"> 📚 **Knowledge Base Reference:** `{sources_str}`\n\n"
+                if not has_attachment:
+                    sources_str = ", ".join(sources_list)
+                    yield f"> 📚 **Knowledge Base Reference:** `{sources_str}`\n\n"
                 
         except Exception as rag_err:
             yield f"> ⚠️ **Knowledge Base Error:** `{str(rag_err)}`\n\n"
@@ -143,13 +141,13 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                 
                 content = re.sub(r'<[^>]+>', '', content).strip()
                 if content.startswith("thought") or "I must wait for the search results" in content:
-                    content = "I don't have enough local context to answer that right now. Could you provide more details or upload the relevant documentation?"
+                    content = MICRO_PROMPTS["fallback_thought_loop"]
                 
                 if not content.strip():
                     if loop_count > 1:
-                        content = "I executed the search tools, but I couldn't find a definitive answer in the results."
+                        content = MICRO_PROMPTS["fallback_tool_failure"]
                     else:
-                        content = "I'm sorry, I don't have enough local context to answer that right now."
+                        content = MICRO_PROMPTS["fallback_generic"]
                 
                 words = content.split(" ")
                 for i, word in enumerate(words):
@@ -160,24 +158,19 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                 break
                 
         if not finished_cleanly:
-            yield "\n\n*[System Warning: Maximum agent loops reached. Execution stopped to prevent infinite loop.]*"
+            yield MICRO_PROMPTS["warning_max_loops"]
                 
     except Exception as e:
         yield f"\n[Engine Error: {str(e)}]"
-
 
 def generate_title(prompt: str) -> str:
     url = f"{BASE_OLLAMA_URL}/api/generate"
     
     clean_prompt = re.sub(r'\[Attached_File:.*?\]', '', prompt).strip()
     if not clean_prompt:
-        return "Document Analysis"
+        return MICRO_PROMPTS["title_document_default"]
 
-    system_prompt = (
-        "You are a title generator. Based on the user message, generate a concise 2 to 4 word title. "
-        "Return ONLY the title text. Do not use quotes or punctuation. "
-        f"Message: {clean_prompt}"
-    )
+    system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
     payload = {
         "model": MODEL_NAME, 
@@ -193,7 +186,7 @@ def generate_title(prompt: str) -> str:
         if len(text.split()) > 5:
             words = clean_prompt.split()
             return " ".join(words[:3]) + "..." if len(words) > 3 else clean_prompt
-        return text if text else "New Diagnostic"
+        return text if text else MICRO_PROMPTS["title_default"]
     except Exception:
         words = clean_prompt.split()
-        return " ".join(words[:3]) + "..." if len(words) > 3 else "New Diagnostic"
+        return " ".join(words[:3]) + "..." if len(words) > 3 else MICRO_PROMPTS["title_default"]

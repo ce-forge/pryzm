@@ -61,7 +61,7 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
         .filter(
             models.Document.workspace == workspace,
             or_(models.Document.session_id == None, models.Document.session_id == session_id),
-            distance < 0.45
+            distance < 0.65
         )
         .order_by(distance)
         .limit(top_k)

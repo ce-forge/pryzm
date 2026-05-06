@@ -2,6 +2,7 @@
 
 import React, { useRef, useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { FileUpload, Message } from "@/hooks/useChatLogic";
@@ -176,6 +177,13 @@ export default function ChatUI({
     );
   };
 
+  const quickActions =[
+    { title: 'Scan Subnet', desc: 'Run a quick ping sweep on a subnet', icon: '🔍', prompt: 'Please run a network scan on the subnet 192.168.1.0/24' },
+    { title: 'Check SSL Certs', desc: 'Verify expiration for a domain', icon: '🔒', prompt: 'Check the SSL certificate status for google.com' },
+    { title: 'Analyze Config', desc: 'Summarize a device config', icon: '📝', prompt: 'I am going to attach a router configuration file. Please review it for security vulnerabilities.' },
+    { title: 'Check Open Ports', desc: 'Scan common ports for an IP', icon: '🌐', prompt: 'Run a port scan on 8.8.8.8 to see what is open' }
+  ];
+
   return (
     <div className="flex flex-col flex-1 min-w-0 h-full bg-[#131314]">
       
@@ -198,7 +206,34 @@ export default function ChatUI({
       </header>
 
       <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center custom-scrollbar">
-         <div className="w-full max-w-3xl space-y-6">
+         <div className="w-full max-w-3xl space-y-6 flex flex-col min-h-full">
+            
+            {messages.length === 0 && (
+              <div className="flex flex-col items-center justify-center flex-1 w-full animate-in fade-in slide-in-from-bottom-4 duration-700">
+                <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/20">
+                  <svg className="w-8 h-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <h2 className="text-2xl font-bold text-[#e3e3e3] mb-2">How can I help you today?</h2>
+                <p className="text-gray-400 text-sm mb-8">Select a quick action or start typing to begin.</p>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 w-full max-w-2xl">
+                  {quickActions.map((action, i) => (
+                    <button
+                      key={i}
+                      onClick={() => { setPrompt(action.prompt); textareaRef.current?.focus(); }}
+                      className="flex flex-col items-start p-4 bg-[#1e1f20]/50 hover:bg-[#282a2c] border border-[#333537] rounded-xl transition-all text-left group"
+                    >
+                      <span className="text-xl mb-2 grayscale opacity-70 group-hover:grayscale-0 group-hover:opacity-100 transition-all">{action.icon}</span>
+                      <span className="text-[#e3e3e3] text-sm font-medium mb-1">{action.title}</span>
+                      <span className="text-gray-500 text-xs">{action.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {messages.map((m, i) => {
               let showTimestamp = false;
               if (m.timestamp) {
@@ -227,6 +262,7 @@ export default function ChatUI({
                             renderUserMessage(m.content)
                           ) : (
                             <ReactMarkdown
+                              remarkPlugins={[remarkGfm]}
                               components={{
                                 p({ children }) { 
                                   if (!children || (typeof children === 'string' && children.trim() === '')) return null;
@@ -239,7 +275,6 @@ export default function ChatUI({
                                     </blockquote>
                                   );
                                 },
-                                // THE FIX: Safely intercept <pre> block code and convert to our CodeBlock widget
                                 pre({ children }: any) { 
                                   if (children && children.props) {
                                     const { className, children: codeContent } = children.props;
@@ -250,13 +285,36 @@ export default function ChatUI({
                                   }
                                   return <pre className="my-1.5">{children}</pre>; 
                                 },
-                                // ONLY applies to inline code like `this`
                                 code({ children, ...rest }: any) {
                                   return (
                                     <code {...rest} className="bg-[#1e1f20] text-emerald-300 px-1.5 py-0.5 rounded text-[13px] border border-[#333537]">
                                       {children}
                                     </code>
                                   );
+                                },
+                                table({ children }) {
+                                  return (
+                                    <div className="overflow-x-auto my-4 rounded-lg border border-[#333537]">
+                                      <table className="w-full text-left border-collapse text-[13px]">
+                                        {children}
+                                      </table>
+                                    </div>
+                                  );
+                                },
+                                thead({ children }) {
+                                  return <thead className="bg-[#1a1b1c] text-gray-400 text-xs uppercase tracking-wider">{children}</thead>;
+                                },
+                                tbody({ children }) {
+                                  return <tbody className="divide-y divide-[#333537]">{children}</tbody>;
+                                },
+                                tr({ children }) {
+                                  return <tr className="hover:bg-[#1e1f20]/50 transition-colors">{children}</tr>;
+                                },
+                                th({ children }) {
+                                  return <th className="px-4 py-2.5 font-semibold border-b border-[#333537]">{children}</th>;
+                                },
+                                td({ children }) {
+                                  return <td className="px-4 py-2.5 text-gray-300">{children}</td>;
                                 },
                                 strong({ children }) { return <strong className="font-semibold text-white">{children}</strong>; },
                                 ul({ children }) { return <ul className="list-disc list-outside mb-3 ml-4 space-y-1">{children}</ul>; },

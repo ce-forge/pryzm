@@ -122,7 +122,6 @@ export function useChatLogic() {
   }, [messages, prompt]);
 
   const processUploadQueue = async (filesToUpload: FileUpload[]) => {
-    // Keep a localized tracker so multiple rapid uploads all link to the newly created session
     let activeSessionForUploads = currentSession;
     
     for (const uploadItem of filesToUpload) {
@@ -139,7 +138,6 @@ export function useChatLogic() {
           const data = await res.json();
           setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "success", progress: 100 } : u)));
           
-          // FIX: If the backend created a new Session ID for this file, ADOPT IT!
           if (!activeSessionForUploads && data.session_id) {
              activeSessionForUploads = data.session_id;
              setCurrentSession(data.session_id);

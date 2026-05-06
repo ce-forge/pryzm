@@ -103,14 +103,12 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
         chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
         
     if not chat_session:
-        # Generate the title synchronously BEFORE starting the stream
         generated_title = ai_engine.generate_title(request.prompt)
         chat_session = models.Session(title=generated_title, mode=request.mode)
         db.add(chat_session)
         db.commit()
         db.refresh(chat_session)
     elif chat_session.title in["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
-        # Update the generic placeholder title once the user actually sends a real prompt!
         chat_session.title = ai_engine.generate_title(request.prompt)
         db.commit()
         db.refresh(chat_session)
