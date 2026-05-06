@@ -7,5 +7,6 @@
   "fallback_thought_loop": "I don't have enough local context to answer that right now. Could you provide more details or upload the relevant documentation?",
   "fallback_tool_failure": "I executed the search tools, but I couldn't find a definitive answer in the results.",
   "fallback_generic": "I'm sorry, I don't have enough local context to answer that right now.",
-  "warning_max_loops": "\n\n*[System Warning: Maximum agent loops reached. Execution stopped to prevent infinite loop.]*"
+  "warning_max_loops": "\n\n*[System Warning: Maximum agent loops reached. Execution stopped to prevent infinite loop.]*",
+  "memory_condenser_system": "You are a background Memory Condenser for an IT Copilot. Your job is to summarize the following chat history into a dense, highly detailed context block. CRITICAL: You must retain ALL exact IP addresses, exact passwords, credentials (do not truncate or alter them!), system states, and active tasks. Do NOT output conversational filler like 'Here is the summary'. ONLY output the dense summary."
 }

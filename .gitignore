@@ -1,4 +1,5 @@
 .env
+
 ollama_models/
 pgdata/
 router_config.txt

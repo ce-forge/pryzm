@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import testSuiteData from "../data/test_suite.json";
 
 export interface FileUpload {
   id: string;
@@ -14,7 +15,7 @@ export interface Message {
   timestamp?: string;
 }
 
-import testSuitePrompts from "../data/test_suite.json";
+const testSuitePrompts = testSuiteData as Record<string, string[]>;
 
 export function useChatLogic() {
   const router = useRouter();
@@ -24,12 +25,12 @@ export function useChatLogic() {
   const workspace = searchParams.get("workspace") || "it_copilot";
 
   const [currentSession, setCurrentSession] = useState<string | null>(urlSessionId);
-  const[sessionTitle, setSessionTitle] = useState("");
+  const [sessionTitle, setSessionTitle] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const[prompt, setPrompt] = useState("");
-  const [isProcessing, setIsProcessing] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const[isProcessing, setIsProcessing] = useState(false);
   const [isAutoTesting, setIsAutoTesting] = useState(false);
-  const[uploads, setUploads] = useState<FileUpload[]>([]);
+  const [uploads, setUploads] = useState<FileUpload[]>([]);
   
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -74,13 +75,13 @@ export function useChatLogic() {
         return;
       }
       try {
-        const res = await fetch(`http://127.0.0.1:8000/sessions/${currentSession}`);
+        const res = await fetch(`{API_URL}/sessions/${currentSession}`);
         if (res.ok) {
           const history = await res.json();
           setMessages(history);
         }
         
-        const sessionRes = await fetch(`http://127.0.0.1:8000/sessions?workspace=${workspace}`);
+        const sessionRes = await fetch(`{API_URL}/sessions?workspace=${workspace}`);
         if (sessionRes.ok) {
             const sessionData = await sessionRes.json();
             const activeSesh = sessionData.find((x: any) => x.id === currentSession);
@@ -97,7 +98,7 @@ export function useChatLogic() {
     const handleChatCreated = async () => {
         if (!currentSession) return;
         try {
-            const sessionRes = await fetch(`http://127.0.0.1:8000/sessions?workspace=${workspace}`);
+            const sessionRes = await fetch(`{API_URL}/sessions?workspace=${workspace}`);
             if (sessionRes.ok) {
                 const sessionData = await sessionRes.json();
                 const activeSesh = sessionData.find((x: any) => x.id === currentSession);
@@ -119,7 +120,7 @@ export function useChatLogic() {
   const totalTokens = useMemo(() => {
     const allText = messages.map(m => m.content).join(" ") + " " + prompt;
     return Math.ceil(allText.length / 4);
-  },[messages, prompt]);
+  }, [messages, prompt]);
 
   const processUploadQueue = async (filesToUpload: FileUpload[]) => {
     let activeSessionForUploads = currentSession;
@@ -133,7 +134,7 @@ export function useChatLogic() {
       if (activeSessionForUploads) formData.append("session_id", activeSessionForUploads);
       
       try {
-        const res = await fetch("http://127.0.0.1:8000/upload", { method: "POST", body: formData });
+        const res = await fetch("{API_URL}/upload", { method: "POST", body: formData });
         if (res.ok) {
           const data = await res.json();
           setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "success", progress: 100 } : u)));
@@ -161,12 +162,10 @@ export function useChatLogic() {
     let updatedSessionId = activeSessionId;
 
     abortControllerRef.current = new AbortController();
-    
-    // Fetch the active model from settings (or fallback to gemma4:e4b)
     const activeModel = localStorage.getItem("pryzm_model") || "gemma4:e4b";
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/analyze", {
+      const res = await fetch("{API_URL}/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text, session_id: activeSessionId, mode: workspace, model: activeModel }),
@@ -211,7 +210,7 @@ export function useChatLogic() {
               if (parsed.chunk !== undefined) {
                 fullAssistantMessage += parsed.chunk;
                 setMessages((prev) => {
-                  const newMsgs =[...prev];
+                  const newMsgs = [...prev];
                   const lastIndex = newMsgs.length - 1;
                   if (lastIndex >= 0 && newMsgs[lastIndex].role === "assistant") {
                     newMsgs[lastIndex] = { ...newMsgs[lastIndex], content: fullAssistantMessage };
@@ -225,7 +224,7 @@ export function useChatLogic() {
       }
     } catch (error: any) {
       if (error.name === "AbortError") return updatedSessionId;
-      setMessages((prev) =>[...prev, { role: "assistant", content: `\n\n[Connection Failure: ${error.message}]` }]);
+      setMessages((prev) => [...prev, { role: "assistant", content: `\n\n[Connection Failure: ${error.message}]` }]);
     } finally {
       setIsProcessing(false);
       abortControllerRef.current = null;
@@ -246,7 +245,7 @@ export function useChatLogic() {
     
     const textToSend = attachedPrefix + prompt;
     
-    setPromptHistory(prev => [prompt, ...prev]);
+    setPromptHistory(prev =>[prompt, ...prev]);
     setHistoryIndex(-1); 
     setPrompt("");
     
@@ -255,19 +254,15 @@ export function useChatLogic() {
     await sendMessage(textToSend, currentSession);
   };
 
-  const toggleDebugSuite = async () => {
-    if (isAutoTesting) {
-      abortTestRef.current = true;
-      setIsAutoTesting(false);
-      return;
-    }
-    if (!confirm("Start automated test suite?")) return;
-    
-    abortTestRef.current = false;
+  const runTestSuite = async (type: "it_demo" | "memory_test" | "tool_chain") => {
+    if (isAutoTesting) return;
     setIsAutoTesting(true);
+    abortTestRef.current = false;
     let sessionForTest = currentSession;
+
+    const promptsToRun: string[] = testSuitePrompts[type] ||[];
     
-    for (const testPrompt of testSuitePrompts) {
+    for (const testPrompt of promptsToRun) {
       if (abortTestRef.current) break;
       const resultId = await sendMessage(testPrompt, sessionForTest);
       if (resultId) sessionForTest = resultId;
@@ -281,7 +276,9 @@ export function useChatLogic() {
     abortTestRef.current = false;
   };
 
-  const stopInference = () => {
+  const stopAutoTest = () => {
+    abortTestRef.current = true;
+    setIsAutoTesting(false);
     if (abortControllerRef.current) abortControllerRef.current.abort();
   };
 
@@ -309,5 +306,5 @@ export function useChatLogic() {
     }
   };
 
-  return { workspace, sessionTitle, messages, prompt, setPrompt, uploads, setUploads, isProcessing, isAutoTesting, handleInference, stopInference, handleKeyDown, toggleDebugSuite, processUploadQueue, totalTokens };
+  return { workspace, sessionTitle, messages, prompt, setPrompt, uploads, setUploads, isProcessing, isAutoTesting, handleInference, stopAutoTest, handleKeyDown, runTestSuite, processUploadQueue, totalTokens };
 }

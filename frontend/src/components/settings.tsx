@@ -10,12 +10,12 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   useEffect(() => {
     setSelectedModel(localStorage.getItem("pryzm_model") || "gemma4:e4b");
     
-    fetch("http://127.0.0.1:8000/api/models")
+    fetch("{API_URL}/api/models")
       .then(r => r.json())
       .then(setModels)
       .catch(() => {});
 
-    fetch("http://127.0.0.1:8000/api/prompts")
+    fetch("{API_URL}/api/prompts")
       .then(r => r.json())
       .then(setPrompts)
       .catch(() => {});
@@ -25,7 +25,7 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
     setIsSaving(true);
     localStorage.setItem("pryzm_model", selectedModel);
     try {
-      await fetch("http://127.0.0.1:8000/api/prompts", {
+      await fetch("{API_URL}/api/prompts", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prompts)

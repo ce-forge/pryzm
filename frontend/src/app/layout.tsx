@@ -5,6 +5,12 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "DaiNamik Pryzm",
   description: "IT Management Dashboard",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Pryzm",
+  },
 };
 
 export const viewport = {

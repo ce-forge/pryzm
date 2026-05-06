@@ -13,8 +13,34 @@ from prompt_manager import MICRO_PROMPTS
 
 BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 
+def condense_chat_memory(old_memory: str, messages: list, model_name: str) -> str:
+    """Runs asynchronously to summarize older messages and prevent context window overflow."""
+    url = f"{BASE_OLLAMA_URL}/api/generate"
+    
+    chat_text = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in messages if m['role'] in ['user', 'assistant']])
+    
+    prompt = f"{MICRO_PROMPTS['memory_condenser_system']}\n\n"
+    
+    if old_memory:
+        prompt += f"--- PREVIOUS MEMORY ---\n{old_memory}\n\n"
+    prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
+
+    payload = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False,
+        "options": {"num_ctx": 8192}
+    }
+    
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        return resp.json().get("response", "").strip()
+    except Exception as e:
+        print(f"Memory Condensation Failed: {e}")
+        return old_memory
+
 def get_system_prompt(mode: str, tool_names: str) -> str:
-    """Reads the system prompt from the text files dynamically."""
     base_dir = os.path.dirname(__file__)
     prompt_path = os.path.join(base_dir, "prompts", f"{mode}.txt")
     
@@ -25,7 +51,7 @@ def get_system_prompt(mode: str, tool_names: str) -> str:
     except FileNotFoundError:
         return "You are an AI assistant. Please configure your prompt files."
 
-def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None , model_name: str = "gemma4:e4b"):
+def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None, model_name: str = "gemma4:e4b"):
     url = f"{BASE_OLLAMA_URL}/api/chat"
     
     if mode == "it_copilot":
@@ -36,7 +62,23 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
         system_msg = {"role": "system", "content": get_system_prompt(mode, "")}
         tools_payload = None 
        
-    recent_messages = messages[-20:] if len(messages) > 20 else messages
+    memory_content = ""
+    active_messages =[]
+    
+    for m in messages:
+        if m.get("role") == "memory":
+            try:
+                mem_data = json.loads(m.get("content"))
+                memory_content = mem_data.get("summary", "")
+            except:
+                memory_content = m.get("content")
+        else:
+            active_messages.append(m)
+            
+    recent_messages = active_messages[-10:] if len(active_messages) > 10 else active_messages
+
+    if memory_content:
+        system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
 
     if recent_messages and recent_messages[-1].get("role") == "user":
         last_query = recent_messages[-1].get("content", "")
@@ -162,7 +204,7 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
     except Exception as e:
         yield f"\n[Engine Error: {str(e)}]"
 
-def generate_title(prompt: str) -> str:
+def generate_title(prompt: str, model_name: str = "gemma4:e4b") -> str:
     url = f"{BASE_OLLAMA_URL}/api/generate"
     
     clean_prompt = re.sub(r'\[Attached_File:.*?\]', '', prompt).strip()
@@ -172,7 +214,7 @@ def generate_title(prompt: str) -> str:
     system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
     payload = {
-        "model": model_name,
+        "model": model_name, 
         "prompt": system_prompt, 
         "stream": False,
         "options": {"num_ctx": 4096}

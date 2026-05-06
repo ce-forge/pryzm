@@ -1,6 +1,30 @@
-[
-"Find the IP address for reddit.com, check if port 443 is open on it, and then check the website status for it.",
-  "Based on what we just did, was the reddit website working properly?",
-  "Who is the CEO of Apple, and is apple.com online right now?",
-  "Check if port 99999 is open on google.com"
-]
+{
+  "it_demo":[
+    "I need help diagnosing a network issue.",
+    "Can you check if google.com is online?",
+    "What ports are commonly used for web traffic?",
+    "Please give me a summary of our diagnostic session so far."
+  ],
+  "memory_test":[
+    "Please memorize this critical fact: The emergency server failover IP is 10.99.100.55 and the sysadmin password is 'Hunter2'.",
+    "What is the history of the ARPANET? Keep it to 2 sentences.",
+    "How does a TCP handshake work?",
+    "What is the difference between UDP and TCP?",
+    "Explain how BGP routing works.",
+    "What is an ARP spoofing attack?",
+    "How do VLANs improve network security?",
+    "Explain the concept of a subnet mask in IPv4.",
+    "What is the difference between IPv4 and IPv6?",
+    "How does an SSL/TLS handshake work?",
+    "What is a zero-day vulnerability?",
+    "What is the purpose of the OSI model?",
+    "How does a DDoS attack work?",
+    "What is the difference between symmetric and asymmetric encryption?",
+    "Explain what a reverse proxy does.",
+    "What is the purpose of a MAC address?",
+    "What was the emergency server failover IP and the sysadmin password I told you to memorize at the very beginning?"
+  ],
+  "tool_chain":[
+    "Please look up the IP for github.com, check if port 443 is open on that IP, and inspect its SSL certificate. Finally give me a diagnostic summary."
+  ]
+}

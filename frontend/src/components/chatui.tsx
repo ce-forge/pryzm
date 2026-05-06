@@ -18,9 +18,9 @@ interface ChatUIProps {
   isProcessing: boolean;
   isAutoTesting: boolean;
   handleInference: (e?: React.FormEvent) => void;
-  stopInference: () => void;
+  stopAutoTest: () => void;
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  toggleDebugSuite: () => void;
+  runTestSuite: (type: "it_demo" | "memory_test" | "tool_chain") => void;
   processUploadQueue: (files: FileUpload[]) => void;
   totalTokens: number;
   isSidebarOpen: boolean;
@@ -87,17 +87,18 @@ const CodeBlock = ({ language, value }: { language: string, value: string }) => 
 
 export default function ChatUI({ 
   workspace, sessionTitle, messages, prompt, setPrompt, uploads, setUploads, isProcessing, isAutoTesting,
-  handleInference, stopInference, handleKeyDown, toggleDebugSuite, processUploadQueue, totalTokens,
+  handleInference, stopAutoTest, handleKeyDown, runTestSuite, processUploadQueue, totalTokens,
   isSidebarOpen, setIsSidebarOpen
 }: ChatUIProps) {
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  const[isDragging, setIsDragging] = useState(false);
+  const [showTestMenu, setShowTestMenu] = useState(false);
   const dragCounter = useRef(0);
 
   useEffect(() => {
-    terminalEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    terminalEndRef.current?.scrollIntoView({ behavior: isProcessing? "auto" : "smooth" });
   }, [messages, isProcessing, uploads]);
 
   useEffect(() => {
@@ -108,7 +109,7 @@ export default function ChatUI({
   }, [prompt]);
 
   const extractFilesFromItems = async (items: DataTransferItemList): Promise<File[]> => {
-    const validFiles: File[] = [];
+    const validFiles: File[] =[];
     const queue: any[] =[];
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -177,6 +178,7 @@ export default function ChatUI({
     );
   };
 
+  // Pre-defined quick actions for the empty state
   const quickActions =[
     { title: 'Scan Subnet', desc: 'Run a quick ping sweep on a subnet', icon: '🔍', prompt: 'Please run a network scan on the subnet 192.168.1.0/24' },
     { title: 'Check SSL Certs', desc: 'Verify expiration for a domain', icon: '🔒', prompt: 'Check the SSL certificate status for google.com' },
@@ -205,9 +207,10 @@ export default function ChatUI({
          </div>
       </header>
 
-      <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center custom-scrollbar">
+      <div className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center custom-scrollbar" onClick={() => setShowTestMenu(false)}>
          <div className="w-full max-w-3xl space-y-6 flex flex-col min-h-full">
             
+            {/* --- EMPTY STATE QUICK ACTIONS --- */}
             {messages.length === 0 && (
               <div className="flex flex-col items-center justify-center flex-1 w-full animate-in fade-in slide-in-from-bottom-4 duration-700">
                 <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center mb-6 border border-blue-500/20">
@@ -234,6 +237,7 @@ export default function ChatUI({
               </div>
             )}
 
+            {/* --- NORMAL MESSAGES --- */}
             {messages.map((m, i) => {
               let showTimestamp = false;
               if (m.timestamp) {
@@ -331,6 +335,7 @@ export default function ChatUI({
               );
             })}
             {isProcessing && <div className="text-gray-500 animate-pulse mt-2 text-sm">Pryzm is thinking...</div>}
+            <div className="h-6 shrink-0" />
             <div ref={terminalEndRef} />
          </div>
       </div>
@@ -387,15 +392,54 @@ export default function ChatUI({
                   />
                   
                   <div className="flex justify-between items-center px-2 pb-1">
-                      <div className="flex gap-2 items-center">
-                          <button type="button" onClick={toggleDebugSuite} className={`p-2 rounded-full transition-colors ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-400 hover:bg-[#333537]'}`} title="Run Test Suite">
-                              <span className="text-sm">🧪</span>
+                      <div className="flex gap-2 items-center relative">
+                          <button 
+                            type="button" 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              isAutoTesting ? stopAutoTest() : setShowTestMenu(!showTestMenu);
+                            }} 
+                            className={`p-2 rounded-full transition-colors ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-400 hover:bg-[#333537]'}`} 
+                            title={isAutoTesting ? "Stop Test" : "Run Test Suite"}
+                          >
+                              {isAutoTesting ? <span className="text-sm">⏹</span> : <span className="text-sm">🧪</span>}
                           </button>
+                          
+                          {/* Test Menu Dropdown */}
+                          {showTestMenu && !isAutoTesting && (
+                            <div className="absolute bottom-[110%] left-0 mb-2 w-48 bg-[#282a2c] border border-[#333537] rounded-xl shadow-xl z-50 overflow-hidden flex flex-col py-1 animate-in fade-in slide-in-from-bottom-2">
+                              <div className="px-3 py-1.5 border-b border-[#333537] mb-1">
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500">Select Suite</span>
+                              </div>
+                              <button 
+                                type="button"
+                                onClick={() => { setShowTestMenu(false); runTestSuite('it_demo'); }} 
+                                className="text-left px-3 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors"
+                              >
+                                IT Demo Suite
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => { setShowTestMenu(false); runTestSuite('memory_test'); }} 
+                                className="text-left px-3 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors"
+                              >
+                                Memory Condenser Test
+                              </button>
+                              <button 
+                                type="button"
+                                onClick={() => { setShowTestMenu(false); runTestSuite('tool_chain'); }} 
+                                className="text-left px-3 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors"
+                              >
+                                Agentic Tool Chain Test
+                              </button>
+                            </div>
+                          )}
+
                           <span className="text-[10px] text-gray-500 ml-2 font-mono">~{totalTokens} / 8192</span>
                       </div>
                       
                       {isProcessing ? (
-                          <button type="button" onClick={stopInference} className="p-2 bg-[#333537] rounded-full text-white flex items-center justify-center">
+                          <button type="button" onClick={stopAutoTest} className="p-2 bg-[#333537] rounded-full text-white flex items-center justify-center">
                               <div className="w-4 h-4 bg-white rounded-sm"></div>
                           </button>
                       ) : (

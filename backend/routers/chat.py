@@ -4,15 +4,15 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
-from config import settings
-from prompt_manager import MICRO_PROMPTS
-import requests
 import json
 
 import database
 import ai_engine
 import models
 import knowledge
+from prompt_manager import MICRO_PROMPTS
+import requests
+from config import settings
 
 router = APIRouter(tags=["AI Chat"])
 
@@ -62,7 +62,12 @@ def get_session_history(session_id: str, db: Session = Depends(database.get_db))
     session = db.query(models.Session).filter(models.Session.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    messages = db.query(models.Message).filter(models.Message.session_id == session_id).order_by(models.Message.created_at).all()
+        
+    messages = db.query(models.Message).filter(
+        models.Message.session_id == session_id,
+        models.Message.role.in_(["user", "assistant"]) 
+    ).order_by(models.Message.created_at).all()
+    
     return[{"role": m.role, 
             "content": m.content,
             "timestamp": m.created_at.isoformat() if m.created_at else None
@@ -113,7 +118,7 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
         db.commit()
         db.refresh(chat_session)
     elif chat_session.title in["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
-        chat_session.title = ai_engine.generate_title(request.prompt)
+        chat_session.title = ai_engine.generate_title(request.prompt, request.model)
         db.commit()
         db.refresh(chat_session)
         
@@ -147,9 +152,55 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
                     ai_msg = models.Message(session_id=chat_session.id, role="assistant", content=full_response)
                     background_db.add(ai_msg)
                     background_db.commit()
+                    
+                    all_msgs = background_db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
+                    
+                    memory_msg = next((m for m in all_msgs if m.role == "memory"), None)
+                    
+                    last_id = None
+                    old_summary = ""
+                    if memory_msg:
+                        try:
+                            mem_data = json.loads(memory_msg.content)
+                            last_id = mem_data.get("last_summarized_id")
+                            old_summary = mem_data.get("summary", "")
+                        except:
+                            old_summary = memory_msg.content
+
+                    active_msgs = [m for m in all_msgs if m.role in ["user", "assistant"]]
+                    
+                    start_idx = 0
+                    if last_id:
+                        for i, m in enumerate(active_msgs):
+                            if m.id == last_id:
+                                start_idx = i + 1
+                                break
+
+                    unsummarized = active_msgs[start_idx:]
+                    
+                    if len(unsummarized) > 30:
+                        to_summarize = unsummarized[:-10] 
+                        new_last_id = to_summarize[-1].id
+                        
+                        msg_dicts =[{"role": m.role, "content": m.content} for m in to_summarize]
+                        new_summary_text = ai_engine.condense_chat_memory(old_summary, msg_dicts, request.model)
+                        
+                        new_mem_data = {
+                            "last_summarized_id": new_last_id,
+                            "summary": new_summary_text
+                        }
+                        
+                        if memory_msg:
+                            memory_msg.content = json.dumps(new_mem_data)
+                        else:
+                            new_mem = models.Message(session_id=chat_session.id, role="memory", content=json.dumps(new_mem_data))
+                            background_db.add(new_mem)
+                            
+                        background_db.commit()
+                        
                 except Exception as e:
                     background_db.rollback()
-                    print(f"Failed to save background message: {e}")
+                    print(f"Failed to process background memory: {e}")
                 finally:
                     background_db.close()
 
@@ -211,24 +262,19 @@ def delete_folder(folder_id: str, db: Session = Depends(database.get_db)):
 
 @router.get("/api/models")
 def get_ollama_models():
-    """Fetches the live list of installed models directly from Ollama."""
     try:
         r = requests.get(f"{settings.OLLAMA_URL.strip().rstrip('/')}/api/tags", timeout=3)
         r.raise_for_status()
-        
         models = [m["name"] for m in r.json().get("models", []) if "embed" not in m["name"].lower()]
         return models if models else["gemma4:e4b"]
-        
     except Exception as e:
-        return["gemma4:e4b"]
+        return["gemma4:e4b"] 
 
 @router.get("/api/prompts")
 def get_prompts():
-    """Returns all active JIT prompts for the Settings menu."""
     return MICRO_PROMPTS.get_all()
 
 @router.patch("/api/prompts")
 def update_prompts(payload: dict):
-    """Saves edited prompts from the Settings menu."""
     MICRO_PROMPTS.save_prompts(payload)
     return {"status": "success"}

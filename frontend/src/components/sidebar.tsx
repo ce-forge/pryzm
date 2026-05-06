@@ -42,6 +42,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   
   const currentSessionId = searchParams.get("session");
   const workspace = searchParams.get("workspace") || "it_copilot";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   useEffect(() => {
     const handleClickOutside = () => setActiveDropdown(null);
@@ -63,7 +64,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   },[folders, foldersLoaded, workspace]);
 
   const fetchFolders = () => {
-    fetch(`http://127.0.0.1:8000/folders?workspace=${workspace}`)
+    fetch(`{API_URL}/folders?workspace=${workspace}`)
       .then(res => res.json())
       .then(data => {
         const savedOpen = localStorage.getItem(`pryzm_folders_open_${workspace}`);
@@ -75,7 +76,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   };
 
   const fetchSessions = () => {
-    fetch(`http://127.0.0.1:8000/sessions?workspace=${workspace}`)
+    fetch(`{API_URL}/sessions?workspace=${workspace}`)
       .then((res) => res.json())
       .then((data) => setSessions(data))
       .catch((err) => console.error("Error loading sessions:", err));
@@ -92,7 +93,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     e.preventDefault(); e.stopPropagation();
     if (!confirm("Delete this log?")) return;
     try {
-      const res = await fetch(`http://127.0.0.1:8000/sessions/${id}`, { method: "DELETE" });
+      const res = await fetch(`{API_URL}/sessions/${id}`, { method: "DELETE" });
       if (res.ok) {
         setSessions((prev) => prev.filter((s) => s.id !== id));
         if (currentSessionId === id) router.push(`/?workspace=${workspace}`); 
@@ -106,7 +107,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setSessions((prev) => prev.map((s) => s.id === id ? { ...s, title: editTitle } : s));
     setEditingId(null);
     try {
-      await fetch(`http://127.0.0.1:8000/sessions/${id}`, { 
+      await fetch(`{API_URL}/sessions/${id}`, { 
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: editTitle })
@@ -130,7 +131,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (!sessionId) return;
     setSessions((prev) => prev.map(s => s.id === sessionId ? { ...s, folder_id: folderId } : s));
     try {
-      await fetch(`http://127.0.0.1:8000/sessions/${sessionId}`, {
+      await fetch(`{API_URL}/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folder_id: folderId })
@@ -143,7 +144,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (name && name.trim()) {
       const newFolder = { id: Date.now().toString(), name: name.trim(), workspace };
       setFolders([{ ...newFolder, isOpen: true }, ...folders]);
-      await fetch("http://127.0.0.1:8000/folders", {
+      await fetch("{API_URL}/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newFolder)
@@ -157,7 +158,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setFolders(prev => prev.map(f => f.id === id ? { ...f, name: editFolderTitle } : f));
     setEditingFolderId(null);
     try {
-      await fetch(`http://127.0.0.1:8000/folders/${id}`, {
+      await fetch(`{API_URL}/folders/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: editFolderTitle })
@@ -171,7 +172,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setFolders(prev => prev.filter(f => f.id !== folderId));
     setActiveDropdown(null);
     try {
-      await fetch(`http://127.0.0.1:8000/folders/${folderId}`, { method: "DELETE" });
+      await fetch(`{API_URL}/folders/${folderId}`, { method: "DELETE" });
       fetchSessions(); 
     } catch (err) {}
   };
@@ -247,7 +248,11 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
   return (
     <>
-      <div className="w-[280px] h-full bg-[#1e1f20] flex flex-col shrink-0 transition-all duration-300 border-r border-[#333537] relative z-10">
+      <div 
+        className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm" 
+        onClick={() => setIsOpen(false)} 
+      />
+      <div className="fixed md:relative w-[280px] h-full bg-[#1e1f20] flex flex-col shrink-0 transition-all duration-300 border-r border-[#333537] z-50 shadow-2xl md:shadow-none">
         
         <div className="p-4 flex items-center gap-4">
           <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-[#282a2c] rounded-full text-gray-400">
