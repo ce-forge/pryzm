@@ -64,7 +64,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   },[folders, foldersLoaded, workspace]);
 
   const fetchFolders = () => {
-    fetch(`{API_URL}/folders?workspace=${workspace}`)
+    fetch(`${API_URL}/folders?workspace=${workspace}`)
       .then(res => res.json())
       .then(data => {
         const savedOpen = localStorage.getItem(`pryzm_folders_open_${workspace}`);
@@ -76,7 +76,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   };
 
   const fetchSessions = () => {
-    fetch(`{API_URL}/sessions?workspace=${workspace}`)
+    fetch(`${API_URL}/sessions?workspace=${workspace}`)
       .then((res) => res.json())
       .then((data) => setSessions(data))
       .catch((err) => console.error("Error loading sessions:", err));
@@ -93,7 +93,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     e.preventDefault(); e.stopPropagation();
     if (!confirm("Delete this log?")) return;
     try {
-      const res = await fetch(`{API_URL}/sessions/${id}`, { method: "DELETE" });
+      const res = await fetch(`${API_URL}/sessions/${id}`, { method: "DELETE" });
       if (res.ok) {
         setSessions((prev) => prev.filter((s) => s.id !== id));
         if (currentSessionId === id) router.push(`/?workspace=${workspace}`); 
@@ -107,7 +107,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setSessions((prev) => prev.map((s) => s.id === id ? { ...s, title: editTitle } : s));
     setEditingId(null);
     try {
-      await fetch(`{API_URL}/sessions/${id}`, { 
+      await fetch(`${API_URL}/sessions/${id}`, { 
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: editTitle })
@@ -131,7 +131,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (!sessionId) return;
     setSessions((prev) => prev.map(s => s.id === sessionId ? { ...s, folder_id: folderId } : s));
     try {
-      await fetch(`{API_URL}/sessions/${sessionId}`, {
+      await fetch(`${API_URL}/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folder_id: folderId })
@@ -144,7 +144,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     if (name && name.trim()) {
       const newFolder = { id: Date.now().toString(), name: name.trim(), workspace };
       setFolders([{ ...newFolder, isOpen: true }, ...folders]);
-      await fetch("{API_URL}/folders", {
+      await fetch("${API_URL}/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newFolder)
@@ -158,7 +158,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setFolders(prev => prev.map(f => f.id === id ? { ...f, name: editFolderTitle } : f));
     setEditingFolderId(null);
     try {
-      await fetch(`{API_URL}/folders/${id}`, {
+      await fetch(`${API_URL}/folders/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: editFolderTitle })
@@ -172,7 +172,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setFolders(prev => prev.filter(f => f.id !== folderId));
     setActiveDropdown(null);
     try {
-      await fetch(`{API_URL}/folders/${folderId}`, { method: "DELETE" });
+      await fetch(`${API_URL}/folders/${folderId}`, { method: "DELETE" });
       fetchSessions(); 
     } catch (err) {}
   };

@@ -6,31 +6,34 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   const[selectedModel, setSelectedModel] = useState("");
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [isSaving, setIsSaving] = useState(false);
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   useEffect(() => {
     setSelectedModel(localStorage.getItem("pryzm_model") || "gemma4:e4b");
     
-    fetch("{API_URL}/api/models")
+    fetch(`${API_URL}/api/models`)
       .then(r => r.json())
       .then(setModels)
-      .catch(() => {});
+      .catch((err) => console.error("Failed to load models:", err));
 
-    fetch("{API_URL}/api/prompts")
+    fetch(`${API_URL}/api/prompts`)
       .then(r => r.json())
       .then(setPrompts)
-      .catch(() => {});
+      .catch((err) => console.error("Failed to load prompts:", err));
   },[]);
 
   const handleSave = async () => {
     setIsSaving(true);
     localStorage.setItem("pryzm_model", selectedModel);
     try {
-      await fetch("{API_URL}/api/prompts", {
+      await fetch(`${API_URL}/api/prompts`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prompts)
       });
-    } catch (e) {}
+    } catch (e) {
+      console.error("Failed to save prompts:", e);
+    }
     setIsSaving(false);
     close();
   };

@@ -23,6 +23,7 @@ export function useChatLogic() {
 
   const urlSessionId = searchParams.get("session");
   const workspace = searchParams.get("workspace") || "it_copilot";
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   const [currentSession, setCurrentSession] = useState<string | null>(urlSessionId);
   const [sessionTitle, setSessionTitle] = useState("");
@@ -75,13 +76,13 @@ export function useChatLogic() {
         return;
       }
       try {
-        const res = await fetch(`{API_URL}/sessions/${currentSession}`);
+        const res = await fetch(`${API_URL}/sessions/${currentSession}`);
         if (res.ok) {
           const history = await res.json();
           setMessages(history);
         }
         
-        const sessionRes = await fetch(`{API_URL}/sessions?workspace=${workspace}`);
+        const sessionRes = await fetch(`${API_URL}/sessions?workspace=${workspace}`);
         if (sessionRes.ok) {
             const sessionData = await sessionRes.json();
             const activeSesh = sessionData.find((x: any) => x.id === currentSession);
@@ -98,7 +99,7 @@ export function useChatLogic() {
     const handleChatCreated = async () => {
         if (!currentSession) return;
         try {
-            const sessionRes = await fetch(`{API_URL}/sessions?workspace=${workspace}`);
+            const sessionRes = await fetch(`${API_URL}/sessions?workspace=${workspace}`);
             if (sessionRes.ok) {
                 const sessionData = await sessionRes.json();
                 const activeSesh = sessionData.find((x: any) => x.id === currentSession);
@@ -134,7 +135,7 @@ export function useChatLogic() {
       if (activeSessionForUploads) formData.append("session_id", activeSessionForUploads);
       
       try {
-        const res = await fetch("{API_URL}/upload", { method: "POST", body: formData });
+        const res = await fetch("$${API_URL}/upload", { method: "POST", body: formData });
         if (res.ok) {
           const data = await res.json();
           setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "success", progress: 100 } : u)));
@@ -165,7 +166,7 @@ export function useChatLogic() {
     const activeModel = localStorage.getItem("pryzm_model") || "gemma4:e4b";
 
     try {
-      const res = await fetch("{API_URL}/analyze", {
+      const res = await fetch("$${API_URL}/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: text, session_id: activeSessionId, mode: workspace, model: activeModel }),
