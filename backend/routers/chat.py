@@ -4,6 +4,9 @@ from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime
+from config import settings
+from prompt_manager import MICRO_PROMPTS
+import requests
 import json
 
 import database
@@ -17,6 +20,7 @@ class InferenceRequest(BaseModel):
     session_id: Optional[str] = None
     prompt: str = Field(..., max_length=100000) 
     mode: str = "it_copilot"  
+    model: str = "gemma4:e4b"
 
 class SessionResponse(BaseModel):
     id: str
@@ -103,7 +107,7 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
         chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
         
     if not chat_session:
-        generated_title = ai_engine.generate_title(request.prompt)
+        generated_title = ai_engine.generate_title(request.prompt, request.model)
         chat_session = models.Session(title=generated_title, mode=request.mode)
         db.add(chat_session)
         db.commit()
@@ -125,7 +129,7 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
         
         full_response = ""
         try:
-            for chunk in ai_engine.stream_chat(safe_messages, request.mode, chat_session.id): 
+            for chunk in ai_engine.stream_chat(safe_messages, request.mode, chat_session.id, request.model): 
                 full_response += chunk
                 yield json.dumps({"chunk": chunk}) + "\n"
                 
@@ -203,4 +207,28 @@ def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
 def delete_folder(folder_id: str, db: Session = Depends(database.get_db)):
     db.query(models.Folder).filter(models.Folder.id == folder_id).delete()
     db.commit()
+    return {"status": "success"}
+
+@router.get("/api/models")
+def get_ollama_models():
+    """Fetches the live list of installed models directly from Ollama."""
+    try:
+        r = requests.get(f"{settings.OLLAMA_URL.strip().rstrip('/')}/api/tags", timeout=3)
+        r.raise_for_status()
+        
+        models = [m["name"] for m in r.json().get("models", []) if "embed" not in m["name"].lower()]
+        return models if models else["gemma4:e4b"]
+        
+    except Exception as e:
+        return["gemma4:e4b"]
+
+@router.get("/api/prompts")
+def get_prompts():
+    """Returns all active JIT prompts for the Settings menu."""
+    return MICRO_PROMPTS.get_all()
+
+@router.patch("/api/prompts")
+def update_prompts(payload: dict):
+    """Saves edited prompts from the Settings menu."""
+    MICRO_PROMPTS.save_prompts(payload)
     return {"status": "success"}

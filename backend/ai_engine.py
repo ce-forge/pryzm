@@ -12,7 +12,6 @@ from tools import AVAILABLE_TOOLS, TOOL_DEFINITIONS
 from prompt_manager import MICRO_PROMPTS
 
 BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
-MODEL_NAME = "gemma4:e4b"
 
 def get_system_prompt(mode: str, tool_names: str) -> str:
     """Reads the system prompt from the text files dynamically."""
@@ -26,7 +25,7 @@ def get_system_prompt(mode: str, tool_names: str) -> str:
     except FileNotFoundError:
         return "You are an AI assistant. Please configure your prompt files."
 
-def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None):
+def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None , model_name: str = "gemma4:e4b"):
     url = f"{BASE_OLLAMA_URL}/api/chat"
     
     if mode == "it_copilot":
@@ -79,7 +78,7 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
         while loop_count < max_loops:
             loop_count += 1
             
-            payload = {"model": MODEL_NAME, 
+            payload = {"model": model_name, 
                        "messages": full_messages, 
                        "stream": False,
                        "option": {"num_ctx": 8192}
@@ -173,7 +172,7 @@ def generate_title(prompt: str) -> str:
     system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
     payload = {
-        "model": MODEL_NAME, 
+        "model": model_name,
         "prompt": system_prompt, 
         "stream": False,
         "options": {"num_ctx": 4096}

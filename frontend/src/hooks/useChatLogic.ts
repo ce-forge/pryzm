@@ -24,12 +24,12 @@ export function useChatLogic() {
   const workspace = searchParams.get("workspace") || "it_copilot";
 
   const [currentSession, setCurrentSession] = useState<string | null>(urlSessionId);
-  const [sessionTitle, setSessionTitle] = useState("");
+  const[sessionTitle, setSessionTitle] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const[prompt, setPrompt] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  const[isAutoTesting, setIsAutoTesting] = useState(false);
-  const [uploads, setUploads] = useState<FileUpload[]>([]);
+  const [isAutoTesting, setIsAutoTesting] = useState(false);
+  const[uploads, setUploads] = useState<FileUpload[]>([]);
   
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -91,7 +91,7 @@ export function useChatLogic() {
       }
     }
     loadHistory();
-  },[currentSession, workspace]);
+  }, [currentSession, workspace]);
 
   useEffect(() => {
     const handleChatCreated = async () => {
@@ -119,7 +119,7 @@ export function useChatLogic() {
   const totalTokens = useMemo(() => {
     const allText = messages.map(m => m.content).join(" ") + " " + prompt;
     return Math.ceil(allText.length / 4);
-  }, [messages, prompt]);
+  },[messages, prompt]);
 
   const processUploadQueue = async (filesToUpload: FileUpload[]) => {
     let activeSessionForUploads = currentSession;
@@ -161,18 +161,21 @@ export function useChatLogic() {
     let updatedSessionId = activeSessionId;
 
     abortControllerRef.current = new AbortController();
+    
+    // Fetch the active model from settings (or fallback to gemma4:e4b)
+    const activeModel = localStorage.getItem("pryzm_model") || "gemma4:e4b";
 
     try {
       const res = await fetch("http://127.0.0.1:8000/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, session_id: activeSessionId, mode: workspace }),
+        body: JSON.stringify({ prompt: text, session_id: activeSessionId, mode: workspace, model: activeModel }),
         signal: abortControllerRef.current.signal
       });
 
       if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
 
-      setMessages((prev) => [...prev, { role: "assistant", content: "", timestamp: new Date().toISOString() }]);
+      setMessages((prev) =>[...prev, { role: "assistant", content: "", timestamp: new Date().toISOString() }]);
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder("utf-8");
@@ -195,18 +198,20 @@ export function useChatLogic() {
               
               if (parsed.status === "started" && parsed.session_id) {
                 updatedSessionId = parsed.session_id;
+                
                 if (!activeSessionId) {
                   isNavigatingRef.current = true; 
                   setCurrentSession(parsed.session_id);
                   router.replace(`/?workspace=${workspace}&session=${parsed.session_id}`, { scroll: false });
                 }
+                
                 window.dispatchEvent(new Event("chatCreated"));
               }
 
               if (parsed.chunk !== undefined) {
                 fullAssistantMessage += parsed.chunk;
                 setMessages((prev) => {
-                  const newMsgs = [...prev];
+                  const newMsgs =[...prev];
                   const lastIndex = newMsgs.length - 1;
                   if (lastIndex >= 0 && newMsgs[lastIndex].role === "assistant") {
                     newMsgs[lastIndex] = { ...newMsgs[lastIndex], content: fullAssistantMessage };

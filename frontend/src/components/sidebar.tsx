@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import SettingsModal from "./settings";
 
 interface SessionInfo {
   id: string;
@@ -23,12 +24,12 @@ interface SidebarProps {
 
 export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const[editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   
-  const[folders, setFolders] = useState<FolderInfo[]>([]);
-  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
-  const [editFolderTitle, setEditFolderTitle] = useState("");
+  const [folders, setFolders] = useState<FolderInfo[]>([]);
+  const[editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const[editFolderTitle, setEditFolderTitle] = useState("");
   const [foldersLoaded, setFoldersLoaded] = useState(false);
   
   const[isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -213,9 +214,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
           <button 
              type="button"
              onClick={(e) => { 
-                e.preventDefault(); 
                 e.stopPropagation(); 
-                e.nativeEvent.stopImmediatePropagation(); // Fixes the event bubbling clash!
+                e.nativeEvent.stopImmediatePropagation();
                 setActiveDropdown(activeDropdown === s.id ? null : s.id); 
              }}
              className="p-1 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"
@@ -296,7 +296,6 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
                       <button 
                          type="button"
                          onClick={(e) => { 
-                            e.preventDefault(); 
                             e.stopPropagation(); 
                             e.nativeEvent.stopImmediatePropagation();
                             setActiveDropdown(activeDropdown === `folder_${folder.id}` ? null : `folder_${folder.id}`); 
@@ -355,22 +354,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
       </div>
 
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="bg-[#1e1f20] w-full max-w-lg rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center p-5 border-b border-[#333537]">
-              <h2 className="text-lg font-bold text-[#e3e3e3]">Pryzm Settings</h2>
-              <button onClick={() => setIsSettingsOpen(false)} className="text-gray-400 hover:text-white transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="p-6 space-y-6 flex-1 overflow-y-auto text-[#e3e3e3]">
-              <div className="text-sm text-gray-400 italic">Settings functionality pending backend integration.</div>
-            </div>
-            <div className="p-4 border-t border-[#333537] flex justify-end bg-[#131314]">
-              <button onClick={() => setIsSettingsOpen(false)} className="px-5 py-2 bg-[#e3e3e3] hover:bg-white text-black font-semibold rounded-lg text-sm transition-colors">Done</button>
-            </div>
-          </div>
-        </div>
+        <SettingsModal workspace={workspace} close={() => setIsSettingsOpen(false)} />
       )}
     </>
   );
