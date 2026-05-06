@@ -1,36 +1,28 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Pryzm Frontend
 
-## Getting Started
+The frontend is a Next.js application styled with Tailwind CSS. It is designed to mirror modern AI chat interfaces while providing advanced file management and markdown rendering capabilities.
 
-First, run the development server:
+## Setup Instructions
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+1. Install Node.js dependencies:
+   ```bash
+   npm install
+   ```
+2. Start the development server:
+   ```bash
+   npm run dev
+   ```
+The interface will be accessible at `http://localhost:3000`.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Core Components
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+* **`useChatLogic.ts`**: A robust custom hook that extracts all state management from the UI. It manages the fetch streams, abort controllers for stopping generation, upload queues, and parses hidden metadata tags (like `[Attached_File: ...]`) out of user prompts.
+* **`chatui.tsx`**: The main chat window. It features:
+  * Drag-and-drop file upload overlay.
+  * `react-markdown` integration for rendering AI responses.
+  * Custom `react-syntax-highlighter` integration for hydration-safe, VS-Code styled code blocks with working "Copy" buttons.
+  * Custom blockquote styling for RAG context citations.
+* **`sidebar.tsx`**: The navigation menu. Features database-backed folders, drag-and-drop log organization, session pinning, and workspace switching.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## State Management Notes
+Session updates (like dynamic title generation) use a combination of local component state and global `window.dispatchEvent` calls to ensure the Sidebar and ChatUI stay synchronized without needing a heavy state management library like Redux.

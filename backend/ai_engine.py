@@ -73,8 +73,9 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
 
     full_messages = [system_msg] + recent_messages
 
-    max_loops = 5
+    max_loops = 8
     loop_count = 0
+    finished_cleanly = False
     
     try:
         while loop_count < max_loops:
@@ -155,9 +156,10 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                     yield word + (" " if i < len(words) - 1 else "")
                     time.sleep(0.02)
                 
+                finished_cleanly = True
                 break
                 
-        if loop_count >= max_loops:
+        if not finished_cleanly:
             yield "\n\n*[System Warning: Maximum agent loops reached. Execution stopped to prevent infinite loop.]*"
                 
     except Exception as e:
