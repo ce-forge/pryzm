@@ -7,6 +7,7 @@ export interface FileUpload {
   file: File;
   status: "pending" | "uploading" | "success" | "error";
   progress: number;
+  errorMessage?: string;
 }
 
 export interface Message {
@@ -76,17 +77,24 @@ export function useChatLogic() {
         return;
       }
       try {
-        const res = await fetch(`${API_URL}/sessions/${currentSession}`);
+        const res = await fetch(`${API_URL}/sessions/${currentSession}`, { cache: 'no-store' });
         if (res.ok) {
           const history = await res.json();
           setMessages(history);
         }
         
-        const sessionRes = await fetch(`${API_URL}/sessions?workspace=${workspace}`);
+        const sessionRes = await fetch(`${API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' });
         if (sessionRes.ok) {
             const sessionData = await sessionRes.json();
             const activeSesh = sessionData.find((x: any) => x.id === currentSession);
-            if (activeSesh) setSessionTitle(activeSesh.title);
+            if (activeSesh) {
+              setSessionTitle(activeSesh.title);
+            } else if (currentSession) {
+              setCurrentSession(null);
+              setMessages([]);
+              setSessionTitle("");
+              router.replace(`/?workspace=${workspace}`);
+            }
         }
       } catch (error) {
         console.error("Failed to load history:", error);
@@ -99,7 +107,7 @@ export function useChatLogic() {
     const handleChatCreated = async () => {
         if (!currentSession) return;
         try {
-            const sessionRes = await fetch(`${API_URL}/sessions?workspace=${workspace}`);
+            const sessionRes = await fetch(`${API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' });
             if (sessionRes.ok) {
                 const sessionData = await sessionRes.json();
                 const activeSesh = sessionData.find((x: any) => x.id === currentSession);
@@ -154,7 +162,6 @@ export function useChatLogic() {
         setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "error", progress: 0 } : u)));
       }
     }
-    setTimeout(() => setUploads((prev) => prev.filter((u) => u.status !== "error")), 3000);
   };
 
   const sendMessage = async (text: string, activeSessionId: string | null) => {
@@ -229,6 +236,7 @@ export function useChatLogic() {
     } finally {
       setIsProcessing(false);
       abortControllerRef.current = null;
+      window.dispatchEvent(new Event("chatCreated"));
     }
     return updatedSessionId;
   };

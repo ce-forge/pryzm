@@ -3,8 +3,7 @@ import redis
 from config import settings
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from models import Base
-
+from db.models import Base
 
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 

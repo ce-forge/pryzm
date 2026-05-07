@@ -21,6 +21,20 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://127.0.0.1:6379"
     OLLAMA_URL: str = "http://127.0.0.1:11434"
 
+    CORS_ORIGINS: list[str] =[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://192.168.0.108:3000",
+        "http://192.168.0.108",
+        "*"
+    ]
+
     model_config = SettingsConfigDict(env_file="../.env", extra="ignore")
+
+    MAXIMUM_TOOL_LOOPS: int = 8  # Max iterations of tool use before giving up and returning a fallback response
+
+    MEMORY_CONTEXT_WINDOW: int = 15  # Max messages sent to Ollama per active chat
+    MEMORY_CONDENSE_THRESHOLD: int = 15  # When to trigger the background condenser
+    MEMORY_CONDENSE_RETAIN: int = 5  # How many recent messages to exclude from the summary
 
 settings = Settings()

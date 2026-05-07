@@ -1,9 +1,10 @@
 import requests
-import models
+from db import models
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import settings
+from utils.formatters import format_rag_context
 
 OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 EMBED_MODEL = "nomic-embed-text"
@@ -19,7 +20,7 @@ def get_embedding(text: str) -> list[float]:
     response.raise_for_status()
     return response.json().get("embedding",[])
 
-def ingest_document(db: Session, filename: str, content: str, workspace: str = "it_copilot", session_id: str = None):
+def ingest_document(db: Session, filename: str, content: str, workspace: str = "itCopilot", session_id: str = None):
     new_doc = models.Document(filename=filename, workspace=workspace, session_id=session_id)
     db.add(new_doc)
     db.commit()
@@ -49,6 +50,24 @@ def ingest_document(db: Session, filename: str, content: str, workspace: str = "
     return {"status": "success", "chunks_created": len(chunks), "document_id": new_doc.id}
 
 def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id: str = None, top_k: int = 3):
+    if query == "document overview" and session_id:
+        results = (
+            db.query(models.DocumentChunk)
+            .join(models.Document)
+            .filter(models.Document.session_id == session_id)
+            .order_by(models.DocumentChunk.created_at.desc())
+            .limit(top_k)
+            .all()
+        )
+        if results:
+            unique_sources = list(set([chunk.document.filename for chunk in results]))
+            context_blocks = [chunk.content for chunk in results]
+            
+            formatted_context = "\n\n=== FILE EXCERPTS (START OF DOCUMENT) ===\n"
+            formatted_context += "\n\n---\n\n".join(context_blocks)
+            
+            return {"context": formatted_context, "sources": unique_sources}
+    
     query_vector = get_embedding(query)
     if not query_vector:
         return None
@@ -89,10 +108,7 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
     unique_sources = list(set([chunk.document.filename for chunk in results]))
     context_blocks = [chunk.content for chunk in results]
     
-    formatted_context = "\n\n=== RETRIEVED KNOWLEDGE BASE CONTEXT ===\n"
-    formatted_context += "The following information was retrieved from the local documentation. Use it to inform your answer if relevant:\n\n"
-    formatted_context += "\n\n---\n\n".join(context_blocks)
-    formatted_context += "\n========================================\n"
+    formatted_context = format_rag_context(context_blocks)
     
     return {
         "context": formatted_context,

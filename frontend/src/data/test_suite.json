@@ -1,8 +1,9 @@
 {
   "it_demo":[
     "I need help diagnosing a network issue.",
-    "Can you check if google.com is online?",
-    "What ports are commonly used for web traffic?",
+    "Find the IP address for reddit.com, check if port 443 is open on it, and then check the website status for it.",
+    "Who is the CEO of Apple, and is apple.com online right now?",
+    "Check if port 99999 is open on google.com",
     "Please give me a summary of our diagnostic session so far."
   ],
   "memory_test":[

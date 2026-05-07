@@ -3,13 +3,21 @@ import requests
 import json
 import inspect
 import time
-import database
-import knowledge
 import re
-from config import settings
 
-from tools import AVAILABLE_TOOLS, TOOL_DEFINITIONS
-from prompt_manager import MICRO_PROMPTS
+from db import database
+from services import knowledge
+from config import settings
+import tools
+from tools.registry import AVAILABLE_TOOLS, TOOL_DEFINITIONS
+from core.prompt_manager import MICRO_PROMPTS
+from utils.formatters import (
+    format_tool_execution, 
+    format_file_analyzed, 
+    format_code_block,
+    format_knowledge_reference, 
+    format_error
+)
 
 BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 
@@ -75,8 +83,9 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
         else:
             active_messages.append(m)
             
-    recent_messages = active_messages[-10:] if len(active_messages) > 10 else active_messages
-
+    recent_limit = settings.MEMORY_CONTEXT_WINDOW
+    recent_messages = active_messages[-recent_limit:] if len(active_messages) > recent_limit else active_messages
+    
     if memory_content:
         system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
 
@@ -86,33 +95,32 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
         has_attachment = "[Attached_File:" in last_query
         clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
         
-        rag_query = clean_user_text if clean_user_text else "document overview"
-        
-        db = database.SessionLocal()
-        try:
-            rag_data = knowledge.retrieve_relevant_chunks(db, query=rag_query, workspace=mode, session_id=session_id)
+        if has_attachment:
+            rag_query = clean_user_text if clean_user_text else "document overview"
             
-            if rag_data and rag_data.get("context"):
-                rag_context = rag_data["context"]
-                sources_list = rag_data["sources"]
+            db = database.SessionLocal()
+            try:
+                rag_data = knowledge.retrieve_relevant_chunks(db, query=rag_query, workspace=mode, session_id=session_id)
                 
-                if has_attachment and len(clean_user_text) < 15:
-                    recent_messages[-1]["content"] = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n{MICRO_PROMPTS['rag_short_file_upload']}"
-                else:
-                    recent_messages[-1]["content"] = f"{last_query}\n\n{rag_context}\n\n{MICRO_PROMPTS['rag_standard_injection']}"
-                
-                if not has_attachment:
+                if rag_data and rag_data.get("context"):
+                    rag_context = rag_data["context"]
+                    sources_list = rag_data["sources"]
+                    
+                    recent_messages[-1]["content"] = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n{MICRO_PROMPTS['rag_file_upload_instruction']}"
+                    
                     sources_str = ", ".join(sources_list)
-                    yield f"> 📚 **Knowledge Base Reference:** `{sources_str}`\n\n"
-                
-        except Exception as rag_err:
-            yield f"> ⚠️ **Knowledge Base Error:** `{str(rag_err)}`\n\n"
-        finally:
-            db.close()
+                    yield format_file_analyzed(sources_list)
+                    
+            except Exception as rag_err:
+                yield format_error(str(rag_err), "File Read Error")
+            finally:
+                db.close()
+        else:
+            recent_messages[-1]["content"] = clean_user_text
 
     full_messages = [system_msg] + recent_messages
 
-    max_loops = 8
+    max_loops = settings.MAXIMUM_TOOL_LOOPS
     loop_count = 0
     finished_cleanly = False
     
@@ -123,7 +131,7 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
             payload = {"model": model_name, 
                        "messages": full_messages, 
                        "stream": False,
-                       "option": {"num_ctx": 8192}
+                       "s": {"num_ctx": 8192}
                        }
             if tools_payload:
                 payload["tools"] = tools_payload
@@ -158,14 +166,14 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                         if "session_id" in valid_params:
                             safe_args["session_id"] = session_id
                         
-                        yield f"\n\n> ⚙️ *Executing `{func_name}` on `{safe_args}`...*\n\n"
+                        yield format_tool_execution(func_name, safe_args)
                         
                         try:
                             result = func(**safe_args)
                         except Exception as tool_err:
                             result = f"Tool execution failed: {str(tool_err)}"
                         
-                        yield f"```text\n{result}\n```\n\n"
+                        yield format_code_block(result)
                             
                         full_messages.append({
                             "role": "tool", 

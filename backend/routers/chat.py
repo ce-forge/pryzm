@@ -1,59 +1,22 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from pydantic import BaseModel, Field
 from typing import Optional, List
-from datetime import datetime
 import json
 
-import database
-import ai_engine
-import models
-import knowledge
-from prompt_manager import MICRO_PROMPTS
-import requests
+from db import database, models
+from core import ai_engine
+from core.prompt_manager import MICRO_PROMPTS
+from services import knowledge
+from schemas import (InferenceRequest, SessionResponse, SessionUpdate, 
+                     FolderUpdate, MessageHistory, FolderCreate)
 from config import settings
+from utils.formatters import format_error
+import requests
+
+
 
 router = APIRouter(tags=["AI Chat"])
-
-class InferenceRequest(BaseModel):
-    session_id: Optional[str] = None
-    prompt: str = Field(..., max_length=100000) 
-    mode: str = "it_copilot"  
-    model: str = "gemma4:e4b"
-
-class SessionResponse(BaseModel):
-    id: str
-    title: str
-    mode: str
-    folder_id: Optional[str] = None
-    is_pinned: Optional[bool] = False
-    created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-class SessionInfo(BaseModel):
-    id: str
-    title: str
-
-class SessionUpdate(BaseModel):
-    folder_id: Optional[str] = None
-    title: Optional[str] = None
-    is_pinned: Optional[bool] = None
-
-class FolderUpdate(BaseModel):
-    name: str
-
-class MessageHistory(BaseModel):
-    role: str
-    content: str
-    timestamp: Optional[str] = None
-
-class FolderCreate(BaseModel):
-    id: str
-    name: str
-    workspace: str
 
 @router.get("/sessions", response_model=List[SessionResponse])
 def get_sessions(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
@@ -144,7 +107,7 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
             yield json.dumps({"done": True}) + "\n"
             
         except Exception as e:
-            error_msg = f"\n\n**[Fatal Stream Error]**\n`{str(e)}`"
+            error_msg = format_error(str(e), "Fatal Stream Error")
             full_response += error_msg
             yield json.dumps({"chunk": error_msg}) + "\n"
 
@@ -181,8 +144,9 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
 
                     unsummarized = active_msgs[start_idx:]
                     
-                    if len(unsummarized) > 30:
-                        to_summarize = unsummarized[:-10] 
+                    if len(unsummarized) > settings.MEMORY_CONDENSE_THRESHOLD:
+                        retain_count = settings.MEMORY_CONDENSE_RETAIN
+                        to_summarize = unsummarized[:-retain_count] 
                         new_last_id = to_summarize[-1].id
                         
                         msg_dicts =[{"role": m.role, "content": m.content} for m in to_summarize]

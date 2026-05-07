@@ -3,13 +3,14 @@
 import React, { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import SettingsModal from "./settings";
+import SettingsModal from "./Settings";
+import SessionItem from "./SessionItem";
 
 interface SessionInfo {
   id: string;
   title: string;
   folder_id?: string | null; 
-  is_pinned?: boolean; // Added the missing property here
+  is_pinned?: boolean;
 }
 
 interface FolderInfo {
@@ -31,9 +32,9 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [editFolderTitle, setEditFolderTitle] = useState("");
-  const [foldersLoaded, setFoldersLoaded] = useState(false);
+  const[foldersLoaded, setFoldersLoaded] = useState(false);
   
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const[isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   
@@ -51,6 +52,18 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     }
   }, [folders, foldersLoaded, workspace]);
 
+  useEffect(() => {
+    const handleClickOutside = () => {
+      if (activeDropdown !== null) {
+        setActiveDropdown(null);
+      }
+    };
+    
+    document.addEventListener("click", handleClickOutside);
+    
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [activeDropdown]);
+
   const fetchFolders = () => {
     fetch(`${API_URL}/folders?workspace=${workspace}`)
       .then(res => res.json())
@@ -64,7 +77,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   };
 
   const fetchSessions = () => {
-    fetch(`${API_URL}/sessions?workspace=${workspace}`)
+    fetch(`${API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => setSessions(data))
       .catch((err) => console.error("Error loading sessions:", err));
@@ -75,7 +88,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     fetchFolders();
     window.addEventListener("chatCreated", fetchSessions);
     return () => window.removeEventListener("chatCreated", fetchSessions);
-  }, [workspace]);
+  },[workspace]);
 
   const handleDeleteSession = async (e: React.MouseEvent, id: string) => {
     e.preventDefault(); e.stopPropagation();
@@ -106,10 +119,8 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const togglePin = async (e: React.MouseEvent, id: string, currentPinned: boolean) => {
     e.stopPropagation();
     const newStatus = !currentPinned;
-    
     setSessions(prev => prev.map(s => s.id === id ? { ...s, is_pinned: newStatus } : s));
     setActiveDropdown(null);
-
     try {
       await fetch(`${API_URL}/sessions/${id}`, {
         method: "PATCH",
@@ -119,11 +130,16 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     } catch (err) {}
   };
 
-  const handleDragStart = (e: React.DragEvent, sessionId: string) => e.dataTransfer.setData("sessionId", sessionId);
+  const handleDragOverSafe = (e: React.DragEvent, target: string | null) => {
+    if (e.dataTransfer.types.includes("application/x-pryzm-session")) {
+      e.preventDefault();
+      setDragTarget(target);
+    }
+  };
 
   const handleDropToFolder = async (e: React.DragEvent, folderId: string | null) => {
     e.preventDefault();
-    const sessionId = e.dataTransfer.getData("sessionId");
+    const sessionId = e.dataTransfer.getData("application/x-pryzm-session");
     if (!sessionId) return;
     setSessions((prev) => prev.map(s => s.id === sessionId ? { ...s, folder_id: folderId } : s));
     try {
@@ -177,71 +193,12 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     setFolders(folders.map(f => f.id === folderId ? { ...f, isOpen: !f.isOpen } : f));
   };
 
-  // Fixed sorting logic to use s.is_pinned
   const getSortedSessions = (folderId: string | null) => {
     const filtered = sessions.filter(s => s.folder_id === folderId || (folderId === null && !folders.find(f => f.id === s.folder_id)));
     const pinned = filtered.filter(s => s.is_pinned);
     const unpinned = filtered.filter(s => !s.is_pinned);
     return [...pinned, ...unpinned];
   };
-
-  const renderSessionItem = (s: SessionInfo) => (
-    <div 
-      key={s.id} 
-      draggable 
-      onDragStart={(e) => handleDragStart(e, s.id)}
-      className={`group flex items-center justify-between rounded-lg transition-colors cursor-grab active:cursor-grabbing ${currentSessionId === s.id ? 'bg-[#282a2c] text-[#e3e3e3]' : 'text-gray-400 hover:bg-[#282a2c] hover:text-[#e3e3e3]'}`}
-    >
-      {editingId === s.id ? (
-        <form onSubmit={(e) => handleRenameSessionSubmit(e, s.id)} className="flex-1 px-3 py-1.5">
-          <input autoFocus value={editTitle} onChange={(e) => setEditTitle(e.target.value)} onBlur={(e) => handleRenameSessionSubmit(e, s.id)} className="w-full bg-[#131314] text-[#e3e3e3] text-sm px-2 py-0.5 rounded outline-none border border-blue-500/50" />
-        </form>
-      ) : (
-        <Link href={`/?workspace=${workspace}&session=${s.id}`} className="truncate flex-1 min-w-0 px-3 py-2 text-sm">
-           {s.title}
-        </Link>
-      )}
-      
-      {editingId !== s.id && (
-        <div className="flex-shrink-0 flex items-center pr-2 relative">
-          {/* Fixed Icon logic */}
-          {s.is_pinned && (
-             <svg className="w-3.5 h-3.5 text-blue-400 mr-1" fill="currentColor" viewBox="0 0 20 20">
-               <path d="M5 4a2 2 0 012-2h6a2 2 0 012 2v14l-5-2.5L5 18V4z" />
-             </svg>
-          )}
-          <button 
-             type="button"
-             onClick={(e) => { 
-                e.stopPropagation(); 
-                e.nativeEvent.stopImmediatePropagation();
-                setActiveDropdown(activeDropdown === s.id ? null : s.id); 
-             }}
-             className="p-1 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"
-          >
-             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
-             </svg>
-          </button>
-
-          {activeDropdown === s.id && (
-             <div className="absolute right-0 top-[90%] mt-1 w-28 bg-[#282a2c] border border-[#333537] rounded-lg shadow-xl z-50 overflow-hidden flex flex-col py-1" onClick={e => e.stopPropagation()}>
-               {/* Fixed Dropdown button logic */}
-               <button onClick={(e) => togglePin(e, s.id, !!s.is_pinned)} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
-                 {s.is_pinned ? "Unpin" : "Pin to Top"}
-               </button>
-               <button onClick={(e) => { e.preventDefault(); setEditingId(s.id); setEditTitle(s.title); setActiveDropdown(null); }} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
-                 Rename
-               </button>
-               <button onClick={(e) => { setActiveDropdown(null); handleDeleteSession(e, s.id); }} className="text-left px-3 py-1.5 text-xs hover:bg-red-500/10 text-red-400">
-                 Delete
-               </button>
-             </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
 
   if (!isOpen) return null;
 
@@ -281,7 +238,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
              <div 
                key={folder.id} 
                className={`pt-1 pb-1 transition-all duration-200 rounded-lg border ${dragTarget === folder.id ? 'border-blue-500 bg-[#282a2c]/50' : 'border-transparent hover:border-[#333537]/50'}`}
-               onDragOver={(e) => { e.preventDefault(); setDragTarget(folder.id); }}
+               onDragOver={(e) => handleDragOverSafe(e, folder.id)}
                onDragLeave={(e) => { e.preventDefault(); setDragTarget(null); }}
                onDrop={(e) => { e.preventDefault(); setDragTarget(null); handleDropToFolder(e, folder.id); }}
              >
@@ -300,8 +257,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
                       <button 
                          type="button"
                          onClick={(e) => { 
-                            e.stopPropagation(); 
-                            e.nativeEvent.stopImmediatePropagation();
+                            e.stopPropagation(); e.nativeEvent.stopImmediatePropagation();
                             setActiveDropdown(activeDropdown === `folder_${folder.id}` ? null : `folder_${folder.id}`); 
                          }}
                          className="p-1 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"
@@ -330,7 +286,15 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
                     {getSortedSessions(folder.id).length === 0 ? (
                         <div className="text-[11px] text-gray-600 italic px-2 py-1">Drag sessions here</div>
                     ) : (
-                        getSortedSessions(folder.id).map(renderSessionItem)
+                        getSortedSessions(folder.id).map((s) => (
+                          <SessionItem 
+                            key={s.id} s={s} workspace={workspace} currentSessionId={currentSessionId}
+                            editingId={editingId} editTitle={editTitle} setEditTitle={setEditTitle} 
+                            handleRenameSubmit={handleRenameSessionSubmit} activeDropdown={activeDropdown} 
+                            setActiveDropdown={setActiveDropdown} togglePin={togglePin} handleDelete={handleDeleteSession} 
+                            setEditingId={setEditingId}
+                          />
+                        ))
                     )}
                  </div>
                )}
@@ -339,12 +303,20 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
 
            <div 
               className={`pt-4 pb-12 space-y-0.5 min-h-[100px] transition-all duration-200 rounded-lg border ${dragTarget === 'unsorted' ? 'border-blue-500 bg-[#282a2c]/50' : 'border-transparent'}`}
-              onDragOver={(e) => { e.preventDefault(); setDragTarget('unsorted'); }}
+              onDragOver={(e) => handleDragOverSafe(e, 'unsorted')}
               onDragLeave={(e) => { e.preventDefault(); setDragTarget(null); }}
               onDrop={(e) => { e.preventDefault(); setDragTarget(null); handleDropToFolder(e, null); }}
            >
              <div className="text-[11px] font-bold uppercase tracking-wider text-gray-500 px-3 mb-2 pointer-events-none">Unsorted Logs</div>
-             {getSortedSessions(null).map(renderSessionItem)}
+             {getSortedSessions(null).map((s) => (
+                <SessionItem 
+                  key={s.id} s={s} workspace={workspace} currentSessionId={currentSessionId}
+                  editingId={editingId} editTitle={editTitle} setEditTitle={setEditTitle} 
+                  handleRenameSubmit={handleRenameSessionSubmit} activeDropdown={activeDropdown} 
+                  setActiveDropdown={setActiveDropdown} togglePin={togglePin} handleDelete={handleDeleteSession} 
+                  setEditingId={setEditingId}
+                />
+              ))}
              {getSortedSessions(null).length === 0 && <div className="text-xs text-gray-600 px-3 italic pointer-events-none">No unsorted logs.</div>}
            </div>
         </div>

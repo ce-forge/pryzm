@@ -1,21 +1,12 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-import database
+from db import database
+from schemas import SystemStatus, HealthResponse
 
 router = APIRouter(tags=["System Health"])
 
-class SystemStatus(BaseModel):
-    api: str
-    redis: str
-    database: str
-    inference_engine: str
-
-class HealthResponse(BaseModel):
-    status: str
-    components: SystemStatus
-
 @router.get("/health", response_model=HealthResponse)
-def get_health(): # Removed 'async' to prevent blocking!
+def get_health():
     pg_status = database.ping_postgres()
     redis_status = database.ping_redis()
     ollama_status = database.ping_ollama()

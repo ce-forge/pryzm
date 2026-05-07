@@ -4,7 +4,6 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   const [activeTab, setActiveTab] = useState<"general" | "behavior">("general");
   const [models, setModels] = useState<string[]>([]);
   
-  // FIX 1: Initialize synchronously to prevent the "fake change" glitch
   const[selectedModel, setSelectedModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
   const[initialModel, setInitialModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
   
@@ -31,7 +30,6 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
       .catch(() => {});
   },[]);
 
-  // FIX 2: Only calculate changes IF the prompts have successfully loaded from the API
   const isLoaded = Object.keys(initialPrompts).length > 0;
   const hasChanges = selectedModel !== initialModel || (isLoaded && JSON.stringify(prompts) !== JSON.stringify(initialPrompts));
 
