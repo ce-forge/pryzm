@@ -11,6 +11,10 @@ export const metadata: Metadata = {
     statusBarStyle: "black-translucent",
     title: "Pryzm",
   },
+  icons: {
+    icon: "/favicon.svg",
+    apple: "/favicon.png",
+  }
 };
 
 export const viewport = {
@@ -19,6 +23,7 @@ export const viewport = {
   maximumScale: 1,
   viewportFit: "cover",
   interactiveWidget: "resizes-visual",
+  themeColor: "#121212",
 };
 
 export default function RootLayout({
@@ -28,9 +33,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="flex h-screen bg-slate-900 text-slate-100 overflow-hidden">
+      <body className="flex h-screen bg-[#121212] text-slate-100 overflow-hidden">
         
-        <Suspense fallback={<div className="w-64 bg-slate-950 border-r border-slate-800 p-4">Loading core...</div>}>
+        <Suspense fallback={<div className="w-64 bg-[#121212] border-r border-slate-800 p-4">Loading core...</div>}>
         </Suspense>
 
         <main className="flex-1 flex flex-col h-screen overflow-hidden">

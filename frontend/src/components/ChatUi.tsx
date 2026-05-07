@@ -97,7 +97,6 @@ export default function ChatUi({
     setSearchIndex(index);
   };
 
-  // Helper to highlight user messages text
   const highlightText = (text: string, query: string, isActive: boolean) => {
     if (!query) return text;
     const parts = text.split(new RegExp(`(${query})`, 'gi'));

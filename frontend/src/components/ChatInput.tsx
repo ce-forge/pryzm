@@ -1,5 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { FileUpload } from "@/hooks/useChatLogic";
+import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 
 interface ChatInputProps {
   prompt: string;
@@ -27,6 +28,10 @@ export default function ChatInput({
   const [showTestMenu, setShowTestMenu] = useState(false);
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const menuWrapperRef = useRef<HTMLDivElement>(null);
+
+  useOnClickOutside(menuWrapperRef, () => setShowTestMenu(false));
 
   useEffect(() => {
     if (inputRef.current) {
@@ -130,7 +135,7 @@ export default function ChatInput({
             />
             
             <div className="flex justify-between items-center px-2 pb-1">
-                <div className="flex gap-1 items-center relative">
+                <div className="flex gap-1 items-center relative" ref={menuWrapperRef}>
                     <input type="file" multiple className="hidden" ref={fileInputRef} onChange={handleFileSelect} />
                     <button 
                       type="button" 
@@ -143,7 +148,10 @@ export default function ChatInput({
 
                     <button 
                       type="button" 
-                      onClick={(e) => { e.stopPropagation(); isAutoTesting ? stopAutoTest() : setShowTestMenu(!showTestMenu); }} 
+                      onClick={(e) => { 
+                        e.stopPropagation(); 
+                        isAutoTesting ? stopAutoTest() : setShowTestMenu(!showTestMenu); 
+                      }} 
                       className={`p-2 rounded-full transition-colors ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:text-gray-300 hover:bg-[#333537]'}`} 
                       title={isAutoTesting ? "Stop Test" : "Debug Tools"}
                     >
