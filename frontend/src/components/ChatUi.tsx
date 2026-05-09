@@ -2,6 +2,7 @@
 
 import React, { useRef, useEffect, useState } from "react";
 import { FileUpload, Message } from "@/hooks/useChatLogic";
+import { useAutoScroll } from "@/hooks/useAutoScroll";
 import MarkdownRenderer from "./MarkdownRenderer";
 import ChatInput from "./ChatInput";
 import ChatHeader from "./ChatHeader";
@@ -50,24 +51,9 @@ export default function ChatUi({
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
   
-  // Auto-scroll logic
-  const[autoScroll, setAutoScroll] = useState(true);
-  const handleScroll = () => {
-    if (!scrollContainerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = scrollContainerRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100;
-    setAutoScroll(isAtBottom);
-  };
+  const { scrollRef, onScroll } = useAutoScroll(messages);
 
-  useEffect(() => {
-    if (autoScroll) {
-      terminalEndRef.current?.scrollIntoView({ behavior: isProcessing ? "auto" : "smooth" });
-    }
-  }, [messages, isProcessing, uploads, autoScroll]);
-
-  // Search logic lifted here so we can pass it down
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<number[]>([]);
   const [searchIndex, setSearchIndex] = useState(0);
@@ -154,8 +140,8 @@ export default function ChatUi({
       />
 
       <div 
-        ref={scrollContainerRef}
-        onScroll={handleScroll}
+        ref={scrollRef}
+        onScroll={onScroll}
         className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center custom-scrollbar"
       >
         <div className="w-full max-w-3xl space-y-6 flex flex-col min-h-full">
@@ -205,7 +191,13 @@ export default function ChatUi({
                 </React.Fragment>
               );
             })}
-            {isProcessing && <ProcessingAnimation />}
+            {isProcessing && 
+             messages.length > 0 && 
+             messages[messages.length - 1].role === "assistant" && 
+             !messages[messages.length - 1].content && (
+              <ProcessingAnimation />
+            )}
+            
             <div className="h-6 shrink-0" />
             <div ref={terminalEndRef} />
          </div>

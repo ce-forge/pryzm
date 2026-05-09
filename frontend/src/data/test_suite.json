@@ -26,6 +26,7 @@
     "What was the emergency server failover IP and the sysadmin password I told you to memorize at the very beginning?"
   ],
   "tool_chain":[
-    "Please look up the IP for github.com, check if port 443 is open on that IP, and inspect its SSL certificate. Finally give me a diagnostic summary."
+    "Please look up the IP for github.com, check if port 443 is open on that IP, and inspect its SSL certificate. Finally give me a diagnostic summary.",
+    "Ping ports 80:1000:40 on yahoo.com and report which ones are open. Please do each one after the other."
   ]
 }

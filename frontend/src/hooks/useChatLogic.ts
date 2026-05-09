@@ -27,12 +27,12 @@ export function useChatLogic() {
   const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
   const [currentSession, setCurrentSession] = useState<string | null>(urlSessionId);
-  const [sessionTitle, setSessionTitle] = useState("");
+  const[sessionTitle, setSessionTitle] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [prompt, setPrompt] = useState("");
-  const[isProcessing, setIsProcessing] = useState(false);
+  const[prompt, setPrompt] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
   const [isAutoTesting, setIsAutoTesting] = useState(false);
-  const [uploads, setUploads] = useState<FileUpload[]>([]);
+  const[uploads, setUploads] = useState<FileUpload[]>([]);
   
   const [promptHistory, setPromptHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -40,7 +40,6 @@ export function useChatLogic() {
   const isProcessingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const abortTestRef = useRef(false);
-  
   const isNavigatingRef = useRef(false);
 
   useEffect(() => {
@@ -88,12 +87,12 @@ export function useChatLogic() {
             const sessionData = await sessionRes.json();
             const activeSesh = sessionData.find((x: any) => x.id === currentSession);
             if (activeSesh) {
-              setSessionTitle(activeSesh.title);
+                setSessionTitle(activeSesh.title);
             } else if (currentSession) {
-              setCurrentSession(null);
-              setMessages([]);
-              setSessionTitle("");
-              router.replace(`/?workspace=${workspace}`);
+                setCurrentSession(null);
+                setMessages([]);
+                setSessionTitle("");
+                router.replace(`/?workspace=${workspace}`);
             }
         }
       } catch (error) {
@@ -101,7 +100,7 @@ export function useChatLogic() {
       }
     }
     loadHistory();
-  }, [currentSession, workspace]);
+  }, [currentSession, workspace, API_URL, router]);
 
   useEffect(() => {
     const handleChatCreated = async () => {
@@ -117,7 +116,7 @@ export function useChatLogic() {
     };
     window.addEventListener("chatCreated", handleChatCreated);
     return () => window.removeEventListener("chatCreated", handleChatCreated);
-  }, [currentSession, workspace]);
+  },[currentSession, workspace, API_URL]);
 
   useEffect(() => {
     return () => {
@@ -156,10 +155,10 @@ export function useChatLogic() {
              window.dispatchEvent(new Event("chatCreated"));
           }
         } else {
-          setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "error", progress: 0 } : u)));
+          setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "error", progress: 0, errorMessage: "Upload failed" } : u)));
         }
       } catch (err) {
-        setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "error", progress: 0 } : u)));
+        setUploads((prev) => prev.map((u) => (u.id === uploadItem.id ? { ...u, status: "error", progress: 0, errorMessage: "Network error" } : u)));
       }
     }
   };
@@ -186,8 +185,10 @@ export function useChatLogic() {
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder("utf-8");
+      
       let buffer = "";
       let fullAssistantMessage = "";
+      let lastUpdateTime = Date.now();
 
       if (reader) {
         while (true) {
@@ -198,6 +199,8 @@ export function useChatLogic() {
           const lines = buffer.split("\n");
           buffer = lines.pop() || "";
 
+          let hasNewChunks = false;
+
           for (const line of lines) {
             if (!line.trim()) continue;
             try {
@@ -205,38 +208,54 @@ export function useChatLogic() {
               
               if (parsed.status === "started" && parsed.session_id) {
                 updatedSessionId = parsed.session_id;
-                
                 if (!activeSessionId) {
                   isNavigatingRef.current = true; 
                   setCurrentSession(parsed.session_id);
                   router.replace(`/?workspace=${workspace}&session=${parsed.session_id}`, { scroll: false });
                 }
-                
-                window.dispatchEvent(new Event("chatCreated"));
               }
 
               if (parsed.chunk !== undefined) {
                 fullAssistantMessage += parsed.chunk;
-                setMessages((prev) => {
-                  const newMsgs = [...prev];
-                  const lastIndex = newMsgs.length - 1;
-                  if (lastIndex >= 0 && newMsgs[lastIndex].role === "assistant") {
-                    newMsgs[lastIndex] = { ...newMsgs[lastIndex], content: fullAssistantMessage };
-                  }
-                  return newMsgs;
-                });
+                hasNewChunks = true;
               }
             } catch (err) { }
           }
+
+          if (hasNewChunks) {
+            const now = Date.now();
+            // THRESHOLD: React is only forced to update the UI once every 50ms
+            if (now - lastUpdateTime > 50) {
+              setMessages((prev) => {
+                const newMsgs = [...prev];
+                const lastIndex = newMsgs.length - 1;
+                if (lastIndex >= 0 && newMsgs[lastIndex].role === "assistant") {
+                  newMsgs[lastIndex] = { ...newMsgs[lastIndex], content: fullAssistantMessage };
+                }
+                return newMsgs;
+              });
+              lastUpdateTime = now;
+            }
+          }
         }
+
+        // Final Flush: Make sure the very last characters are printed when the stream finishes
+        setMessages((prev) => {
+          const newMsgs = [...prev];
+          const lastIndex = newMsgs.length - 1;
+          if (lastIndex >= 0 && newMsgs[lastIndex].role === "assistant") {
+            newMsgs[lastIndex] = { ...newMsgs[lastIndex], content: fullAssistantMessage };
+          }
+          return newMsgs;
+        });
       }
     } catch (error: any) {
       if (error.name === "AbortError") return updatedSessionId;
-      setMessages((prev) => [...prev, { role: "assistant", content: `\n\n[Connection Failure: ${error.message}]` }]);
+      setMessages((prev) =>[...prev, { role: "assistant", content: `\n\n> **System Error:** \`[Connection Failure: ${error.message}]\`\n\n` }]);
     } finally {
       setIsProcessing(false);
       abortControllerRef.current = null;
-      window.dispatchEvent(new Event("chatCreated"));
+      window.dispatchEvent(new Event("chatCreated")); // Always refresh sidebar titles
     }
     return updatedSessionId;
   };
@@ -254,10 +273,9 @@ export function useChatLogic() {
     
     const textToSend = attachedPrefix + prompt;
     
-    setPromptHistory(prev =>[prompt, ...prev]);
+    setPromptHistory(prev => [prompt, ...prev]);
     setHistoryIndex(-1); 
     setPrompt("");
-    
     setUploads(prev => prev.filter(u => u.status !== 'success'));
     
     await sendMessage(textToSend, currentSession);

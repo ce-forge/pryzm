@@ -12,7 +12,7 @@ export default function QuickActions({ setPrompt, inputRef }: QuickActionsProps)
       title: 'Optimize Code', 
       desc: 'Refactor scripts for performance', 
       Icon: ZapIcon, 
-      prompt: 'Review the following code and suggest optimizations for performance and readability. Explain the logic behind your changes: \n\n',
+      prompt: 'Review the following code and suggest optimizations for performance and readability. Explain the logic behind your changes: \n',
       hoverBorder: 'hover:border-red-500/30',
       hoverText: 'group-hover:text-red-400'
     },
@@ -20,7 +20,7 @@ export default function QuickActions({ setPrompt, inputRef }: QuickActionsProps)
       title: 'System Troubleshooter', 
       desc: 'Diagnose OS or hardware errors', 
       Icon: WrenchIcon, 
-      prompt: 'I am experiencing a system issue. Based on these symptoms/logs, walk me through the causes and terminal commands to fix it: \n\n',
+      prompt: 'I am experiencing a system issue. Based on these symptoms/logs, walk me through the causes and terminal commands to fix it: \n',
       hoverBorder: 'hover:border-green-500/30',
       hoverText: 'group-hover:text-green-400'
     },
