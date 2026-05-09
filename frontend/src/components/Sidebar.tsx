@@ -22,9 +22,12 @@ interface FolderInfo {
 interface SidebarProps {
   isOpen: boolean;
   setIsOpen: (val: boolean) => void;
+  selectedModel: string;
+  setSelectedModel: (model: string) => void;
+  streamingSessionIdsRef: React.MutableRefObject<Set<string>>;
 }
 
-export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
+export default function Sidebar({ isOpen, setIsOpen, streamingSessionIdsRef }: SidebarProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
@@ -64,6 +67,13 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
     return () => document.removeEventListener("click", handleClickOutside);
   }, [activeDropdown]);
 
+  const fetchSessions = () => {
+    fetch(`${API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => setSessions(data))
+      .catch((err) => console.error("Error loading sessions:", err));
+  };
+
   const fetchFolders = () => {
     fetch(`${API_URL}/folders?workspace=${workspace}`)
       .then(res => res.json())
@@ -74,13 +84,6 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         setFoldersLoaded(true);
       })
       .catch(err => console.error("Error loading folders:", err));
-  };
-
-  const fetchSessions = () => {
-    fetch(`${API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' })
-      .then((res) => res.json())
-      .then((data) => setSessions(data))
-      .catch((err) => console.error("Error loading sessions:", err));
   };
 
   useEffect(() => {
@@ -289,6 +292,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
                         getSortedSessions(folder.id).map((s) => (
                           <SessionItem 
                             key={s.id} s={s} workspace={workspace} currentSessionId={currentSessionId}
+                            isStreaming={streamingSessionIdsRef.current.has(s.id)}
                             editingId={editingId} editTitle={editTitle} setEditTitle={setEditTitle} 
                             handleRenameSubmit={handleRenameSessionSubmit} activeDropdown={activeDropdown} 
                             setActiveDropdown={setActiveDropdown} togglePin={togglePin} handleDelete={handleDeleteSession} 
@@ -311,6 +315,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
              {getSortedSessions(null).map((s) => (
                 <SessionItem 
                   key={s.id} s={s} workspace={workspace} currentSessionId={currentSessionId}
+                  isStreaming={streamingSessionIdsRef.current.has(s.id)}
                   editingId={editingId} editTitle={editTitle} setEditTitle={setEditTitle} 
                   handleRenameSubmit={handleRenameSessionSubmit} activeDropdown={activeDropdown} 
                   setActiveDropdown={setActiveDropdown} togglePin={togglePin} handleDelete={handleDeleteSession} 

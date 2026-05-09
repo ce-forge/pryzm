@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
-import { FileUpload } from "@/hooks/useChatLogic";
+import { FileUpload } from "@/types/chat"; 
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 
 interface ChatInputProps {

@@ -1,15 +1,18 @@
 "use client";
 
-import React, { useRef, useEffect, useState } from "react";
-import { FileUpload, Message } from "@/hooks/useChatLogic";
+import React, { useRef, useEffect } from "react";
+import { Message, FileUpload } from "@/types/chat"; 
 import { useAutoScroll } from "@/hooks/useAutoScroll";
+import { useSearch } from "@/hooks/useSearch";
 import MarkdownRenderer from "./MarkdownRenderer";
 import ChatInput from "./ChatInput";
 import ChatHeader from "./ChatHeader";
 import QuickActions from "./QuickActions";
 import ProcessingAnimation from "./ProcessingAnimation";
+import SearchBar from "./SearchBar";
+import ChatTimestamp from "./ChatTimestamp";
 
-interface ChatUIProps {
+interface ActiveSessionProps {
   workspace: string;
   sessionTitle: string;
   messages: Message[];
@@ -19,7 +22,7 @@ interface ChatUIProps {
   setUploads: React.Dispatch<React.SetStateAction<FileUpload[]>>;
   isProcessing: boolean;
   isAutoTesting: boolean;
-  handleInference: (e?: React.FormEvent) => void;
+  handleInference: (e?: React.FormEvent) => void; 
   stopAutoTest: () => void;
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
   runTestSuite: (type: "it_demo" | "memory_test" | "tool_chain") => void;
@@ -27,6 +30,7 @@ interface ChatUIProps {
   totalTokens: number;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (val: boolean) => void;
+  isLoadingHistory?: boolean;
 }
 
 const formatTimestamp = (timestamp?: string) => {
@@ -35,92 +39,57 @@ const formatTimestamp = (timestamp?: string) => {
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-  
   const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  
   if (diffDays === 0 && now.getDate() === date.getDate()) return `Today ${time}`;
   if (diffDays === 1 || (diffDays === 0 && now.getDate() !== date.getDate())) return `Yesterday ${time}`;
   return `${date.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
 };
 
-export default function ChatUi({ 
+export default function ActiveSession({ 
   workspace, sessionTitle, messages, prompt, setPrompt, uploads, setUploads, isProcessing, isAutoTesting,
   handleInference, stopAutoTest, handleKeyDown, runTestSuite, processUploadQueue, totalTokens,
-  isSidebarOpen, setIsSidebarOpen
-}: ChatUIProps) {
+  isSidebarOpen, setIsSidebarOpen, isLoadingHistory 
+}: ActiveSessionProps) {
   
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const terminalEndRef = useRef<HTMLDivElement>(null);
   
   const { scrollRef, onScroll } = useAutoScroll(messages);
-
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchResults, setSearchResults] = useState<number[]>([]);
-  const [searchIndex, setSearchIndex] = useState(0);
-  const[isSearchOpen, setIsSearchOpen] = useState(false);
+  
+  const search = useSearch();
 
   useEffect(() => {
-    if (!searchQuery.trim()) {
-      setSearchResults([]);
+    if (!search.searchQuery) {
+      search.setTotalMatches(0);
       return;
     }
-    const query = searchQuery.toLowerCase();
-    const matches = messages
-      .map((m, i) => m.content.toLowerCase().includes(query) ? i : -1)
-      .filter(i => i !== -1);
-    
-    setSearchResults(matches);
-    setSearchIndex(0);
-    
-    if (matches.length > 0) {
-      document.getElementById(`msg-${matches[0]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    }
-  }, [searchQuery, messages]);
 
-  const scrollToMatch = (index: number) => {
-    if (searchResults.length === 0) return;
-    document.getElementById(`msg-${searchResults[index]}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-    setSearchIndex(index);
-  };
+    const timer = setTimeout(() => {
+      const marks = document.querySelectorAll('.search-match');
+      search.setTotalMatches(marks.length);
 
-  const highlightText = (text: string, query: string, isActive: boolean) => {
-    if (!query) return text;
-    const parts = text.split(new RegExp(`(${query})`, 'gi'));
-    return parts.map((part, i) =>
-      part.toLowerCase() === query.toLowerCase() ? (
-        <mark key={i} className={`rounded-[3px] px-0.5 text-inherit ${isActive ? "bg-blue-500/70 text-white shadow-sm shadow-blue-900/50" : "bg-blue-500/20 text-blue-300"}`}>
-          {part}
-        </mark>
-      ) : part
-    );
-  };
+      let activeIdx = search.searchIndex;
+      if (marks.length > 0 && activeIdx >= marks.length) {
+         activeIdx = marks.length - 1;
+         search.setSearchIndex(activeIdx);
+      }
 
-  const renderUserMessage = (rawContent: string, isActiveMatch: boolean) => {
-    const attachmentRegex = /\[Attached_File:(.*?)\]/g;
-    const attachments: string[] =[];
-    let match;
-    
-    while ((match = attachmentRegex.exec(rawContent)) !== null) {
-      attachments.push(match[1]);
-    }
-    const cleanContent = rawContent.replace(attachmentRegex, '').trim();
-    
-    return (
-      <div className="flex flex-col items-end">
-        {attachments.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mb-2 justify-end">
-            {attachments.map((filename, idx) => (
-              <div key={idx} className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#131314] text-gray-300 border border-[#333537]">
-                <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
-                {filename}
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="whitespace-pre-wrap">{highlightText(cleanContent, searchQuery, isActiveMatch)}</div>
-      </div>
-    );
-  };
+      marks.forEach((mark, i) => {
+        const element = mark as HTMLElement;
+        if (i === activeIdx) {
+          element.style.backgroundColor = '#3b82f6'; // bg-blue-500
+          element.style.color = '#ffffff';           // text-white
+          element.classList.add('shadow-sm', 'shadow-blue-900/50', 'z-10');
+        } else {
+          element.style.backgroundColor = 'rgba(59, 130, 246, 0.2)';
+          element.style.color = '#93c5fd';
+          element.classList.remove('shadow-sm', 'shadow-blue-900/50', 'z-10');
+        }
+      });
+    });
+
+    return () => clearTimeout(timer);
+  }, [messages, search.searchQuery, search.searchIndex, search]); // Re-run when DOM changes
 
   return (
     <div className="flex flex-col flex-1 min-w-0 h-full bg-[#131314]">
@@ -130,23 +99,13 @@ export default function ChatUi({
         sessionTitle={sessionTitle} 
         isSidebarOpen={isSidebarOpen} 
         setIsSidebarOpen={setIsSidebarOpen} 
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        searchResults={searchResults}
-        searchIndex={searchIndex}
-        scrollToMatch={scrollToMatch}
-        isSearchOpen={isSearchOpen}
-        setIsSearchOpen={setIsSearchOpen}
+        rightActions={<SearchBar {...search} />} 
       />
 
-      <div 
-        ref={scrollRef}
-        onScroll={onScroll}
-        className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center custom-scrollbar"
-      >
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center custom-scrollbar">
         <div className="w-full max-w-3xl space-y-6 flex flex-col min-h-full">
             
-            {messages.length === 0 && (
+            {messages.length === 0 && !isLoadingHistory && (
               <QuickActions setPrompt={setPrompt} inputRef={textareaRef} />
             )}
 
@@ -163,27 +122,56 @@ export default function ChatUi({
                 }
               }
 
-              const isMatch = searchResults.includes(i);
-              const isActiveMatch = searchResults[searchIndex] === i;
+              const renderUserMessage = (rawContent: string) => {
+                const attachmentRegex = /\[Attached_File:(.*?)\]/g;
+                const attachments: string[] = [];
+                let match;
+                
+                while ((match = attachmentRegex.exec(rawContent)) !== null) attachments.push(match[1]);
+                const cleanContent = rawContent.replace(attachmentRegex, '').trim();
+                
+                const escapedQuery = search.searchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const parts = cleanContent.split(new RegExp(`(${escapedQuery})`, 'gi'));
+                
+                const highlighted = parts.map((part, idx) => {
+                  if (search.searchQuery && part.toLowerCase() === search.searchQuery.toLowerCase()) {
+                    return <mark key={idx} className="search-match rounded-[3px] px-0.5 text-inherit transition-colors duration-200">{part}</mark>
+                  }
+                  return part;
+                });
+
+                return (
+                  <div className="flex flex-col items-end">
+                    {attachments.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2 justify-end">
+                        {attachments.map((filename, idx) => (
+                          <div key={idx} className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium bg-[#131314] text-gray-300 border border-[#333537]">
+                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" /></svg>
+                            {filename}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div className="whitespace-pre-wrap">{highlighted}</div>
+                  </div>
+                );
+              };
 
               return (
                 <React.Fragment key={i}>
                   {showTimestamp && (
                     <div className="flex justify-center my-6">
-                      <span className="text-xs font-medium text-gray-500 bg-[#1e1f20] border border-[#333537] px-3 py-1 rounded-full">
-                        {formatTimestamp(m.timestamp)}
-                      </span>
+                      <span className="text-xs font-medium text-gray-500 bg-[#1e1f20] border border-[#333537] px-3 py-1 rounded-full">{formatTimestamp(m.timestamp)}</span>
                     </div>
                   )}
                   <div id={`msg-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                       <div className={`text-[15px] leading-relaxed ${m.role === 'user' ? 'bg-[#1e1f20] text-[#e3e3e3] rounded-3xl py-2.5 px-5 max-w-[80%] whitespace-pre-wrap' : 'text-[#e3e3e3] w-full max-w-full overflow-hidden'}`}>
                           {m.role === "user" ? (
-                            renderUserMessage(m.content, isActiveMatch)
+                            renderUserMessage(m.content)
                           ) : (
                             <MarkdownRenderer 
                               content={m.content} 
-                              searchQuery={searchQuery} 
-                              isActiveMatch={isActiveMatch} 
+                              searchQuery={search.searchQuery} 
                             />
                           )}
                       </div>
@@ -191,13 +179,9 @@ export default function ChatUi({
                 </React.Fragment>
               );
             })}
-            {isProcessing && 
-             messages.length > 0 && 
-             messages[messages.length - 1].role === "assistant" && 
-             !messages[messages.length - 1].content && (
+            {isProcessing && messages.length > 0 && messages[messages.length - 1].role === "assistant" && !messages[messages.length - 1].content && (
               <ProcessingAnimation />
             )}
-            
             <div className="h-6 shrink-0" />
             <div ref={terminalEndRef} />
          </div>
