@@ -11,7 +11,7 @@ interface SessionItemProps {
   };
   workspace: string;
   currentSessionId: string | null;
-  isStreaming?: boolean; // New: Background state
+  isStreaming?: boolean;
   editingId: string | null;
   editTitle: string;
   setEditTitle: (val: string) => void;
@@ -67,19 +67,16 @@ export default function SessionItem({
         {editingId !== s.id && (
           <div className="flex-shrink-0 flex items-center gap-1.5 pr-2 relative" ref={dropdownRef}>
             
-            {/* 1. Dynamic Loader */}
             {isStreaming && (
               <LoadingIcon className="w-3.5 h-3.5 text-gray-500 shrink-0 mr-1" />
             )}
 
-            {/* 2. Pin Icon */}
             {s.is_pinned && (
                <svg className="w-3.5 h-3.5 text-gray-500 opacity-70 shrink-0" fill="currentColor" viewBox="0 0 24 24">
                  <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6l.8 1.2.8-1.2v-6H19v-2l-2-2z" />
                </svg>
             )}
             
-            {/* 3. Three Dots Menu */}
             <button 
                type="button"
                onClick={(e) => { 

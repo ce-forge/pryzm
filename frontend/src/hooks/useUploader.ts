@@ -29,16 +29,16 @@ export function useUploader(
             prev.map((u) => (u.id === item.id ? { ...u, status: "success", progress: 100 } : u))
           );
 
+          // We capture the ID for RAG context, but we DON'T navigate.
+          // This stops the "blink" and unwanted title changes.
           if (!activeId && data.session_id) {
             activeId = data.session_id;
             onSessionCreated(data.session_id);
           }
-        } else {
-            throw new Error("Rejected");
         }
       } catch (err) {
         setUploads((prev) => 
-          prev.map((u) => (u.id === item.id ? { ...u, status: "error", progress: 0, errorMessage: "Failed" } : u))
+          prev.map((u) => (u.id === item.id ? { ...u, status: "error", errorMessage: "Failed" } : u))
         );
       }
     }

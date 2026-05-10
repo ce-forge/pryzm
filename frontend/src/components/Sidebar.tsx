@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import SettingsModal from "./Settings";
@@ -35,9 +35,9 @@ export default function Sidebar({ isOpen, setIsOpen, streamingSessionIdsRef }: S
   const [folders, setFolders] = useState<FolderInfo[]>([]);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [editFolderTitle, setEditFolderTitle] = useState("");
-  const[foldersLoaded, setFoldersLoaded] = useState(false);
+  const [foldersLoaded, setFoldersLoaded] = useState(false);
   
-  const[isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   
@@ -67,14 +67,15 @@ export default function Sidebar({ isOpen, setIsOpen, streamingSessionIdsRef }: S
     return () => document.removeEventListener("click", handleClickOutside);
   }, [activeDropdown]);
 
-  const fetchSessions = () => {
+  // THE FIX: Wrap in useCallback so the event listener always uses the freshest reference
+  const fetchSessions = useCallback(() => {
     fetch(`${API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => setSessions(data))
       .catch((err) => console.error("Error loading sessions:", err));
-  };
+  }, [API_URL, workspace]);
 
-  const fetchFolders = () => {
+  const fetchFolders = useCallback(() => {
     fetch(`${API_URL}/folders?workspace=${workspace}`)
       .then(res => res.json())
       .then(data => {
@@ -84,14 +85,16 @@ export default function Sidebar({ isOpen, setIsOpen, streamingSessionIdsRef }: S
         setFoldersLoaded(true);
       })
       .catch(err => console.error("Error loading folders:", err));
-  };
+  }, [API_URL, workspace]);
 
+  // Apply the stable callbacks to the useEffect
   useEffect(() => {
     fetchSessions();
     fetchFolders();
+    
     window.addEventListener("chatCreated", fetchSessions);
     return () => window.removeEventListener("chatCreated", fetchSessions);
-  },[workspace]);
+  }, [fetchSessions, fetchFolders]);
 
   const handleDeleteSession = async (e: React.MouseEvent, id: string) => {
     e.preventDefault(); e.stopPropagation();

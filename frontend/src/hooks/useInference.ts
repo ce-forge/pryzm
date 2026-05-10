@@ -9,35 +9,38 @@ export function useInference(
   onSessionCreated: (id: string) => void
 ) {
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  // Map to handle independent concurrent streams
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
-  const sendMessage = useCallback(async (text: string, activeSessionId: string | null, model: string) => {
+  const sendMessage = useCallback(async (text: string, activeSessionId: string | null, model: string): Promise<string> => {
     setIsProcessing(true);
     const controller = new AbortController();
     
-    let streamTargetId: string | null = activeSessionId;
-    const lookupId = streamTargetId || "temp_new_chat";
-
-    abortControllersRef.current.set(lookupId, controller);
-    if (streamTargetId) streamingSessionIdsRef.current.add(streamTargetId);
+    const streamTargetId = activeSessionId || "temp_new_chat";
+    abortControllersRef.current.set(streamTargetId, controller);
+    streamingSessionIdsRef.current.add(streamTargetId);
 
     setMessageCache(prev => ({
       ...prev,
-      [lookupId]: [
-        ...(prev[lookupId] || []),
+      [streamTargetId]: [
+        ...(prev[streamTargetId] || []),
         { role: "user", content: text, timestamp: new Date().toISOString() },
         { role: "assistant", content: "", timestamp: new Date().toISOString() }
       ]
     }));
 
+    let finalSessionId: string | null = activeSessionId;
+
     try {
       const res = await fetch(`${APP_CONFIG.API_URL}/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, session_id: activeSessionId, mode: workspace, model }),
-        signal: controller.signal // Use mapped controller
+        body: JSON.stringify({ 
+          prompt: text, 
+          session_id: activeSessionId, // This is null for first prompt
+          mode: workspace, 
+          model 
+        }),
+        signal: controller.signal
       });
 
       if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
@@ -45,89 +48,73 @@ export function useInference(
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let fullAssistantMessage = "";
-      let lastUpdateTime = 0;
+      let lineBuffer = ""; // THE FIX: Stores partial JSON lines
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           
-          const lines = decoder.decode(value).split("\n");
-          let chunkUpdated = false; // Track changes per payload
+          lineBuffer += decoder.decode(value, { stream: true });
+          const lines = lineBuffer.split("\n");
+          
+          // Keep the last (potentially incomplete) line in the buffer
+          lineBuffer = lines.pop() || "";
 
           for (const line of lines) {
             if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
               
-              if (parsed.status === "started" && parsed.session_id && !streamTargetId) {
-                streamTargetId = parsed.session_id;
+              if (parsed.status === "started" && parsed.session_id && !finalSessionId) {
                 const newId = parsed.session_id;
+                finalSessionId = newId;
                 streamingSessionIdsRef.current.add(newId);
-                
-                // Migrate the abort controller to the new persistent ID
-                abortControllersRef.current.set(newId, controller);
-                abortControllersRef.current.delete("temp_new_chat");
                 
                 setMessageCache(prev => {
                   const newCache = { ...prev };
-                  newCache[newId] = newCache["temp_new_chat"] || [];
-                  delete newCache["temp_new_chat"];
+                  newCache[newId] = [...(newCache[streamTargetId] || [])];
+                  delete newCache[streamTargetId];
                   return newCache;
                 });
-
                 onSessionCreated(newId);
               }
 
               if (parsed.chunk) {
                 fullAssistantMessage += parsed.chunk;
-                chunkUpdated = true;
+                const currentKey = finalSessionId || streamTargetId;
+                
+                setMessageCache(prev => {
+                  const msgs = prev[currentKey] || [];
+                  if (msgs.length === 0) return prev;
+                  const newMsgs = [...msgs];
+                  newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], content: fullAssistantMessage };
+                  return { ...prev, [currentKey]: newMsgs };
+                });
               }
-            } catch (err) {}
-          }
-          
-          // Exactly ONE state update per fetch payload
-          if (chunkUpdated) {
-            const now = Date.now();
-            const currentIdKey = streamTargetId || "temp_new_chat";
-            
-            if (now - lastUpdateTime > 40) {
-              setMessageCache(prev => {
-                const msgs = prev[currentIdKey] || [];
-                if (msgs.length === 0) return prev;
-                const newMsgs = [...msgs];
-                newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], content: fullAssistantMessage };
-                return { ...prev, [currentIdKey]: newMsgs };
-              });
-              lastUpdateTime = now;
+            } catch (err) {
+                lineBuffer = line + lineBuffer;
             }
           }
         }
-        
-        // Final flush when the stream finishes completely
-        const finalIdKey = streamTargetId || "temp_new_chat";
-        setMessageCache(prev => {
-          const msgs = prev[finalIdKey] || [];
-          if (msgs.length === 0) return prev;
-          const newMsgs = [...msgs];
-          newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], content: fullAssistantMessage };
-          return { ...prev, [finalIdKey]: newMsgs };
-        });
       }
+      return finalSessionId || streamTargetId;
     } catch (error: any) {
-      // Catch the AbortError specifically and swallow it silently
-      if (error.name === 'AbortError') {
-        console.log("Test suite / Inference stopped by user.");
-      } else {
-        console.error("Stream failed", error);
-      }
+      if (error.name !== 'AbortError') console.error("Stream failed", error);
+      return streamTargetId;
     } finally {
       setIsProcessing(false);
-      if (streamTargetId) streamingSessionIdsRef.current.delete(streamTargetId);
+      
+      // Clean up the optimistic ID
+      streamingSessionIdsRef.current.delete(streamTargetId);
+      
+      // THE FIX: Also clean up the real backend ID so the spinner stops!
+      if (finalSessionId) {
+        streamingSessionIdsRef.current.delete(finalSessionId);
+      }
+      
       window.dispatchEvent(new Event("chatCreated"));
     }
-    
-    return streamTargetId;
   }, [workspace, setMessageCache, streamingSessionIdsRef, onSessionCreated]);
 
   return { 
@@ -135,13 +122,7 @@ export function useInference(
     sendMessage, 
     stopInference: (sessionId?: string | null) => {
       const id = sessionId || "temp_new_chat";
-      try {
-        const controller = abortControllersRef.current.get(id);
-        if (controller) {
-          controller.abort();
-          abortControllersRef.current.delete(id);
-        }
-      } catch (e) {}
+      abortControllersRef.current.get(id)?.abort();
     } 
   };
 }
