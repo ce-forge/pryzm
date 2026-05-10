@@ -5,6 +5,7 @@ import { useSession } from "@/hooks/useSession";
 import { useUploader } from "@/hooks/useUploader";
 import { useInference } from "@/hooks/useInference";
 import { useTestSuite } from "@/hooks/useTestSuite";
+import { useMessageActions } from "@/hooks/useMessageActions";
 import { APP_CONFIG } from "@/utils/constants";
 
 const ChatContext = createContext<any>(null);
@@ -96,6 +97,16 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     ai.stopInference(session.currentSession);
   };
 
+  const msgActions = useMessageActions(
+    session.workspace,
+    currentKey,
+    session.messages,
+    session.setMessageCache,
+    ai.sendMessage,
+    session.navigateToSession,
+    selectedModel
+  )
+
   const value = {
     session,
     uploader,
@@ -107,6 +118,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     currentIsTesting,
     handleInference,
     stopAllInference,
+    msgActions
   };
 
   return (

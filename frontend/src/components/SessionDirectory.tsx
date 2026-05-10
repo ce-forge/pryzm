@@ -35,10 +35,8 @@ export default function SessionDirectory() {
   const [foldersLoaded, setFoldersLoaded] = useState(false);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
   
-  // THE FIX: Track the exact workspace the current folders belong to
   const [loadedWorkspace, setLoadedWorkspace] = useState(workspace);
 
-  // Safely save only if the loaded data matches the active workspace
   useEffect(() => {
     if (foldersLoaded && loadedWorkspace === workspace) {
       const openFolders = folders.filter(f => f.isOpen).map(f => f.id);
@@ -52,11 +50,15 @@ export default function SessionDirectory() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
+  // Anti-Flicker: Clear optimistic IDs when a real UUID arrives, fallback to ""
   useEffect(() => {
     if (currentSessionId && currentSessionId !== "temp_new_chat") {
       setSessions(prev => {
         if (!prev.some(s => s.id === currentSessionId)) {
-          return [{ id: currentSessionId, title: "New Chat", is_pinned: false }, ...prev];
+          const optimisticItem = prev.find(s => s.id.startsWith("optimistic-"));
+          const titleToUse = optimisticItem?.title || ""; 
+          const cleaned = prev.filter(s => !s.id.startsWith("optimistic-"));
+          return [{ id: currentSessionId, title: titleToUse, is_pinned: false }, ...cleaned];
         }
         return prev;
       });
@@ -71,7 +73,7 @@ export default function SessionDirectory() {
           const backendHasActive = data.some((s: any) => s.id === currentSessionId);
           if (currentSessionId && currentSessionId !== "temp_new_chat" && !backendHasActive) {
             const existingOptimistic = prev.find(s => s.id === currentSessionId);
-            const placeholder = existingOptimistic || { id: currentSessionId, title: "New Chat", is_pinned: false };
+            const placeholder = existingOptimistic || { id: currentSessionId, title: "", is_pinned: false };
             return [placeholder, ...data];
           }
           return data;
@@ -88,7 +90,7 @@ export default function SessionDirectory() {
         const openSet = savedOpen ? new Set(JSON.parse(savedOpen)) : new Set();
         setFolders(data.map((f: any) => ({ ...f, isOpen: openSet.has(f.id) })));
         setFoldersLoaded(true);
-        setLoadedWorkspace(workspace); // Tag the data with its source workspace
+        setLoadedWorkspace(workspace);
       })
       .catch(err => console.error("Error loading folders:", err));
   }, [API_URL, workspace]);
@@ -150,11 +152,21 @@ export default function SessionDirectory() {
     } catch (err) {}
   };
 
+  // CLEAN FIX: Halt thread for confirm() BEFORE doing state updates.
   const handleDeleteFolder = async (e: React.MouseEvent, folderId: string) => {
+    e.preventDefault();
     e.stopPropagation();
-    if (!confirm("Delete this folder? Sessions inside will not be deleted but will become unsorted.")) return;
-    setFolders(prev => prev.filter(f => f.id !== folderId));
+
+    // 1. Ask first!
+    if (!window.confirm("Delete this folder? Sessions inside will not be deleted but will become unsorted.")) {
+        setActiveFolderDropdown(null);
+        return;
+    }
+
+    // 2. Only do state updates after they explicitly hit OK
     setActiveFolderDropdown(null);
+    setFolders(prev => prev.filter(f => f.id !== folderId));
+    
     try {
       await fetch(`${API_URL}/folders/${folderId}`, { method: "DELETE" });
       fetchSessions(); 
@@ -178,6 +190,13 @@ export default function SessionDirectory() {
 
   return (
     <>
+      <style>{`
+        @keyframes pryzmSlideFade {
+          from { opacity: 0; transform: translateX(-15px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+      `}</style>
+
       <div className="flex items-center justify-between px-3 mt-2 mb-1">
         <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Log Directories</span>
         <button onClick={handleCreateFolder} className="text-gray-500 hover:text-[#e3e3e3] transition-colors p-1" title="New Folder">
@@ -230,7 +249,9 @@ export default function SessionDirectory() {
                 <button 
                     type="button"
                     onClick={(e) => { 
-                      e.stopPropagation(); e.nativeEvent.stopImmediatePropagation();
+                      e.preventDefault(); 
+                      e.stopPropagation(); 
+                      e.nativeEvent.stopImmediatePropagation();
                       setActiveFolderDropdown(activeFolderDropdown === `folder_${folder.id}` ? null : `folder_${folder.id}`); 
                     }}
                     className="p-1 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"

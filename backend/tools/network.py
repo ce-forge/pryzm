@@ -4,8 +4,13 @@ import socket
 import requests
 import time
 import ssl
-from datetime import datetime
+import re
+from datetime import datetime, timezone
 from .registry import tool
+
+def is_safe_hostname(hostname: str) -> bool:
+    """Basic validation to prevent command injection via hostname."""
+    return bool(re.match(r'^[a-zA-Z0-9.-]+$', hostname))
 
 @tool(
     properties={"hostname": {"type": "string", "description": "The hostname or IP. Append '.com' if it's a known web brand."}},
@@ -13,6 +18,10 @@ from .registry import tool
 )
 def execute_ping(hostname: str) -> str:
     """Ping an IP address or hostname to check network connectivity and latency."""
+    
+    if not is_safe_hostname(hostname):
+        return "Error: Invalid hostname provided."
+
     param = '-n' if platform.system().lower() == 'windows' else '-c'
     command = ['ping', param, '3', hostname]
     try:
@@ -59,6 +68,9 @@ def traceroute(hostname: str) -> str:
     is_windows = platform.system().lower() == 'windows'
     command = ['tracert', '-h', '15', hostname] if is_windows else ['traceroute', '-m', '15', hostname]
     
+    if not is_safe_hostname(hostname):
+        return "Error: Invalid hostname provided."
+
     try:
         output = subprocess.check_output(command, stderr=subprocess.STDOUT, universal_newlines=True, timeout=20)
         return f"Traceroute complete:\n{output}"
@@ -81,14 +93,18 @@ def ssl_inspect(hostname: str) -> str:
                 
                 expire_str = cert.get('notAfter')
                 expire_date = datetime.strptime(expire_str, "%b %d %H:%M:%S %Y %Z")
-                days_left = (expire_date - datetime.utcnow()).days
+                
+                expire_date = expire_date.replace(tzinfo=timezone.utc)
+                now_utc = datetime.now(timezone.utc)
+                
+                days_left = (expire_date - now_utc).days
                 
                 return (f"SSL Certificate for {hostname} is VALID.\n"
                         f"Expires on: {expire_date.strftime('%Y-%m-%d')} ({days_left} days remaining).\n"
                         f"Issued to: {cert.get('subject')[0][0][1]}\n"
                         f"Issuer: {cert.get('issuer')[1][0][1]}")
     except Exception as e:
-        return f"SSL inspection failed for {hostname}. The cert may be invalid or the host is down. Details: {str(e)}"
+        return f"SSL inspection failed for {hostname}. Details: {str(e)}"
 
 @tool(properties={}, required=[])
 def get_public_ip() -> str:

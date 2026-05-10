@@ -33,7 +33,8 @@ def get_session_history(session_id: str, db: Session = Depends(database.get_db))
         models.Message.role.in_(["user", "assistant"]) 
     ).order_by(models.Message.created_at).all()
     
-    return[{"role": m.role, 
+    return [{"id": m.id, 
+            "role": m.role, 
             "content": m.content,
             "timestamp": m.created_at.isoformat() if m.created_at else None
             } 
@@ -93,10 +94,13 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
             models.Document.id.in_(request.attachments)
         ).update({"session_id": chat_session.id}, synchronize_session=False)
         db.commit()
-        
-    user_msg = models.Message(session_id=chat_session.id, role="user", content=request.prompt)
-    db.add(user_msg)
-    db.commit()
+
+    if not request.skip_db_save:
+        user_msg = models.Message(session_id=chat_session.id, role="user", content=request.prompt)
+        db.add(user_msg)
+        db.commit()
+    else:
+        print(f"SKIPPING DB SAVE for session {chat_session.id}")
 
     history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
     safe_messages =[{"role": msg.role, "content": msg.content} for msg in history]
@@ -250,3 +254,72 @@ def get_prompts():
 def update_prompts(payload: dict):
     MICRO_PROMPTS.save_prompts(payload)
     return {"status": "success"}
+
+@router.patch("/messages/{message_id}")
+def update_message(message_id: str, payload: dict, db: Session = Depends(database.get_db)):
+    msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    msg.content = payload.get("content", msg.content)
+    db.commit()
+    return {"status": "success"}
+
+@router.delete("/messages/{message_id}")
+def delete_message(message_id: str, db: Session = Depends(database.get_db)):
+    msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+    if not msg:
+        raise HTTPException(status_code=404, detail="Message not found")
+    
+    session_id = msg.session_id
+    db.delete(msg)
+    db.commit()
+    return {"status": "success", "session_id": session_id}
+
+@router.post("/sessions/{session_id}/branch")
+def branch_session(session_id: str, up_to_message_id: str, db: Session = Depends(database.get_db)):
+    # 1. Get original session
+    old_session = db.query(models.Session).filter(models.Session.id == session_id).first()
+    
+    # 2. Create new session
+    new_session = models.Session(
+        title=f"{old_session.title} (Branch)",
+        mode=old_session.mode
+    )
+    db.add(new_session)
+    db.commit()
+    db.refresh(new_session)
+    
+    # 3. Copy messages up to the specific one
+    messages = db.query(models.Message).filter(
+        models.Message.session_id == session_id
+    ).order_by(models.Message.created_at).all()
+    
+    for m in messages:
+        new_msg = models.Message(
+            session_id=new_session.id,
+            role=m.role,
+            content=m.content
+        )
+        db.add(new_msg)
+        if m.id == up_to_message_id:
+            break
+            
+    db.commit()
+    return {"new_session_id": new_session.id}
+
+@router.delete("/sessions/{session_id}/truncate/{message_id}")
+def truncate_session(session_id: str, message_id: str, db: Session = Depends(database.get_db)):
+    """Deletes all messages in a session that occurred AFTER the specified message_id."""
+    target_msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+    if not target_msg:
+        raise HTTPException(status_code=404, detail="Target message not found")
+
+    # Delete everything created after the target message's timestamp in this session
+    deleted_count = db.query(models.Message).filter(
+        models.Message.session_id == session_id,
+        models.Message.created_at > target_msg.created_at
+    ).delete(synchronize_session=False)
+    
+    db.commit()
+    return {"status": "success", "deleted_count": deleted_count}

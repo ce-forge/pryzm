@@ -8,6 +8,9 @@ export function useTestSuite(
 ) {
   const [activeTestSessions, setActiveTestSessions] = useState<Set<string>>(new Set());
   const abortRefs = useRef<Record<string, boolean>>({});
+  
+  // NEW: A dictionary to store ID translations (optimistic -> real backend UUID)
+  const idMapRef = useRef<Record<string, string>>({});
 
   // Prevent accidental refreshes while the test suite is looping
   useEffect(() => {
@@ -23,6 +26,9 @@ export function useTestSuite(
   }, [activeTestSessions.size]);
 
   const linkSession = useCallback((oldId: string, newId: string) => {
+    // Record the translation so the loop can find it
+    idMapRef.current[oldId] = newId;
+
     setActiveTestSessions(prev => {
       if (prev.has(oldId)) {
         const next = new Set(prev);
@@ -56,7 +62,10 @@ export function useTestSuite(
 
       const resultId = await sendMessage(prompt, currentId);
       
-      if (resultId) currentId = resultId;
+      // FIX: Check our translation dictionary to swap optimistic IDs for real DB UUIDs
+      if (resultId) {
+        currentId = idMapRef.current[resultId] || resultId;
+      }
 
       const postPromptId = currentId || initialTrackingId;
       for (let i = 0; i < 30; i++) {

@@ -72,28 +72,3 @@ def search_knowledge_base(query: str, workspace: str, session_id: str = None) ->
         return f"Knowledge base search failed with error: {str(e)}"
     finally:
         db.close()
-
-
-@tool(
-    properties={
-        "new_title": {"type": "string", "description": "The new title to rename the current chat session to."}
-    },
-    required=["new_title"]
-)
-def rename_chat_session(new_title: str, session_id: str = None, workspace: str = None) -> str:
-    """Renames the current chat session to the requested title."""
-    if not session_id:
-        return "Tool execution failed: No active session ID provided."
-    
-    db = SessionLocal()
-    try:
-        session = db.query(Session).filter(Session.id == session_id).first()
-        if session:
-            session.title = new_title
-            db.commit()
-            return f"Success! The chat session has been renamed to '{new_title}'."
-        return "Tool execution failed: Session not found."
-    except Exception as e:
-        return f"Tool execution failed: {str(e)}"
-    finally:
-        db.close()

@@ -8,6 +8,7 @@ class InferenceRequest(BaseModel):
     mode: str = "itCopilot"  
     model: str = "gemma4:e4b"
     attachments: Optional[List[str]] = None
+    skip_db_save: Optional[bool] = False
 
 class SessionResponse(BaseModel):
     id: str
@@ -33,6 +34,7 @@ class FolderUpdate(BaseModel):
     name: str
 
 class MessageHistory(BaseModel):
+    id: str
     role: str
     content: str
     timestamp: Optional[str] = None
