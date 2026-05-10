@@ -175,7 +175,11 @@ export default function ChatInput({
                 </div>
                 
                 {isProcessing ? (
-                    <button type="button" onClick={stopAutoTest} className="p-2 bg-[#333537] hover:bg-red-500/80 rounded-full text-white flex items-center justify-center transition-colors">
+                    <button 
+                      type="button" 
+                      onClick={(e) => { e.preventDefault(); stopAutoTest(); }} // Explicitly block submission
+                      className="p-2 bg-[#333537] hover:bg-red-500/80 rounded-full text-white flex items-center justify-center transition-colors"
+                    >
                         <div className="w-3.5 h-3.5 bg-white rounded-sm"></div>
                     </button>
                 ) : (

@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, RefObject } from "react";
 
-export function useSearch(messages: any[]) { // Add messages as dependency
+export function useSearch(messages: any[], containerRef: RefObject<HTMLElement | null>) { 
   const [searchQuery, setSearchQuery] = useState("");
   const [totalMatches, setTotalMatches] = useState(0);
   const [searchIndex, setSearchIndex] = useState(0);
@@ -8,13 +8,14 @@ export function useSearch(messages: any[]) { // Add messages as dependency
 
   // Synchronize matches with the DOM
   useEffect(() => {
-    if (!searchQuery) {
+    if (!searchQuery || !containerRef.current) {
       setTotalMatches(0);
       return;
     }
 
     const timer = setTimeout(() => {
-      const marks = document.querySelectorAll('.search-match');
+      // Safely scan only inside the chat container
+      const marks = containerRef.current!.querySelectorAll('.search-match');
       setTotalMatches(marks.length);
 
       marks.forEach((mark, i) => {
@@ -32,15 +33,15 @@ export function useSearch(messages: any[]) { // Add messages as dependency
     }, 50);
 
     return () => clearTimeout(timer);
-  }, [searchQuery, searchIndex, messages]);
+  }, [searchQuery, searchIndex, messages, containerRef]);
 
   const scrollToMatch = (index: number) => {
-    if (totalMatches === 0) return;
+    if (totalMatches === 0 || !containerRef.current) return;
     const safeIndex = (index + totalMatches) % totalMatches;
     setSearchIndex(safeIndex);
 
     setTimeout(() => {
-      const marks = document.querySelectorAll('.search-match');
+      const marks = containerRef.current!.querySelectorAll('.search-match');
       if (marks[safeIndex]) marks[safeIndex].scrollIntoView({ behavior: "smooth", block: "center" });
     }, 10);
   };

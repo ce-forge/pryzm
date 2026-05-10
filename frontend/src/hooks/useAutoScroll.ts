@@ -30,5 +30,5 @@ export function useAutoScroll(dependencies: any[]) {
     }
   };
 
-  return { scrollRef, onScroll, setIsAutoScrollEnabled };
+  return { scrollRef, onScroll, setIsAutoScrollEnabled, scrollToBottom };
 }

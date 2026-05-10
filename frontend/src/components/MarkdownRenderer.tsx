@@ -38,7 +38,9 @@ const CodeBlock = ({ language, value }: { language: string, value: string }) => 
     </div>
   );
 };
-export default function MarkdownRenderer({ content, searchQuery }: { content: string, searchQuery?: string }) {
+
+// FIX: Changed from "export default function" to just "function"
+function MarkdownRenderer({ content, searchQuery }: { content: string, searchQuery?: string }) {
   
   const highlightText = (text: string, query: string): React.ReactNode => {
     if (!query) return text;
@@ -51,8 +53,8 @@ export default function MarkdownRenderer({ content, searchQuery }: { content: st
           key={i} 
           className="search-match rounded-[3px] px-0.5 text-inherit transition-colors duration-200"
           style={{ 
-            backgroundColor: 'rgba(59, 130, 246, 0.2)', // Matches bg-blue-500/20
-            color: '#93c5fd'                            // Matches text-blue-300
+            backgroundColor: 'rgba(59, 130, 246, 0.2)',
+            color: '#93c5fd'
           }}
         >
           {part}
@@ -156,3 +158,6 @@ export default function MarkdownRenderer({ content, searchQuery }: { content: st
     </ReactMarkdown>
   );
 }
+
+// FIX: Wrap the export in React.memo!
+export default React.memo(MarkdownRenderer);

@@ -1,9 +1,10 @@
 "use client";
 
-import React, { useRef } from "react";
-import { Message, FileUpload } from "@/types/chat"; 
+import React, { useRef, useEffect } from "react";
+import { useChatContext } from "@/context/ChatContext"; 
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useSearch } from "@/hooks/useSearch";
+import { usePrompt } from "@/hooks/usePrompt";
 import MarkdownRenderer from "./MarkdownRenderer";
 import ChatInput from "./ChatInput";
 import ChatHeader from "./ChatHeader";
@@ -14,94 +15,109 @@ import ChatTimestamp from "./ChatTimestamp";
 import UserMessage from "./UserMessage";
 
 interface ActiveSessionProps {
-  workspace: string;
-  sessionTitle: string;
-  messages: Message[];
-  prompt: string;
-  setPrompt: (p: string) => void;
-  uploads: FileUpload[];
-  setUploads: React.Dispatch<React.SetStateAction<FileUpload[]>>;
-  isProcessing: boolean;
-  isAutoTesting: boolean;
-  handleInference: (e?: React.FormEvent) => void; 
-  stopAutoTest: () => void;
-  handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  runTestSuite: (type: "it_demo" | "memory_test" | "tool_chain") => void;
-  processUploadQueue: (files: FileUpload[]) => void;
-  totalTokens: number;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (val: boolean) => void;
-  isLoadingHistory?: boolean;
 }
 
-export default function ActiveSession(props: ActiveSessionProps) {
+export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: ActiveSessionProps) {
   const { 
-    messages, isProcessing, isAutoTesting, prompt, setPrompt, 
-    uploads, setUploads, handleInference, stopAutoTest, 
-    handleKeyDown, runTestSuite, processUploadQueue, totalTokens,
-    workspace, sessionTitle, isSidebarOpen, setIsSidebarOpen, isLoadingHistory
-  } = props;
+    session, uploader, ai, tester, 
+    currentIsProcessing, currentIsTesting, 
+    handleInference, stopAllInference 
+  } = useChatContext();
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const terminalEndRef = useRef<HTMLDivElement>(null);
-  const { scrollRef, onScroll } = useAutoScroll(messages);
+  const messages = session.isInitialLoading ? [] : session.messages;
   
-  const search = useSearch(messages);
+  // THE FIX: Isolated streaming text per session ID
+  const activeSessionKey = session.currentSession || "temp_new_chat";
+  const myStreamingText = ai.streamingContent[activeSessionKey];
+
+  // THE FIX: Computed Title logic to prevent "Ghost Titles"
+  // If we have no ID or an optimistic one, we FORCE an empty title
+  const activeTitle = (!session.currentSession || session.currentSession.startsWith("optimistic-")) 
+    ? "" 
+    : session.sessionTitle;
+
+  const promptState = usePrompt(messages);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  
+  const { scrollRef, onScroll, scrollToBottom } = useAutoScroll(messages);
+
+  useEffect(() => {
+    if (currentIsProcessing && myStreamingText) {
+      scrollToBottom();
+    }
+  }, [myStreamingText, currentIsProcessing, scrollToBottom]);
+
+  const search = useSearch(messages, chatContainerRef);
+
+  const onLocalSubmit = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!promptState.prompt.trim() || currentIsProcessing) return;
+    
+    handleInference(promptState.prompt);
+    promptState.saveToHistory(promptState.prompt);
+    promptState.setPrompt(""); 
+  };
 
   return (
     <div className="flex flex-col flex-1 min-w-0 h-full bg-[#131314]">
-      <ChatHeader {...props} rightActions={<SearchBar {...search} />} />
+      <ChatHeader 
+         workspace={session.workspace} 
+         sessionTitle={activeTitle} // Use our new computed title here
+         isSidebarOpen={isSidebarOpen} 
+         setIsSidebarOpen={setIsSidebarOpen} 
+         rightActions={<SearchBar {...search} />} 
+      />
       
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-6 flex flex-col items-center custom-scrollbar">
-        <div className="w-full max-w-3xl space-y-6 flex flex-col min-h-full">
-            {messages.length === 0 && !isLoadingHistory && (
-              <QuickActions setPrompt={setPrompt} inputRef={textareaRef} />
+        <div ref={chatContainerRef} className="w-full max-w-3xl space-y-6 flex flex-col min-h-full">
+            {messages.length === 0 && !session.isInitialLoading && (
+              <QuickActions setPrompt={promptState.setPrompt} inputRef={textareaRef} />
             )}
 
-            {messages.map((m, i) => (
-              <React.Fragment key={i}>
-                <ChatTimestamp 
-                  timestamp={m.timestamp} 
-                  previousTimestamp={i > 0 ? messages[i-1].timestamp : undefined}
-                  isFirstMessage={i === 0}
-                />
-                
-                <div id={`msg-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`text-[15px] leading-relaxed ${m.role === 'user' ? 'bg-[#1e1f20] text-[#e3e3e3] rounded-3xl py-2.5 px-5 max-w-[80%] whitespace-pre-wrap' : 'text-[#e3e3e3] w-full max-w-full overflow-hidden'}`}>
-                        {m.role === "user" ? (
-                          <UserMessage 
-                            content={m.content} 
-                            searchQuery={search.searchQuery} 
-                          />
-                        ) : (
-                          <MarkdownRenderer 
-                            content={m.content} 
-                            searchQuery={search.searchQuery} 
-                          />
-                        )}
-                    </div>
-                </div>
-              </React.Fragment>
-            ))}
+            {messages.map((m: any, i: number) => {
+              const isLastAndStreaming = currentIsProcessing && i === messages.length - 1 && m.role === "assistant";
+              const displayContent = isLastAndStreaming ? (myStreamingText || m.content) : m.content;
+
+              return (
+                <React.Fragment key={i}>
+                  <ChatTimestamp timestamp={m.timestamp} previousTimestamp={i > 0 ? messages[i-1].timestamp : undefined} isFirstMessage={i === 0} />
+                  <div id={`msg-${i}`} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`text-[15px] leading-relaxed ${m.role === 'user' ? 'bg-[#1e1f20] text-[#e3e3e3] rounded-3xl py-2.5 px-5 max-w-[80%] whitespace-pre-wrap' : 'text-[#e3e3e3] w-full max-w-full overflow-hidden'}`}>
+                          {m.role === "user" ? (
+                            <UserMessage content={displayContent} searchQuery={search.searchQuery} />
+                          ) : (
+                            <MarkdownRenderer content={displayContent} searchQuery={search.searchQuery} />
+                          )}
+                      </div>
+                  </div>
+                </React.Fragment>
+              );
+            })}
             
-            {isProcessing && messages.length > 0 && messages[messages.length - 1].role === "assistant" && !messages[messages.length - 1].content && (
+            {currentIsProcessing && messages.length > 0 && messages[messages.length - 1].role === "assistant" && !myStreamingText && !messages[messages.length - 1].content && (
               <ProcessingAnimation />
             )}
-            
             <div className="h-6 shrink-0" />
-            <div ref={terminalEndRef} />
          </div>
       </div>
 
       <div className="shrink-0 pb-6 px-4 flex flex-col items-center">
         <ChatInput 
-          prompt={prompt} setPrompt={setPrompt}
-          uploads={uploads} setUploads={setUploads}
-          isProcessing={isProcessing} isAutoTesting={isAutoTesting}
-          handleInference={handleInference} stopAutoTest={stopAutoTest}
-          handleKeyDown={handleKeyDown} runTestSuite={runTestSuite}
-          processUploadQueue={processUploadQueue} totalTokens={totalTokens}
-          inputRef={textareaRef}
+          prompt={promptState.prompt} 
+          setPrompt={promptState.setPrompt}
+          uploads={uploader.uploads} 
+          setUploads={uploader.setUploads}
+          isProcessing={currentIsProcessing} 
+          isAutoTesting={currentIsTesting}
+          handleInference={onLocalSubmit} 
+          stopAutoTest={stopAllInference}
+          handleKeyDown={(e: any) => promptState.handleKeyDown(e, onLocalSubmit)} 
+          runTestSuite={(type: any) => tester.runTestSuite(type, session.currentSession)}
+          processUploadQueue={(files: any) => uploader.processUploadQueue(files, session.currentSession)} 
+          totalTokens={promptState.totalTokens} inputRef={textareaRef}
         />
       </div>
     </div>

@@ -13,12 +13,16 @@ export function useSession() {
   const [currentSession, setCurrentSession] = useState<string | null>(urlSessionId);
   const [sessionTitle, setSessionTitle] = useState("");
   const [messageCache, setMessageCache] = useState<Record<string, Message[]>>({});
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   const streamingSessionIdsRef = useRef<Set<string>>(new Set());
   const isNavigatingRef = useRef(false);
 
   const activeCacheKey = currentSession || "temp_new_chat";
+  const hasHistory = (messageCache[activeCacheKey]?.length || 0) > 0;
+  const isActivelyStreaming = streamingSessionIdsRef.current.has(activeCacheKey) || 
+                               streamingSessionIdsRef.current.has("temp_new_chat");;
+  const isInitialLoading = !!currentSession && currentSession !== "temp_new_chat" && !hasHistory && !isActivelyStreaming;
+  
   const messages = messageCache[activeCacheKey] || [];
 
   useEffect(() => {
@@ -55,20 +59,16 @@ export function useSession() {
     async function loadSessionData() {
       if (!currentSession) {
         setSessionTitle("");
-        setIsInitialLoading(false);
         return;
       }
 
-      // 1. Check if this session is currently being streamed into
-      const isActivelyStreaming = streamingSessionIdsRef.current.has(currentSession || "temp_new_chat");
-
-      // 2. Only trigger the loading wipe if it's an old chat we are loading from scratch
-      if (!isActivelyStreaming) {
-        setIsInitialLoading(true);
+      if (currentSession.startsWith("optimistic-")) {
+        setSessionTitle("");
+        return;
       }
 
-      // 3. Only fetch history from the DB if we don't have it AND it's not currently streaming
-      if (!messageCache[currentSession] && !isActivelyStreaming) {
+      const isOptimistic = currentSession.startsWith("optimistic-");
+      if (!isOptimistic && (messageCache[currentSession]?.length || 0) === 0) {
         try {
           const historyRes = await fetch(`${APP_CONFIG.API_URL}/sessions/${currentSession}`, { cache: 'no-store' });
           if (historyRes.ok) {
@@ -76,19 +76,44 @@ export function useSession() {
             setMessageCache(prev => ({ ...prev, [currentSession]: historyData }));
           }
         } catch (error) { 
-          console.error("Sync failed:", error); 
+          console.error("History sync failed:", error); 
         }
       }
 
-      // 4. Always ensure the title is up to date
-      await fetchTitle();
-      
-      // 5. Release the loading lock
-      setIsInitialLoading(false);
+      if (!isOptimistic && (messageCache[currentSession]?.length || 0) === 0) {
+        try {
+          const historyRes = await fetch(`${APP_CONFIG.API_URL}/sessions/${currentSession}`, { cache: 'no-store' });
+          if (historyRes.ok) {
+            const historyData = await historyRes.json();
+            setMessageCache(prev => ({ ...prev, [currentSession]: historyData }));
+          }
+        } catch (error) { 
+          console.error("History sync failed:", error); 
+        }
+      }
+
+      if (!isOptimistic) {
+        try {
+          const listRes = await fetch(`${APP_CONFIG.API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' });
+          if (listRes.ok) {
+            const sessions = await listRes.json();
+            const activeSesh = sessions.find((s: any) => s.id === currentSession);
+            
+            if (activeSesh) {
+              const unwanted = ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"];
+              setSessionTitle(unwanted.includes(activeSesh.title) ? "" : activeSesh.title);
+            } else {
+              setSessionTitle("");
+            }
+          }
+        } catch (e) {
+          console.error("Title fetch failed:", e);
+        }
+      }
     }
-    
+
     loadSessionData();
-  }, [currentSession, workspace, fetchTitle]); // Added fetchTitle to deps
+  }, [currentSession, workspace]);
 
   const navigateToSession = useCallback((id: string) => {
     isNavigatingRef.current = true;

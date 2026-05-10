@@ -5,7 +5,7 @@ interface UserMessageProps {
   searchQuery: string;
 }
 
-export default function UserMessage({ content, searchQuery }: UserMessageProps) {
+function UserMessage({ content, searchQuery }: UserMessageProps) {
   const attachmentRegex = /\[Attached_File:(.*?)\]/g;
   const attachments: string[] = [];
   let match;
@@ -42,3 +42,6 @@ export default function UserMessage({ content, searchQuery }: UserMessageProps) 
     </div>
   );
 }
+
+// FIX: Wrap the export in React.memo!
+export default React.memo(UserMessage);
