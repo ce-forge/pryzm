@@ -201,7 +201,7 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                 words = content.split(" ")
                 for i, word in enumerate(words):
                     yield word + (" " if i < len(words) - 1 else "")
-                    time.sleep(0.02)
+                    time.sleep(0.01)
                 
                 finished_cleanly = True
                 break

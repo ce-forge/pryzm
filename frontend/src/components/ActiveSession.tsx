@@ -28,12 +28,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
 
   const messages = session.isInitialLoading ? [] : session.messages;
   
-  // THE FIX: Isolated streaming text per session ID
   const activeSessionKey = session.currentSession || "temp_new_chat";
   const myStreamingText = ai.streamingContent[activeSessionKey];
 
-  // THE FIX: Computed Title logic to prevent "Ghost Titles"
-  // If we have no ID or an optimistic one, we FORCE an empty title
   const activeTitle = (!session.currentSession || session.currentSession.startsWith("optimistic-")) 
     ? "" 
     : session.sessionTitle;
@@ -65,7 +62,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     <div className="flex flex-col flex-1 min-w-0 h-full bg-[#131314]">
       <ChatHeader 
          workspace={session.workspace} 
-         sessionTitle={activeTitle} // Use our new computed title here
+         sessionTitle={activeTitle} 
          isSidebarOpen={isSidebarOpen} 
          setIsSidebarOpen={setIsSidebarOpen} 
          rightActions={<SearchBar {...search} />} 
@@ -114,10 +111,11 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
           isAutoTesting={currentIsTesting}
           handleInference={onLocalSubmit} 
           stopAutoTest={stopAllInference}
-          handleKeyDown={(e: any) => promptState.handleKeyDown(e, onLocalSubmit)} 
-          runTestSuite={(type: any) => tester.runTestSuite(type, session.currentSession)}
-          processUploadQueue={(files: any) => uploader.processUploadQueue(files, session.currentSession)} 
-          totalTokens={promptState.totalTokens} inputRef={textareaRef}
+          handleKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => promptState.handleKeyDown(e, onLocalSubmit)} 
+          runTestSuite={(type: "it_demo" | "memory_test" | "tool_chain") => tester.runTestSuite(type, session.currentSession)}
+          processUploadQueue={(files: any[]) => uploader.processUploadQueue(files, session.currentSession)} 
+          totalTokens={promptState.totalTokens} 
+          inputRef={textareaRef}
         />
       </div>
     </div>

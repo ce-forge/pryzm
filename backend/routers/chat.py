@@ -83,10 +83,16 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
         db.add(chat_session)
         db.commit()
         db.refresh(chat_session)
-    elif chat_session.title in["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
+    elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
         chat_session.title = ai_engine.generate_title(request.prompt, request.model)
         db.commit()
         db.refresh(chat_session)
+        
+    if request.attachments:
+        db.query(models.Document).filter(
+            models.Document.id.in_(request.attachments)
+        ).update({"session_id": chat_session.id}, synchronize_session=False)
+        db.commit()
         
     user_msg = models.Message(session_id=chat_session.id, role="user", content=request.prompt)
     db.add(user_msg)
@@ -178,6 +184,7 @@ async def upload_document(
     file: UploadFile = File(...), 
     workspace: str = Form("it_copilot"),
     session_id: Optional[str] = Form(None), 
+    is_global: bool = Form(False),  # <-- ADDED
     db: Session = Depends(database.get_db)
 ):
     content = await file.read()
@@ -186,23 +193,21 @@ async def upload_document(
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="Only UTF-8 text files are currently supported.")
         
-    active_session_id = session_id
-    
-    if active_session_id and active_session_id not in ["null", "undefined"]:
-        existing_session = db.query(models.Session).filter(models.Session.id == active_session_id).first()
-        
-        if not existing_session:
-            new_session = models.Session(id=active_session_id, title="Document Upload Session", mode=workspace)
-            db.add(new_session)
-            db.commit()
-    else:
-        new_session = models.Session(title="Document Upload Session", mode=workspace)
-        db.add(new_session)
-        db.commit()
-        db.refresh(new_session)
-        active_session_id = new_session.id
+    active_session_id = None
+    if session_id and session_id not in ["null", "undefined", "temp_new_chat", ""]:
+        existing_session = db.query(models.Session).filter(models.Session.id == session_id).first()
+        if existing_session:
+            active_session_id = session_id
 
-    result = knowledge.ingest_document(db, file.filename, text_content, workspace, active_session_id)
+    # Passed to knowledge.ingest_document
+    result = knowledge.ingest_document(
+        db=db, 
+        filename=file.filename, 
+        content=text_content, 
+        workspace=workspace, 
+        session_id=active_session_id, 
+        is_global=is_global 
+    )
     
     return {
         "message": f"Successfully ingested {file.filename}", 

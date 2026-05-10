@@ -7,6 +7,7 @@ class InferenceRequest(BaseModel):
     prompt: str = Field(..., max_length=100000) 
     mode: str = "itCopilot"  
     model: str = "gemma4:e4b"
+    attachments: Optional[List[str]] = None
 
 class SessionResponse(BaseModel):
     id: str

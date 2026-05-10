@@ -6,6 +6,7 @@ export interface Message {
 
 export interface FileUpload {
   id: string;
+  document_id?: string;
   file: File;
   status: "pending" | "uploading" | "success" | "error";
   progress: number;

@@ -36,28 +36,25 @@ class Folder(Base):
     workspace = Column(String)
 
 class Document(Base):
-    """Tracks files that have been uploaded to the knowledge base."""
     __tablename__ = "documents"
     
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     filename = Column(String, nullable=False)
     workspace = Column(String, default="it_copilot") 
-
-    session = relationship("Session", back_populates="documents")    
     session_id = Column(String, ForeignKey("sessions.id"))
     
+    is_global = Column(Boolean, default=False) # THE FIX: Explicit Global Identifier
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    session = relationship("Session", back_populates="documents")    
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
 class DocumentChunk(Base):
-    """Stores the actual paragraphs and their mathematical AI vectors."""
     __tablename__ = "document_chunks"
     
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), index=True)
-    
     content = Column(Text, nullable=False)
-    
     embedding = Column(Vector(768)) 
-    
     document = relationship("Document", back_populates="chunks")

@@ -10,7 +10,6 @@ OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 EMBED_MODEL = "nomic-embed-text"
 
 def get_embedding(text: str) -> list[float]:
-    """Calls Ollama to convert text into a 768-dimensional mathematical vector."""
     url = f"{OLLAMA_URL}/api/embeddings"
     payload = {
         "model": EMBED_MODEL,
@@ -20,8 +19,9 @@ def get_embedding(text: str) -> list[float]:
     response.raise_for_status()
     return response.json().get("embedding",[])
 
-def ingest_document(db: Session, filename: str, content: str, workspace: str = "itCopilot", session_id: str = None):
-    new_doc = models.Document(filename=filename, workspace=workspace, session_id=session_id)
+# Passed the new is_global flag
+def ingest_document(db: Session, filename: str, content: str, workspace: str = "itCopilot", session_id: str = None, is_global: bool = False):
+    new_doc = models.Document(filename=filename, workspace=workspace, session_id=session_id, is_global=is_global)
     db.add(new_doc)
     db.commit()
     db.refresh(new_doc)
@@ -74,12 +74,13 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
 
     distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
     
+    # Filter updated to check is_global instead of None
     results = (
         db.query(models.DocumentChunk)
         .join(models.Document)
         .filter(
             models.Document.workspace == workspace,
-            or_(models.Document.session_id == None, models.Document.session_id == session_id),
+            or_(models.Document.session_id == session_id, models.Document.is_global == True),
             distance < 0.65
         )
         .order_by(distance)
@@ -90,13 +91,14 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
     if not results:
         clean_query = query.lower().replace("what is the ", "").replace("who is ", "").replace("what is ", "").strip()
         
+        # Filter updated to check is_global instead of None
         results = (
             db.query(models.DocumentChunk)
             .join(models.Document)
             .filter(
                 models.Document.workspace == workspace,
-                or_(models.Document.session_id == None, models.Document.session_id == session_id),
-                models.DocumentChunk.content.ilike(f"%{clean_query}%") # Traditional SQL text match
+                or_(models.Document.session_id == session_id, models.Document.is_global == True),
+                models.DocumentChunk.content.ilike(f"%{clean_query}%") 
             )
             .limit(top_k)
             .all()

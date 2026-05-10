@@ -1,117 +1,139 @@
-import React, { useRef } from "react";
+import React, { useState, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { LoadingIcon } from "./Icons";
 
 interface SessionItemProps {
-  s: {
-    id: string;
-    title: string;
-    is_pinned?: boolean;
-  };
+  s: { id: string; title: string; is_pinned?: boolean; folder_id?: string | null };
   workspace: string;
   currentSessionId: string | null;
   isStreaming?: boolean;
-  editingId: string | null;
-  editTitle: string;
-  setEditTitle: (val: string) => void;
-  handleRenameSubmit: (e: React.FormEvent, id: string) => void;
-  activeDropdown: string | null;
-  setActiveDropdown: (val: string | null) => void;
-  togglePin: (e: React.MouseEvent, id: string, currentPinned: boolean) => void;
-  handleDelete: (e: React.MouseEvent, id: string) => void;
-  setEditingId: (id: string | null) => void;
+  setSessions: React.Dispatch<React.SetStateAction<any[]>>;
 }
 
 export default function SessionItem({
-  s, workspace, currentSessionId, isStreaming,
-  editingId, editTitle, setEditTitle,
-  handleRenameSubmit, activeDropdown, setActiveDropdown, 
-  togglePin, handleDelete, setEditingId
+  s, workspace, currentSessionId, isStreaming, setSessions
 }: SessionItemProps) {
-  
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const router = useRouter();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(s.title);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
 
-  useOnClickOutside(dropdownRef, () => {
-    if (activeDropdown === s.id) {
-      setActiveDropdown(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  useOnClickOutside(dropdownRef, () => setIsDropdownOpen(false));
+
+  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+  const handleRenameSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editTitle.trim()) {
+        setIsEditing(false);
+        return setEditTitle(s.title);
     }
-  });
+    
+    setSessions(prev => prev.map(item => item.id === s.id ? { ...item, title: editTitle } : item));
+    setIsEditing(false);
+    
+    try {
+      await fetch(`${API_URL}/sessions/${s.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: editTitle })
+      });
+    } catch (err) { console.error("Rename failed", err); }
+  };
+
+  const togglePin = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const newStatus = !s.is_pinned;
+    
+    setSessions(prev => prev.map(item => item.id === s.id ? { ...item, is_pinned: newStatus } : item));
+    setIsDropdownOpen(false);
+    
+    try {
+      await fetch(`${API_URL}/sessions/${s.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ is_pinned: newStatus })
+      });
+    } catch (err) { console.error("Pin failed", err); }
+  };
+
+  const handleDelete = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsDropdownOpen(false);
+    if (!confirm("Delete this log?")) return;
+
+    setSessions(prev => prev.filter(item => item.id !== s.id));
+    if (currentSessionId === s.id) router.push(`/?workspace=${workspace}`);
+
+    try {
+      await fetch(`${API_URL}/sessions/${s.id}`, { method: "DELETE" });
+    } catch (err) { console.error("Delete failed", err); }
+  };
+
+  // Class Name Helpers
+  const isActive = currentSessionId === s.id;
+  const containerClasses = `group flex flex-col rounded-lg transition-colors mb-0.5 ${isActive ? 'bg-[#282a2c]' : 'hover:bg-[#282a2c]/50'}`;
+  const linkClasses = `truncate flex-1 px-3 py-2 text-sm ${isActive ? 'text-[#e3e3e3]' : 'text-gray-400 group-hover:text-[#e3e3e3]'}`;
 
   return (
     <div 
-      draggable 
+      draggable
       onDragStart={(e) => e.dataTransfer.setData("application/x-pryzm-session", s.id)}
-      className={`group flex flex-col rounded-lg transition-colors cursor-grab active:cursor-grabbing mb-0.5 ${currentSessionId === s.id ? 'bg-[#282a2c]' : 'hover:bg-[#282a2c]/50'}`}
+      className={containerClasses}
     >
-      <div className="flex items-center justify-between w-full">
-        {editingId === s.id ? (
-          <form onSubmit={(e) => handleRenameSubmit(e, s.id)} className="flex-1 px-3 py-1.5">
+      <div className="flex items-center justify-between w-full relative">
+        
+        {isEditing ? (
+          <form onSubmit={handleRenameSubmit} className="flex-1 px-3 py-1.5">
             <input 
               autoFocus 
               value={editTitle} 
               onChange={(e) => setEditTitle(e.target.value)} 
-              onBlur={(e) => handleRenameSubmit(e, s.id)} 
+              onBlur={handleRenameSubmit} 
               className="w-full bg-[#131314] text-[#e3e3e3] text-sm px-2 py-0.5 rounded outline-none border border-blue-500/50" 
             />
           </form>
         ) : (
-          <Link 
-            href={`/?workspace=${workspace}&session=${s.id}`} 
-            className={`truncate flex-1 min-w-0 px-3 py-2 text-sm transition-colors ${currentSessionId === s.id ? 'text-[#e3e3e3]' : 'text-gray-400 group-hover:text-[#e3e3e3]'}`}
-          >
+          <Link href={`/?workspace=${workspace}&session=${s.id}`} className={linkClasses}>
              {s.title}
           </Link>
         )}
         
-        {editingId !== s.id && (
-          <div className="flex-shrink-0 flex items-center gap-1.5 pr-2 relative" ref={dropdownRef}>
-            
-            {isStreaming && (
-              <LoadingIcon className="w-3.5 h-3.5 text-gray-500 shrink-0 mr-1" />
-            )}
-
+        <div className="flex items-center gap-1 pr-2 relative" ref={dropdownRef}>
+            {isStreaming && <LoadingIcon className="w-3 h-3 text-gray-500 shrink-0" />}
             {s.is_pinned && (
-               <svg className="w-3.5 h-3.5 text-gray-500 opacity-70 shrink-0" fill="currentColor" viewBox="0 0 24 24">
-                 <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6l.8 1.2.8-1.2v-6H19v-2l-2-2z" />
-               </svg>
+              <svg className="w-3 h-3 text-gray-500 opacity-70" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6l.8 1.2.8-1.2v-6H19v-2l-2-2z" />
+              </svg>
             )}
             
             <button 
                type="button"
-               onClick={(e) => { 
-                  e.stopPropagation();
-                  setActiveDropdown(activeDropdown === s.id ? null : s.id); 
-               }}
-               className="p-1 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity z-10"
+               onClick={(e) => { e.stopPropagation(); setIsDropdownOpen(!isDropdownOpen); }}
+               className="p-1 text-gray-500 hover:text-white opacity-0 group-hover:opacity-100 transition-opacity"
             >
-               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
                </svg>
             </button>
 
-            {activeDropdown === s.id && (
-               <div className="absolute right-0 top-[90%] mt-1 w-28 bg-[#282a2c] border border-[#333537] rounded-lg shadow-xl z-50 overflow-hidden flex flex-col py-1" onClick={e => e.stopPropagation()}>
-                 <button onClick={(e) => togglePin(e, s.id, !!s.is_pinned)} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
-                   {s.is_pinned ? "Unpin" : "Pin to Top"}
+            {isDropdownOpen && (
+               <div className="absolute right-0 top-full mt-1 w-28 bg-[#282a2c] border border-[#333537] rounded-lg shadow-xl z-[60] overflow-hidden flex flex-col py-1">
+                 <button onClick={togglePin} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
+                    {s.is_pinned ? "Unpin" : "Pin"}
                  </button>
-                 <button onClick={(e) => { 
-                   setEditingId(s.id); 
-                   setEditTitle(s.title); 
-                   setActiveDropdown(null); 
-                 }} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
-                   Rename
+                 <button onClick={() => { setIsEditing(true); setIsDropdownOpen(false); }} className="text-left px-3 py-1.5 text-xs hover:bg-[#333537] text-gray-300">
+                    Rename
                  </button>
-                 <button onClick={(e) => { 
-                   setActiveDropdown(null);
-                   handleDelete(e, s.id); 
-                 }} className="text-left px-3 py-1.5 text-xs hover:bg-red-500/10 text-red-400">
-                   Delete
+                 <button onClick={handleDelete} className="text-left px-3 py-1.5 text-xs hover:bg-red-500/10 text-red-400">
+                    Delete
                  </button>
                </div>
             )}
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

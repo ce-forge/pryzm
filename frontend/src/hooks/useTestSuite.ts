@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import testSuiteData from "../data/test_suite.json";
 
 const testSuitePrompts = testSuiteData as Record<string, string[]>;
@@ -8,6 +8,19 @@ export function useTestSuite(
 ) {
   const [activeTestSessions, setActiveTestSessions] = useState<Set<string>>(new Set());
   const abortRefs = useRef<Record<string, boolean>>({});
+
+  // Prevent accidental refreshes while the test suite is looping
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (activeTestSessions.size > 0) {
+        e.preventDefault();
+        e.returnValue = "Test suite is running. If you refresh, it will be interrupted.";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [activeTestSessions.size]);
 
   const linkSession = useCallback((oldId: string, newId: string) => {
     setActiveTestSessions(prev => {
@@ -27,7 +40,6 @@ export function useTestSuite(
   }, []);
 
   const runTestSuite = async (type: string, targetSessionId: string | null) => {
-    // If starting from scratch, track under temp ID
     const initialTrackingId = targetSessionId || "temp_new_chat";
     
     if (activeTestSessions.has(initialTrackingId)) return;
@@ -39,16 +51,13 @@ export function useTestSuite(
     let currentId = targetSessionId;
 
     for (const prompt of prompts) {
-      // Use currentId if we have one, otherwise initial tracking ID
       const trackingId = currentId || initialTrackingId;
       if (abortRefs.current[trackingId]) break;
 
       const resultId = await sendMessage(prompt, currentId);
       
-      // Update local pointer if ID changed (Optimistic -> UUID)
       if (resultId) currentId = resultId;
 
-      // Pause for visual feedback
       const postPromptId = currentId || initialTrackingId;
       for (let i = 0; i < 30; i++) {
         if (abortRefs.current[postPromptId]) break;
@@ -67,7 +76,6 @@ export function useTestSuite(
   const stopTestSuite = (sessionId: string | null) => {
     const id = sessionId || "temp_new_chat";
     abortRefs.current[id] = true;
-    // Also check for any optimistic IDs matching this session in abortRefs
     Object.keys(abortRefs.current).forEach(key => {
         if (key.startsWith('optimistic-')) abortRefs.current[key] = true;
     });
