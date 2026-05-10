@@ -13,7 +13,7 @@ import SearchBar from "./SearchBar";
 import ChatTimestamp from "./ChatTimestamp";
 import ChatBubble from "./ChatBubble";
 import AssistantMessage from "./AssistantMessage";
-import ConfirmModal from "./ConfirmModal"; // NEW IMPORT
+import ConfirmModal from "./ConfirmModal";
 
 export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) {
   const { session, uploader, ai, tester, msgActions, currentIsProcessing, currentIsTesting, handleInference, stopAllInference } = useChatContext();
@@ -29,7 +29,12 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, index: number } | null>(null);
 
   useEffect(() => {
-    if (currentIsProcessing && myStreamingText) scrollToBottom();
+    if (currentIsProcessing && myStreamingText) {
+      scrollToBottom();
+    } else if (!currentIsProcessing) {
+      const timer = setTimeout(() => scrollToBottom(), 50);
+      return () => clearTimeout(timer);
+    }
   }, [myStreamingText, currentIsProcessing, scrollToBottom]);
 
   const search = useSearch(messages, chatContainerRef);
@@ -45,11 +50,13 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
   }, [promptState, currentIsProcessing, handleInference]);
 
   return (
-    <div className="flex flex-col flex-1 h-full bg-[#131314]">
+    // FIX: Added w-full max-w-[100vw] overflow-hidden to clamp viewport width
+    <div className="flex flex-col flex-1 h-full w-full max-w-[100vw] overflow-hidden bg-[#131314]">
       <ChatHeader workspace={session.workspace} sessionTitle={session.sessionTitle} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} rightActions={<SearchBar {...search} />} />
       
-      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto px-4 py-2 custom-scrollbar">
-        <div ref={chatContainerRef} className="w-full max-w-3xl mx-auto flex flex-col min-h-full">
+      {/* FIX: Added min-w-0 to ensure flex shrinking */}
+      <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto overflow-x-hidden px-2 sm:px-4 py-2 custom-scrollbar w-full min-w-0">
+        <div ref={chatContainerRef} className="w-full max-w-3xl mx-auto flex flex-col min-h-full pb-24 min-w-0">
             
             {messages.length === 0 && !session.isInitialLoading && !currentIsProcessing && (
               <QuickActions setPrompt={promptState.setPrompt} inputRef={textareaRef} />
@@ -58,7 +65,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
             {messages.map((m: any, i: number) => {
               const isLastStreaming = currentIsProcessing && i === messages.length - 1 && m.role === "assistant";
               if (isLastStreaming) return (
-                <div key="stream" className="w-full mb-8"><AssistantMessage content={myStreamingText || m.content} searchQuery={search.searchQuery} /></div>
+                <div key="stream" className="w-full mb-8 min-w-0 break-words">
+                  <AssistantMessage content={myStreamingText || m.content} searchQuery={search.searchQuery} />
+                </div>
               );
 
               return (
@@ -73,7 +82,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
          </div>
       </div>
 
-      <div className="shrink-0 pb-6 px-4 bg-gradient-to-t from-[#131314] to-transparent">
+      <div className="shrink-0 pb-6 px-4 w-full flex justify-center bg-gradient-to-t from-[#131314] to-transparent">
         <ChatInput 
             prompt={promptState.prompt} setPrompt={promptState.setPrompt} uploads={uploader.uploads} setUploads={uploader.setUploads}
             isProcessing={currentIsProcessing} isAutoTesting={currentIsTesting} handleInference={onSubmit} stopAutoTest={stopAllInference}
@@ -84,7 +93,6 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
         />
       </div>
 
-      {/* SWAPPED TO THE NEW COMPONENT */}
       <ConfirmModal 
         isOpen={!!deleteConfirm}
         title="Delete Message?"
