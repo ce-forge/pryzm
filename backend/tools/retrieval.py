@@ -32,7 +32,7 @@ def search_knowledge_base(query: str, workspace: str, session_id: str = None) ->
             .filter(
                 models.Document.workspace == workspace,
                 or_(
-                    models.Document.session_id == None, 
+                    models.Document.is_global == True, 
                     models.Document.session_id == session_id
                 ),
                 distance < 0.45 
@@ -51,7 +51,7 @@ def search_knowledge_base(query: str, workspace: str, session_id: str = None) ->
                 .filter(
                     models.Document.workspace == workspace,
                     or_(
-                        models.Document.session_id == None, 
+                        models.Document.is_global == True, 
                         models.Document.session_id == session_id
                     ),
                     models.DocumentChunk.content.ilike(f"%{clean_query}%")
