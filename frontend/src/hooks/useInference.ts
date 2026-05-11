@@ -21,28 +21,28 @@ export function useInference(
   ): Promise<string> => {
     setIsProcessing(true);
     
-    // FIX: Changed from const to let so we can swap it mid-flight
-    let currentTargetId = activeSessionId || `optimistic-${Date.now()}`;
+    const optimisticId = activeSessionId || `optimistic-${Date.now()}`;
+    let realDbId: string | null = null; // Safely typed for TS
     
-    setStreamingContent(prev => ({ ...prev, [currentTargetId]: "" }));
+    setStreamingContent(prev => ({ ...prev, [optimisticId]: "" }));
 
     let fullAssistantMessage = "";
 
     setMessageCache(prev => {
-      const existing = prev[currentTargetId] || [];
+      const existing = prev[optimisticId] || [];
       const newItems: Message[] = [];
       if (!skipUserAdd) {
         newItems.push({ id: `temp-${Date.now()}-u`, role: "user", content: text, timestamp: new Date().toISOString() });
       }
       newItems.push({ id: `temp-${Date.now()}-a`, role: "assistant", content: "", timestamp: new Date().toISOString() });
-      return { ...prev, [currentTargetId]: [...existing, ...newItems] };
+      return { ...prev, [optimisticId]: [...existing, ...newItems] };
     });
 
-    if (!activeSessionId) onSessionCreated("temp_new_chat", currentTargetId);
+    if (!activeSessionId) onSessionCreated("temp_new_chat", optimisticId);
 
     const controller = new AbortController();
-    abortControllersRef.current.set(currentTargetId, controller);
-    streamingSessionIdsRef.current.add(currentTargetId);
+    abortControllersRef.current.set(optimisticId, controller);
+    streamingSessionIdsRef.current.add(optimisticId);
 
     try {
       const res = await fetch(`${APP_CONFIG.API_URL}/analyze`, {
@@ -73,45 +73,34 @@ export function useInference(
             try {
               const parsed = JSON.parse(line);
               
-              // --- THE HANDOFF FIX ---
+              // THE HANDOFF
               if (parsed.status === "started" && parsed.session_id && !activeSessionId) {
                 const newDbId = parsed.session_id;
+                realDbId = newDbId; // Store for the rest of the stream
                 
-                // 1. Tell the parent to update the URL
-                onSessionCreated(currentTargetId, newDbId);
+                onSessionCreated(optimisticId, newDbId);
 
-                // 2. Transfer the AbortController so the Stop button still works
-                const activeController = abortControllersRef.current.get(currentTargetId);
-                if (activeController) {
-                    abortControllersRef.current.delete(currentTargetId);
-                    abortControllersRef.current.set(newDbId, activeController);
-                }
+                const activeController = abortControllersRef.current.get(optimisticId);
+                if (activeController) abortControllersRef.current.set(newDbId, activeController);
 
-                // 3. Transfer the loading animation tracker
-                streamingSessionIdsRef.current.delete(currentTargetId);
                 streamingSessionIdsRef.current.add(newDbId);
 
-                // 4. Transfer the UI Message History buckets
-                setMessageCache(prev => {
-                    const msgs = prev[currentTargetId] || [];
-                    const { [currentTargetId]: removedItem, ...rest } = prev;
-                    return { ...rest, [newDbId]: msgs };
-                });
-
-                // 5. Transfer the streaming text bucket
-                setStreamingContent(prev => {
-                    const content = prev[currentTargetId] || "";
-                    const { [currentTargetId]: removedItem, ...rest } = prev;
-                    return { ...rest, [newDbId]: content };
-                });
-
-                // 6. Adopt the new UUID for the remainder of the stream!
-                currentTargetId = newDbId;
+                // Initialize the new bucket, but DO NOT delete optimistic yet!
+                setMessageCache(prev => ({ ...prev, [newDbId]: prev[optimisticId] || [] }));
+                setStreamingContent(prev => ({ ...prev, [newDbId]: prev[optimisticId] || "" }));
               }
               
               if (parsed.chunk) {
                 fullAssistantMessage += parsed.chunk;
-                setStreamingContent(prev => ({ ...prev, [currentTargetId]: fullAssistantMessage }));
+                
+                // Stream into BOTH buckets so the UI never misses a chunk during URL change
+                setStreamingContent(prev => {
+                    const next = { ...prev, [optimisticId]: fullAssistantMessage };
+                    if (realDbId !== null) {
+                        next[realDbId] = fullAssistantMessage;
+                    }
+                    return next;
+                });
               }
             } catch (e) {}
           }
@@ -122,17 +111,34 @@ export function useInference(
     } finally {
       setIsProcessing(false);
       setMessageCache(prev => {
-        const msgs = prev[currentTargetId] || [];
+        const msgs = prev[optimisticId] || [];
         if (msgs.length === 0) return prev;
         const newMsgs = [...msgs];
         newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], content: fullAssistantMessage };
-        return { ...prev, [currentTargetId]: newMsgs };
+        
+        // Finalize both buckets
+        const next = { ...prev, [optimisticId]: newMsgs };
+        if (realDbId !== null) {
+            next[realDbId] = newMsgs;
+        }
+        return next;
       });
-      setStreamingContent(prev => { const { [currentTargetId]: removedItem, ...rest } = prev; return rest; });
-      streamingSessionIdsRef.current.delete(currentTargetId);
+      
+      // Safely delete both buckets using TS rest properties
+      setStreamingContent(prev => { 
+        const { [optimisticId]: optRemoved, ...rest1 } = prev;
+        if (realDbId !== null) {
+            const { [realDbId]: dbRemoved, ...rest2 } = rest1;
+            return rest2;
+        }
+        return rest1; 
+      });
+      
+      streamingSessionIdsRef.current.delete(optimisticId);
+      if (realDbId !== null) streamingSessionIdsRef.current.delete(realDbId);
       window.dispatchEvent(new Event("chatCreated"));
     }
-    return currentTargetId;
+    return optimisticId;
   }, [workspace, setMessageCache, streamingSessionIdsRef, onSessionCreated]);
 
   return { 

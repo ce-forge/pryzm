@@ -12,7 +12,6 @@ import ProcessingAnimation from "./ProcessingAnimation";
 import SearchBar from "./SearchBar";
 import ChatTimestamp from "./ChatTimestamp";
 import ChatBubble from "./ChatBubble";
-import AssistantMessage from "./AssistantMessage";
 import ConfirmModal from "./ConfirmModal";
 
 export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) {
@@ -50,13 +49,11 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
   }, [promptState, currentIsProcessing, handleInference]);
 
   return (
-    // FIX: Added w-full max-w-[100vw] overflow-hidden to clamp viewport width
     <div className="flex flex-col flex-1 h-full w-full max-w-[100vw] overflow-hidden bg-[#131314]">
       <ChatHeader workspace={session.workspace} sessionTitle={session.sessionTitle} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} rightActions={<SearchBar {...search} />} />
       
-      {/* FIX: Added min-w-0 to ensure flex shrinking */}
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto overflow-x-hidden px-2 sm:px-4 py-2 custom-scrollbar w-full min-w-0">
-        <div ref={chatContainerRef} className="w-full max-w-3xl mx-auto flex flex-col min-h-full pb-24 min-w-0">
+        <div ref={chatContainerRef} className="w-full max-w-3xl mx-auto flex flex-col min-h-full min-w-0">
             
             {messages.length === 0 && !session.isInitialLoading && !currentIsProcessing && (
               <QuickActions setPrompt={promptState.setPrompt} inputRef={textareaRef} />
@@ -64,16 +61,22 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
 
             {messages.map((m: any, i: number) => {
               const isLastStreaming = currentIsProcessing && i === messages.length - 1 && m.role === "assistant";
-              if (isLastStreaming) return (
-                <div key="stream" className="w-full mb-8 min-w-0 break-words">
-                  <AssistantMessage content={myStreamingText || m.content} searchQuery={search.searchQuery} />
-                </div>
-              );
+              
+              // Stream text directly into the bubble properties
+              const displayContent = (isLastStreaming && myStreamingText) ? myStreamingText : m.content;
+              const stableKey = `msg-${i}`;
 
               return (
-                <React.Fragment key={m.id || i}>
+                <React.Fragment key={stableKey}>
                   <ChatTimestamp timestamp={m.timestamp} previousTimestamp={i > 0 ? messages[i-1].timestamp : undefined} isFirstMessage={i === 0} />
-                  <ChatBubble message={m} index={i} activeSessionKey={activeSessionKey} searchQuery={search.searchQuery} isStreaming={currentIsProcessing} onDeleteRequest={(id, idx) => setDeleteConfirm({ id, index: idx })} />
+                  <ChatBubble 
+                    message={{ ...m, content: displayContent }} 
+                    index={i} 
+                    activeSessionKey={activeSessionKey} 
+                    searchQuery={search.searchQuery} 
+                    isStreaming={isLastStreaming} 
+                    onDeleteRequest={(id, idx) => setDeleteConfirm({ id, index: idx })} 
+                  />
                 </React.Fragment>
               );
             })}

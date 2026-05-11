@@ -15,7 +15,7 @@ const CodeBlock = ({ language, value }: { language: string, value: string }) => 
 
   // FIX: Added max-w-full to contain the block
   return (
-    <div className="relative rounded-xl overflow-hidden border border-[#333537] my-4 shadow-lg bg-[#0d0d0d] max-w-full">
+    <div className="relative rounded-xl overflow-hidden border border-[#333537] my-4 shadow-lg bg-[#0d0d0d] w-full max-w-full">
       <div className="flex items-center justify-between px-4 py-1.5 bg-[#1a1b1c] border-b border-[#333537] text-xs text-gray-400 select-none">
         <span className="font-mono lowercase tracking-wide">{language || 'text'}</span>
         <button onClick={handleCopy} className="flex items-center gap-1.5 hover:text-[#e3e3e3] transition-colors focus:outline-none">

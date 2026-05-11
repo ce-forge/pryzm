@@ -74,8 +74,8 @@ export default function ChatBubble({ message, index, activeSessionKey, searchQue
   return (
     <div className="group flex flex-col w-full mb-6 relative">
       <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} w-full`}>
-        <div className={`flex flex-col ${message.role === 'user' ? 'max-w-[85%] items-end' : 'max-w-full items-start'}`}>
-          <div className={`${message.role === 'user' ? 'bg-[#2f2f2f] text-[#e3e3e3] rounded-2xl py-2.5 px-5' : 'text-[#e3e3e3] px-1 w-full'}`}>
+        <div className={`flex flex-col ${message.role === 'user' ? 'max-w-[85%] items-end' : 'w-full items-start'} min-w-0`}>
+          <div className={`${message.role === 'user' ? 'bg-[#2f2f2f] text-[#e3e3e3] rounded-2xl py-2.5 px-5' : 'text-[#e3e3e3] px-1 w-full flex-1'} break-words min-w-0`}>
             {message.role === "user" ? (
               <UserMessage content={message.content} searchQuery={searchQuery} />
             ) : (
