@@ -28,6 +28,14 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, index: number } | null>(null);
 
   useEffect(() => {
+    const isDesktopPointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+    if (textareaRef.current && activeSessionKey === "temp_new_chat" && isDesktopPointer) {
+      textareaRef.current.focus();
+    }
+  }, [activeSessionKey]);
+
+  useEffect(() => {
     if (currentIsProcessing && myStreamingText) {
       scrollToBottom();
     } else if (!currentIsProcessing) {
