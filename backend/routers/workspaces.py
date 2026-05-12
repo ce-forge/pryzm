@@ -16,6 +16,7 @@ from services.workspaces import (
     slugify_unique,
     read_default_prompt,
     DEFAULT_ENABLED_TOOLS,
+    DEFAULT_DISPLAY_NAMES,
 )
 from tools.registry import AVAILABLE_TOOLS
 
@@ -34,9 +35,11 @@ def _validate_enabled_tools(names: List[str]) -> None:
 
 
 def _validate_preferred_model(model: str) -> None:
-    """Confirm the model exists in the Ollama /api/tags response. Done at
-    PATCH time so we fail loudly on misconfiguration; chat-time resolution
-    in services/workspaces.py tolerates a stale value with a warning."""
+    """Confirm the model exists in the Ollama /api/tags response AND is a
+    chat-capable model (embedding-only models like nomic-embed-text are
+    filtered out, matching chat.py:get_ollama_models). Done at PATCH time
+    so we fail loudly on misconfiguration; chat-time resolution in
+    services/workspaces.py tolerates a stale value with a warning."""
     if model is None:
         return
     try:
@@ -45,7 +48,12 @@ def _validate_preferred_model(model: str) -> None:
             timeout=3,
         )
         r.raise_for_status()
-        names = [m["name"] for m in r.json().get("models", [])]
+        # Filter out embedding-only models; they're not usable as chat models.
+        names = [
+            m["name"]
+            for m in r.json().get("models", [])
+            if "embed" not in m["name"].lower()
+        ]
     except Exception as e:
         raise HTTPException(
             status_code=503,
@@ -54,7 +62,7 @@ def _validate_preferred_model(model: str) -> None:
     if model not in names:
         raise HTTPException(
             status_code=400,
-            detail=f"Model not installed in Ollama: {model}. Available: {names}",
+            detail=f"Model not installed (or is embedding-only) in Ollama: {model}. Available: {names}",
         )
 
 
@@ -152,7 +160,11 @@ def delete_workspace(slug: str, db: Session = Depends(database.get_db)):
             detail="Cannot delete the only remaining workspace.",
         )
 
-    # Count what's about to cascade so the response can populate the modal.
+    # Count what's about to cascade so the response can populate the UI
+    # confirmation modal. Counts are best-effort: a concurrent request could
+    # add/remove rows between these COUNTs and the db.delete below, so the
+    # numbers may be slightly off. The actual cascade-delete is authoritative
+    # — these counts are display-only.
     removed_sessions = db.query(models.Session).filter(models.Session.workspace_id == ws.id).count()
     removed_folders = db.query(models.Folder).filter(models.Folder.workspace_id == ws.id).count()
     removed_documents = db.query(models.Document).filter(models.Document.workspace_id == ws.id).count()
@@ -186,7 +198,7 @@ def reset_workspace(slug: str, db: Session = Depends(database.get_db)):
     ws.enabled_tools = DEFAULT_ENABLED_TOOLS.get(slug, [])
     ws.preferred_model = None
     # Display name reset to its canonical form too.
-    ws.display_name = {"it_copilot": "IT Copilot", "personal": "Personal"}.get(slug, ws.display_name)
+    ws.display_name = DEFAULT_DISPLAY_NAMES.get(slug, ws.display_name)
     db.commit()
     db.refresh(ws)
     return ws

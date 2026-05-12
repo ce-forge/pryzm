@@ -135,3 +135,12 @@ DEFAULT_ENABLED_TOOLS: dict[str, list[str]] = {
     ],
     "personal": ["rename_chat_session", "search_knowledge_base"],
 }
+
+
+# Display names for the built-in workspaces. Used by /reset to restore the
+# canonical name if a user renamed a built-in. Same drift caveat as
+# DEFAULT_ENABLED_TOOLS — keep in sync with the migration's seed values.
+DEFAULT_DISPLAY_NAMES: dict[str, str] = {
+    "it_copilot": "IT Copilot",
+    "personal": "Personal",
+}
