@@ -24,7 +24,7 @@ class Message(Base):
     __tablename__ = "messages"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
-    role = Column(String, nullable=False) 
+    role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     session = relationship("Session", back_populates="messages")
@@ -37,17 +37,17 @@ class Folder(Base):
 
 class Document(Base):
     __tablename__ = "documents"
-    
+
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     filename = Column(String, nullable=False)
-    workspace = Column(String, default="it_copilot") 
-    session_id = Column(String, ForeignKey("sessions.id"))
-    
-    is_global = Column(Boolean, default=False) # THE FIX: Explicit Global Identifier
-    
+    workspace = Column(String, default="it_copilot")
+    session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
+
+    is_global = Column(Boolean, default=False)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
-    session = relationship("Session", back_populates="documents")    
+
+    session = relationship("Session", back_populates="documents")
     chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
 
 class DocumentChunk(Base):

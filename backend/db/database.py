@@ -1,9 +1,11 @@
+import os
 import requests
 import redis
+from alembic import command
+from alembic.config import Config
 from config import settings
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from db.models import Base
 
 SQLALCHEMY_DATABASE_URL = settings.DATABASE_URL
 
@@ -13,11 +15,23 @@ if not SQLALCHEMY_DATABASE_URL:
 engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Resolve alembic.ini once at import time so we don't recompute the path on
+# every startup or migration call.
+_ALEMBIC_INI = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "alembic.ini",
+)
+
+
 def init_db():
-    with engine.connect() as conn:
-        conn.execute(text("Create EXTENSION IF NOT EXISTS vector;"))
-        conn.commit()
-    Base.metadata.create_all(bind=engine)
+    """Apply any pending alembic migrations before the app accepts traffic.
+
+    Schema is owned entirely by alembic (see backend/alembic/versions/). The
+    baseline migration creates the pgvector extension and all tables; future
+    changes go through `alembic revision --autogenerate -m "..."`.
+    """
+    cfg = Config(_ALEMBIC_INI)
+    command.upgrade(cfg, "head")
 
 def get_db():
     db = SessionLocal()
