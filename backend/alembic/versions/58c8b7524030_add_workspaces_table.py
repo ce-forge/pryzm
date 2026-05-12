@@ -2,7 +2,7 @@
 
 Revision ID: 58c8b7524030
 Revises: 99647b177e47
-Create Date: 2026-05-12
+Create Date: 2026-05-12 14:30:00.000000
 
 """
 import os
@@ -16,8 +16,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 revision: str = "58c8b7524030"
 down_revision: Union[str, Sequence[str], None] = "99647b177e47"
-branch_labels = None
-depends_on = None
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
 
 
 # Hardcoded seed values so the migration is self-contained and doesn't depend
@@ -42,6 +42,11 @@ PROMPTS_DIR = os.path.join(BACKEND_DIR, "core", "prompts")
 
 def _read_prompt(name: str) -> str:
     path = os.path.join(PROMPTS_DIR, f"{name}.txt")
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"Migration requires {path} — ensure the prompts directory is present "
+            f"relative to the backend root."
+        )
     with open(path, "r") as f:
         return f.read().strip()
 
@@ -61,8 +66,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("slug"),
     )
-    op.create_index("ix_workspaces_id", "workspaces", ["id"])
-    op.create_index("ix_workspaces_slug", "workspaces", ["slug"])
+    op.create_index(op.f("ix_workspaces_id"), "workspaces", ["id"], unique=False)
+    op.create_index(op.f("ix_workspaces_slug"), "workspaces", ["slug"], unique=False)
 
     # 2. Seed the two built-ins. UUIDs are deterministic-by-position so the
     # backfill below can reference them without a SELECT round-trip.
@@ -108,9 +113,9 @@ def upgrade() -> None:
     op.add_column("folders", sa.Column("workspace_id", sa.String(), nullable=True))
     op.add_column("documents", sa.Column("workspace_id", sa.String(), nullable=True))
 
-    op.create_index("ix_sessions_workspace_id", "sessions", ["workspace_id"])
-    op.create_index("ix_folders_workspace_id", "folders", ["workspace_id"])
-    op.create_index("ix_documents_workspace_id", "documents", ["workspace_id"])
+    op.create_index(op.f("ix_sessions_workspace_id"), "sessions", ["workspace_id"], unique=False)
+    op.create_index(op.f("ix_folders_workspace_id"), "folders", ["workspace_id"], unique=False)
+    op.create_index(op.f("ix_documents_workspace_id"), "documents", ["workspace_id"], unique=False)
 
     # 4. Backfill from the old string columns. Any row whose old string didn't
     # match a known built-in (shouldn't happen in practice) gets assigned to
@@ -130,12 +135,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_documents_workspace_id", table_name="documents")
-    op.drop_index("ix_folders_workspace_id", table_name="folders")
-    op.drop_index("ix_sessions_workspace_id", table_name="sessions")
+    op.drop_index(op.f("ix_documents_workspace_id"), table_name="documents")
+    op.drop_index(op.f("ix_folders_workspace_id"), table_name="folders")
+    op.drop_index(op.f("ix_sessions_workspace_id"), table_name="sessions")
     op.drop_column("documents", "workspace_id")
     op.drop_column("folders", "workspace_id")
     op.drop_column("sessions", "workspace_id")
-    op.drop_index("ix_workspaces_slug", table_name="workspaces")
-    op.drop_index("ix_workspaces_id", table_name="workspaces")
+    op.drop_index(op.f("ix_workspaces_slug"), table_name="workspaces")
+    op.drop_index(op.f("ix_workspaces_id"), table_name="workspaces")
     op.drop_table("workspaces")
