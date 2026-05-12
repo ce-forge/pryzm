@@ -14,10 +14,10 @@ const FRAME: PixelGrid = [
 
 // Orange — flame
 const FLAME: PixelGrid = [
-  [0, 0, 1, 0, 0],
-  [0, 1, 1, 1, 0],
-  [1, 1, 0, 1, 1],
+  [0, 1, 0, 1, 0],
   [1, 1, 1, 1, 1],
+  [0, 1, 1, 1, 0],
+  [0, 1, 1, 1, 0],
   [0, 1, 1, 1, 0],
 ];
 
@@ -75,6 +75,15 @@ const FLOWER: PixelGrid = [
   [1, 0, 1, 0, 1],
 ];
 
+// White — crown (3-spike regalia, "the council")
+const CROWN: PixelGrid = [
+  [1, 0, 1, 0, 1],
+  [1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1],
+  [1, 1, 1, 1, 1],
+];
+
 const SPRITE_GRIDS: Record<WorkspaceColor, PixelGrid> = {
   blue:    FRAME,
   orange:  FLAME,
@@ -84,6 +93,7 @@ const SPRITE_GRIDS: Record<WorkspaceColor, PixelGrid> = {
   violet:  MOON,
   cyan:    DROP,
   pink:    FLOWER,
+  white:   CROWN,
 };
 
 interface WorkspaceSpriteProps {
@@ -96,7 +106,7 @@ export function WorkspaceSprite({ color, className }: WorkspaceSpriteProps) {
   const grid = SPRITE_GRIDS[key];
   return (
     <svg
-      viewBox="0 0 10 10"
+      viewBox="0 0 9.6 9.6"
       className={className}
       fill="currentColor"
       style={{ shapeRendering: "crispEdges" }}
@@ -104,7 +114,7 @@ export function WorkspaceSprite({ color, className }: WorkspaceSpriteProps) {
     >
       {grid.flatMap((row, y) =>
         row.map((cell, x) =>
-          cell ? <rect key={`${x}-${y}`} x={x * 2 + 0.2} y={y * 2 + 0.2} width="1.6" height="1.6" /> : null
+          cell ? <rect key={`${x}-${y}`} x={x * 2} y={y * 2} width="1.6" height="1.6" /> : null
         )
       )}
     </svg>

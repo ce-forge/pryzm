@@ -7,6 +7,7 @@ export const WORKSPACE_COLORS = {
   violet:  { dot: "bg-violet-500",  badge: "bg-violet-500/10 text-violet-400 border-violet-500/20",    ring: "ring-violet-500",  text: "text-violet-400" },
   cyan:    { dot: "bg-cyan-500",    badge: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",          ring: "ring-cyan-500",    text: "text-cyan-400" },
   pink:    { dot: "bg-pink-500",    badge: "bg-pink-500/10 text-pink-400 border-pink-500/20",          ring: "ring-pink-500",    text: "text-pink-400" },
+  white:   { dot: "bg-white",      badge: "bg-white/10 text-white border-white/20",                    ring: "ring-white",       text: "text-white" },
 } as const;
 
 export type WorkspaceColor = keyof typeof WORKSPACE_COLORS;

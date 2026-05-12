@@ -75,7 +75,7 @@ class WorkspaceResponse(BaseModel):
     created_at: datetime
 
 
-WORKSPACE_COLOR = Literal["blue", "orange", "emerald", "red", "amber", "violet", "cyan", "pink"]
+WORKSPACE_COLOR = Literal["blue", "orange", "emerald", "red", "amber", "violet", "cyan", "pink", "white"]
 
 
 class WorkspaceCreate(BaseModel):
