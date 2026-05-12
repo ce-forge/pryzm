@@ -59,3 +59,35 @@ class SystemStatus(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     components: SystemStatus
+
+
+class WorkspaceResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    slug: str
+    display_name: str
+    system_prompt: str
+    enabled_tools: List[str]
+    preferred_model: Optional[str] = None
+    is_builtin: bool
+    created_at: datetime
+
+
+class WorkspaceCreate(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=80)
+    clone_from: Optional[str] = None  # slug of source workspace; None = blank defaults
+
+
+class WorkspaceUpdate(BaseModel):
+    display_name: Optional[str] = Field(None, min_length=1, max_length=80)
+    system_prompt: Optional[str] = Field(None, max_length=50_000)
+    enabled_tools: Optional[List[str]] = None
+    preferred_model: Optional[str] = None  # explicit null = clear the pin
+
+
+class WorkspaceDeleteResponse(BaseModel):
+    deleted: bool
+    removed_sessions: int
+    removed_folders: int
+    removed_documents: int
