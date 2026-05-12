@@ -5,11 +5,11 @@ import inspect
 import time
 import re
 
-from db import database
+from db import database, models
 from services import knowledge
+from services.workspaces import resolve_tools_for_workspace, resolve_model_for_request
 from config import settings
-import tools
-from tools.registry import AVAILABLE_TOOLS, TOOL_DEFINITIONS
+import tools  # triggers @tool registration as a side effect
 from core.prompt_manager import MICRO_PROMPTS
 from utils.formatters import (
     format_tool_execution, 
@@ -61,16 +61,13 @@ def condense_chat_memory(old_memory: str, messages: list, model_name: str) -> st
         return old_memory
 
 def stream_chat(messages: list, workspace_id: str, session_id: str = None, model_name: str = "gemma4:e4b"):
-    from services.workspaces import resolve_tools_for_workspace, resolve_model_for_request
-
     url = f"{BASE_OLLAMA_URL}/api/chat"
 
     # Fetch the workspace once (needed for tool list, prompt, and model pin).
-    from db import models as db_models
     db = database.SessionLocal()
     try:
-        workspace = db.query(db_models.Workspace).filter(
-            db_models.Workspace.id == workspace_id
+        workspace = db.query(models.Workspace).filter(
+            models.Workspace.id == workspace_id
         ).first()
         if not workspace:
             yield f"\n[Engine Error: Workspace {workspace_id} not found.]"

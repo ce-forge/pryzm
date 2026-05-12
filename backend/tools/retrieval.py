@@ -20,10 +20,11 @@ def search_knowledge_base(query: str, workspace: str, session_id: str = None) ->
     try:
         # The `workspace` arg here is the slug (injected by ai_engine via
         # workspace.slug). Resolve to id for the new search_chunks signature.
+        from fastapi import HTTPException
         from services.workspaces import get_by_slug
         try:
             ws = get_by_slug(db, workspace)
-        except Exception:
+        except HTTPException:
             return f"Knowledge base search failed: workspace not found ({workspace})"
         # Stricter threshold than the auto-RAG path: the LLM picked this tool
         # deliberately, so we want precision over recall.

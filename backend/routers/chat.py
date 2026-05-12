@@ -8,7 +8,7 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from services import knowledge
-from services.workspaces import get_by_slug, get_or_default
+from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
                      MessageUpdate)
@@ -169,7 +169,6 @@ def analyze_data(
         # `chat_session` after the local `db` is closed below.
         session_id = chat_session.id
         workspace_id = workspace.id
-        workspace_slug = workspace.slug
     finally:
         db.close()
 
