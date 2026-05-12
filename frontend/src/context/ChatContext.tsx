@@ -7,6 +7,7 @@ import { useInference } from "@/hooks/useInference";
 import { useTestSuite } from "@/hooks/useTestSuite";
 import { useMessageActions } from "@/hooks/useMessageActions";
 import { APP_CONFIG } from "@/utils/constants";
+import { useWorkspaces, Workspace } from "@/hooks/useWorkspaces";
 
 /**
  * Compose all chat-related hooks into a single value object. The context's
@@ -23,6 +24,10 @@ function useChatValue() {
   });
 
   const session = useSession();
+  const workspacesApi = useWorkspaces();
+  const activeWorkspace: Workspace | null =
+    workspacesApi.workspaces.find((w) => w.slug === session.workspace) ?? null;
+
   const uploader = useUploader(session.workspace);
 
   const ai = useInference(
@@ -122,6 +127,8 @@ function useChatValue() {
     handleInference,
     stopAllInference,
     msgActions,
+    workspacesApi,
+    activeWorkspace,
   };
 }
 

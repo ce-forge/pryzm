@@ -53,7 +53,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
 
   return (
     <div className="flex flex-col flex-1 h-full w-full max-w-[100vw] overflow-hidden bg-[#131314]">
-      <ChatHeader workspace={session.workspace} sessionTitle={messages.length === 0 ? "" : session.sessionTitle} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} rightActions={<SearchBar {...search} />} />
+      <ChatHeader sessionTitle={messages.length === 0 ? "" : session.sessionTitle} isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} rightActions={<SearchBar {...search} />} />
       
       <div ref={scrollRef} onScroll={onScroll} className="flex-1 overflow-y-auto overflow-x-hidden px-2 sm:px-4 py-2 custom-scrollbar w-full min-w-0">
         <div ref={chatContainerRef} className="w-full max-w-3xl mx-auto flex flex-col min-h-full min-w-0">

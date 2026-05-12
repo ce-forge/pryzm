@@ -376,6 +376,18 @@ def delete_folder(folder_id: str, db: Session = Depends(database.get_db)):
     db.commit()
     return {"status": "success"}
 
+@router.get("/api/tools")
+def get_tools_metadata():
+    """Lists registered tools with their schemas for the workspace settings UI."""
+    from tools.registry import TOOL_DEFINITIONS
+    return [
+        {
+            "name": d["function"]["name"],
+            "description": d["function"]["description"],
+        }
+        for d in TOOL_DEFINITIONS
+    ]
+
 @router.get("/api/models")
 def get_ollama_models():
     try:

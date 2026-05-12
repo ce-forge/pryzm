@@ -1,10 +1,10 @@
 "use client";
 
 import React, { useState } from "react";
-import Link from "next/link";
 import { useChatContext } from "@/context/ChatContext";
 import SettingsModal from "./Settings";
 import SessionDirectory from "./SessionDirectory";
+import WorkspaceSwitcher from "./WorkspaceSwitcher";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -33,13 +33,10 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
           </button>
         </div>
 
-        {/* TOP: Workspace Toggles & New Chat */}
-        <div className="px-4 mb-4 space-y-3">
-          <div className="flex rounded-lg p-1 bg-[#131314] border border-[#333537]">
-            <Link href="?workspace=it_copilot" className={`flex-1 text-center py-1.5 text-xs font-bold rounded-md transition-all ${session.workspace === 'it_copilot' ? 'bg-[#282a2c] text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}>IT Copilot</Link>
-            <Link href="?workspace=personal" className={`flex-1 text-center py-1.5 text-xs font-bold rounded-md transition-all ${session.workspace !== 'it_copilot' ? 'bg-[#282a2c] text-orange-400' : 'text-gray-500 hover:text-gray-300'}`}>Personal</Link>
-          </div>
-          <button 
+        {/* TOP: Workspace Switcher & New Chat */}
+        <WorkspaceSwitcher />
+        <div className="px-4 mb-4">
+          <button
              onClick={() => session.navigateToSession("")}
              className="flex items-center justify-center gap-3 bg-[#282a2c] hover:bg-[#333537] text-[#e3e3e3] px-4 py-2.5 rounded-full text-sm font-medium transition-colors w-full"
           >

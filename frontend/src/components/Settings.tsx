@@ -73,8 +73,8 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
             {activeTab === "general" && (
               <div className="space-y-6">
                 <div>
-                  <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Active AI Model</label>
-                  <p className="text-xs text-gray-500 mb-3">Select the local Ollama model to use for inference. Models must be pulled to your machine first.</p>
+                  <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Default AI Model</label>
+                  <p className="text-xs text-gray-500 mb-3">Used when a workspace doesn&apos;t pin its own model. Workspaces with a pinned model override this.</p>
                   <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors appearance-none">
                     {models.length === 0 && <option value={selectedModel}>{selectedModel} (Loading...)</option>}
                     {models.map(m => <option key={m} value={m}>{m}</option>)}
