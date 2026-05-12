@@ -193,7 +193,7 @@ Decision: **option A** — DB is the sole runtime source of truth.
 
 - **Last-workspace deletion**: API returns 409 (see API Surface).
 - **Deleting the workspace you're currently in**: frontend handles the redirect — after the DELETE response, navigate to the first remaining workspace.
-- **URL points at a deleted/unknown slug**: backend returns 404 from any endpoint with that slug. Frontend handles by navigating to the first available workspace and showing a small toast/message (TBD wording; spec says "fall back to first workspace silently" for now).
+- **URL points at a deleted/unknown slug**: backend returns 404 from any endpoint with that slug. Frontend silently navigates to the first available workspace (sorted by `created_at` ascending — i.e. `it_copilot` if it still exists) and updates the URL. No user-facing toast; the redirect is silent because this only happens when something off-flow has happened (manual URL edit, stale bookmark after a delete in another tab).
 - **Slug collision on create**: append `-2`, `-3`, … until unique. The chosen final slug is returned in the response so the frontend can navigate to it.
 - **Empty slug after slugify** (e.g. user enters only emojis): 400 with `{"detail": "Display name must contain at least one alphanumeric character"}`.
 - **Tool name in `enabled_tools` no longer exists in code**: the engine ignores it at request time (warns to stdout via the request logger). PATCH endpoint refuses to *add* unknown names — only stale ones persist.
@@ -258,8 +258,9 @@ UI verification (manual / screenshot):
 - `backend/db/models.py` — new `Workspace` model; FK changes on `Session` / `Folder` / `Document`.
 - `backend/schemas.py` — `WorkspaceResponse`, `WorkspaceCreate`, `WorkspaceUpdate`.
 - `backend/routers/chat.py` — slug → workspace_id resolution at the start of any handler that takes `workspace=`; new workspace CRUD endpoints (or split into `backend/routers/workspaces.py` if `chat.py` gets too dense).
-- `backend/core/ai_engine.py` — `get_tools_for_workspace` reads from DB instead of the registry's static `TOOL_WORKSPACES`.
-- `backend/tools/registry.py` — `TOOL_WORKSPACES` becomes seed-only metadata; `get_tools_for_workspace` removed or repurposed.
+- `backend/services/workspaces.py` (new) — owns workspace DB operations, including a `resolve_tools_for_workspace(db, workspace_id) -> (callable_map, definitions_list)` function that intersects the workspace's stored `enabled_tools` with the live `AVAILABLE_TOOLS` registry.
+- `backend/core/ai_engine.py` — `stream_chat` now calls `services.workspaces.resolve_tools_for_workspace(db, workspace_id)` instead of `tools.registry.get_tools_for_workspace(name)`.
+- `backend/tools/registry.py` — `TOOL_WORKSPACES` is kept as seed-only metadata. The existing `get_tools_for_workspace(name)` helper is removed; its only caller was `ai_engine.stream_chat`, which now resolves via the DB.
 - `frontend/src/components/Sidebar.tsx` — replace tab toggle with `<WorkspaceSwitcher />`.
 - `frontend/src/components/SessionDirectory.tsx` — refactor inline folder-create to use `<InlineCreateForm />`.
 - `frontend/src/components/ChatHeader.tsx` — read active workspace's display_name instead of hardcoded copilot/personal logic.
