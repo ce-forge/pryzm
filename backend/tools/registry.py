@@ -42,16 +42,3 @@ def tool(properties, required=None, workspaces=None):
     return decorator
 
 
-def get_tools_for_workspace(workspace: str):
-    """Return (callable_map, definitions_list) restricted to tools exposed in
-    the given workspace. This is the seam where a future UI-driven override
-    will plug in — for now it just filters by the decorator-declared allowlist.
-    """
-    allowed_names = {
-        name for name, spaces in TOOL_WORKSPACES.items() if workspace in spaces
-    }
-    callables = {name: fn for name, fn in AVAILABLE_TOOLS.items() if name in allowed_names}
-    definitions = [
-        d for d in TOOL_DEFINITIONS if d["function"]["name"] in allowed_names
-    ]
-    return callables, definitions

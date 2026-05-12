@@ -20,8 +20,8 @@ def get_embedding(text: str) -> list[float]:
     return response.json().get("embedding", [])
 
 
-def ingest_document(db: Session, filename: str, content: str, workspace: str = "itCopilot", session_id: str = None, is_global: bool = False):
-    new_doc = models.Document(filename=filename, workspace=workspace, session_id=session_id, is_global=is_global)
+def ingest_document(db: Session, filename: str, content: str, workspace_id: str, session_id: str = None, is_global: bool = False):
+    new_doc = models.Document(filename=filename, workspace_id=workspace_id, session_id=session_id, is_global=is_global)
     db.add(new_doc)
     db.commit()
     db.refresh(new_doc)
@@ -67,7 +67,7 @@ def _strip_query_prefix(query: str) -> str:
 def search_chunks(
     db: Session,
     query: str,
-    workspace: str,
+    workspace_id: str,
     session_id: str = None,
     threshold: float = 0.65,
     top_k: int = 3,
@@ -101,7 +101,7 @@ def search_chunks(
         db.query(models.DocumentChunk)
         .join(models.Document)
         .filter(
-            models.Document.workspace == workspace,
+            models.Document.workspace_id == workspace_id,
             scope_filter,
             distance < threshold,
         )
@@ -117,7 +117,7 @@ def search_chunks(
         db.query(models.DocumentChunk)
         .join(models.Document)
         .filter(
-            models.Document.workspace == workspace,
+            models.Document.workspace_id == workspace_id,
             scope_filter,
             models.DocumentChunk.content.ilike(f"%{clean_query}%"),
         )
@@ -134,7 +134,7 @@ def _label_chunk(chunk) -> str:
     return f"[from {filename}]\n{chunk.content}"
 
 
-def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id: str = None, top_k: int = 3):
+def retrieve_relevant_chunks(db: Session, query: str, workspace_id: str, session_id: str = None, top_k: int = 3):
     if query == "document overview" and session_id:
         # Most recent document for this session, sampled up to top_k chunks.
         recent_doc = (
@@ -156,7 +156,7 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
                 formatted_context += "\n\n---\n\n".join(context_blocks)
                 return {"context": formatted_context, "sources": [recent_doc.filename]}
 
-    results = search_chunks(db, query, workspace, session_id=session_id, threshold=0.65, top_k=top_k)
+    results = search_chunks(db, query, workspace_id=workspace_id, session_id=session_id, threshold=0.65, top_k=top_k)
     if not results:
         return None
 

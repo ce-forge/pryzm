@@ -9,7 +9,7 @@ from db import database
 from services import knowledge
 from config import settings
 import tools
-from tools.registry import AVAILABLE_TOOLS, TOOL_DEFINITIONS, get_tools_for_workspace
+from tools.registry import AVAILABLE_TOOLS, TOOL_DEFINITIONS
 from core.prompt_manager import MICRO_PROMPTS
 from utils.formatters import (
     format_tool_execution, 
@@ -60,73 +60,75 @@ def condense_chat_memory(old_memory: str, messages: list, model_name: str) -> st
         print(f"Memory Condensation Failed: {e}")
         return old_memory
 
-def get_system_prompt(mode: str, tool_names: str) -> str:
-    base_dir = os.path.dirname(__file__)
-    prompt_path = os.path.join(base_dir, "prompts", f"{mode}.txt")
-    
-    try:
-        with open(prompt_path, "r") as f:
-            content = f.read()
-        return content.replace("{tool_names}", tool_names)
-    except FileNotFoundError:
-        return "You are an AI assistant. Please configure your prompt files."
+def stream_chat(messages: list, workspace_id: str, session_id: str = None, model_name: str = "gemma4:e4b"):
+    from services.workspaces import resolve_tools_for_workspace, resolve_model_for_request
 
-def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None, model_name: str = "gemma4:e4b"):
     url = f"{BASE_OLLAMA_URL}/api/chat"
 
-    # Each workspace gets the subset of tools that opted into it via the
-    # @tool(workspaces=[...]) decorator. Workspaces with no exposed tools
-    # (or unrecognised workspace names) just won't advertise any to the LLM.
-    workspace_tools, workspace_tool_defs = get_tools_for_workspace(mode)
-    if workspace_tools:
+    # Fetch the workspace once (needed for tool list, prompt, and model pin).
+    from db import models as db_models
+    db = database.SessionLocal()
+    try:
+        workspace = db.query(db_models.Workspace).filter(
+            db_models.Workspace.id == workspace_id
+        ).first()
+        if not workspace:
+            yield f"\n[Engine Error: Workspace {workspace_id} not found.]"
+            return
+
+        workspace_tools, workspace_tool_defs = resolve_tools_for_workspace(workspace)
+        effective_model = resolve_model_for_request(workspace, model_name)
+
+        # Substitute {tool_names} placeholder in the workspace's stored
+        # system prompt.
         tool_names = ", ".join(workspace_tools.keys())
-        system_msg = {"role": "system", "content": get_system_prompt(mode, tool_names)}
-        tools_payload = workspace_tool_defs
-    else:
-        system_msg = {"role": "system", "content": get_system_prompt(mode, "")}
-        tools_payload = None
-       
+        system_content = (workspace.system_prompt or "").replace("{tool_names}", tool_names)
+
+        if workspace_tools:
+            tools_payload = workspace_tool_defs
+        else:
+            tools_payload = None
+
+        system_msg = {"role": "system", "content": system_content}
+        workspace_slug = workspace.slug
+    finally:
+        db.close()
+
     memory_content = ""
-    active_messages =[]
-    
+    active_messages = []
+
     for m in messages:
         if m.get("role") == "memory":
             try:
                 mem_data = json.loads(m.get("content"))
                 memory_content = mem_data.get("summary", "")
-            except:
+            except Exception:
                 memory_content = m.get("content")
         else:
             active_messages.append(m)
-            
+
     recent_limit = settings.MEMORY_CONTEXT_WINDOW
     recent_messages = active_messages[-recent_limit:] if len(active_messages) > recent_limit else active_messages
-    
+
     if memory_content:
         system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
 
     if recent_messages and recent_messages[-1].get("role") == "user":
         last_query = recent_messages[-1].get("content", "")
-        
         has_attachment = "[Attached_File:" in last_query
         clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
-        
         if has_attachment:
             rag_query = clean_user_text if clean_user_text else "document overview"
-            
             db = database.SessionLocal()
             try:
-                rag_data = knowledge.retrieve_relevant_chunks(db, query=rag_query, workspace=mode, session_id=session_id)
-                
+                rag_data = knowledge.retrieve_relevant_chunks(
+                    db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
+                )
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]
                     sources_list = rag_data["sources"]
-                    
                     recent_messages[-1]["content"] = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n{MICRO_PROMPTS['rag_file_upload_instruction']}"
-                    
-                    sources_str = ", ".join(sources_list)
                     yield format_file_analyzed(sources_list)
-                    
             except Exception as rag_err:
                 yield format_error(str(rag_err), "File Read Error")
             finally:
@@ -135,20 +137,19 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
             recent_messages[-1]["content"] = clean_user_text
 
     full_messages = [system_msg] + recent_messages
-
     max_loops = settings.MAXIMUM_TOOL_LOOPS
     loop_count = 0
     finished_cleanly = False
-    
+
     try:
         while loop_count < max_loops:
             loop_count += 1
-            
-            payload = {"model": model_name,
-                       "messages": full_messages,
-                       "stream": False,
-                       "options": {"num_ctx": 8192}
-                       }
+            payload = {
+                "model": effective_model,
+                "messages": full_messages,
+                "stream": False,
+                "options": {"num_ctx": 8192},
+            }
             if tools_payload:
                 payload["tools"] = tools_payload
 
@@ -156,49 +157,38 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
             resp.raise_for_status()
             data = resp.json()
             message = data.get("message", {})
-            
+
             if message.get("tool_calls"):
-                full_messages.append(message) 
-                
+                full_messages.append(message)
                 for tool in message["tool_calls"]:
                     func_name = tool["function"]["name"]
                     args = tool["function"]["arguments"]
-                    
                     if isinstance(args, str):
                         try:
                             args = json.loads(args)
-                        except:
+                        except Exception:
                             args = {}
-                    
                     if func_name in workspace_tools:
                         func = workspace_tools[func_name]
-                        
                         valid_params = inspect.signature(func).parameters.keys()
                         safe_args = {k: v for k, v in args.items() if k in valid_params}
-                        
                         if "workspace" in valid_params:
-                            safe_args["workspace"] = mode
-                            
+                            safe_args["workspace"] = workspace_slug
                         if "session_id" in valid_params:
                             safe_args["session_id"] = session_id
-                        
                         yield format_tool_execution(func_name, safe_args)
-                        
                         try:
                             result = func(**safe_args)
                         except Exception as tool_err:
                             result = f"Tool execution failed: {str(tool_err)}"
-                        
                         yield format_code_block(result)
-                            
                         full_messages.append({
-                            "role": "tool", 
+                            "role": "tool",
                             "content": result,
-                            "name": func_name 
+                            "name": func_name,
                         })
-                        
                 continue
-                
+
             else:
                 content = message.get("content")
                 if content is None:
@@ -232,10 +222,10 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
 
                 finished_cleanly = True
                 break
-                
+
         if not finished_cleanly:
             yield MICRO_PROMPTS["warning_max_loops"]
-                
+
     except Exception as e:
         yield f"\n[Engine Error: {str(e)}]"
 

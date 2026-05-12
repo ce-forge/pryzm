@@ -8,6 +8,7 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from services import knowledge
+from services.workspaces import get_by_slug, get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
                      MessageUpdate)
@@ -39,7 +40,8 @@ def get_sessions(
     limit/offset (optional) — pagination. With no params the response is
     unbounded to preserve the existing frontend's 'load all' behaviour.
     """
-    q = db.query(models.Session).filter(models.Session.mode == workspace)
+    ws = get_or_default(db, workspace)
+    q = db.query(models.Session).filter(models.Session.workspace_id == ws.id)
     if folder_id is not None:
         q = q.filter(models.Session.folder_id == folder_id)
     q = q.order_by(models.Session.created_at.desc())
@@ -126,6 +128,7 @@ def analyze_data(
     # multiple sessions stream concurrently.
     db = database.SessionLocal()
     try:
+        workspace = get_or_default(db, request.mode)
         chat_session = None
 
         if request.session_id:
@@ -133,7 +136,10 @@ def analyze_data(
 
         if not chat_session:
             generated_title = ai_engine.generate_title(request.prompt, request.model)
-            chat_session = models.Session(title=generated_title, mode=request.mode)
+            chat_session = models.Session(
+                title=generated_title,
+                workspace_id=workspace.id,
+            )
             db.add(chat_session)
             db.commit()
             db.refresh(chat_session)
@@ -145,7 +151,10 @@ def analyze_data(
         if request.attachments:
             db.query(models.Document).filter(
                 models.Document.id.in_(request.attachments)
-            ).update({"session_id": chat_session.id}, synchronize_session=False)
+            ).update(
+                {"session_id": chat_session.id, "workspace_id": workspace.id},
+                synchronize_session=False,
+            )
             db.commit()
 
         if not request.skip_db_save:
@@ -159,8 +168,8 @@ def analyze_data(
         # Capture identifiers needed inside the generator so we don't reach into
         # `chat_session` after the local `db` is closed below.
         session_id = chat_session.id
-        mode = request.mode
-        model_name = request.model
+        workspace_id = workspace.id
+        workspace_slug = workspace.slug
     finally:
         db.close()
 
@@ -172,7 +181,12 @@ def analyze_data(
         disconnected = False
 
         try:
-            for chunk in ai_engine.stream_chat(safe_messages, mode, session_id, model_name):
+            for chunk in ai_engine.stream_chat(
+                safe_messages,
+                workspace_id=workspace_id,
+                session_id=session_id,
+                model_name=request.model,
+            ):
                 if await http_request.is_disconnected():
                     disconnected = True
                     break
@@ -253,7 +267,7 @@ def analyze_data(
                         new_last_id = to_summarize[-1].id
 
                         msg_dicts = [{"role": m.role, "content": m.content} for m in to_summarize]
-                        new_summary_text = ai_engine.condense_chat_memory(old_summary, msg_dicts, model_name)
+                        new_summary_text = ai_engine.condense_chat_memory(old_summary, msg_dicts, request.model)
 
                         new_mem_data = {
                             "last_summarized_id": new_last_id,
@@ -263,12 +277,11 @@ def analyze_data(
                         if memory_msg:
                             memory_msg.content = json.dumps(new_mem_data)
                         else:
-                            new_mem = models.Message(
+                            background_db.add(models.Message(
                                 session_id=session_id,
                                 role="memory",
                                 content=json.dumps(new_mem_data),
-                            )
-                            background_db.add(new_mem)
+                            ))
 
                         background_db.commit()
 
@@ -288,6 +301,7 @@ async def upload_document(
     is_global: bool = Form(False),
     db: Session = Depends(database.get_db)
 ):
+    ws = get_or_default(db, workspace)
     # Stream the upload in 8KB chunks and bail as soon as we cross the
     # configured ceiling. Reading the whole body unbounded (await file.read())
     # would let a single request balloon the worker's memory.
@@ -308,38 +322,40 @@ async def upload_document(
         text_content = content.decode("utf-8")
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="Only UTF-8 text files are currently supported.")
-        
+
     active_session_id = None
     if session_id and session_id not in ["null", "undefined", "temp_new_chat", ""]:
         existing_session = db.query(models.Session).filter(models.Session.id == session_id).first()
         if existing_session:
             active_session_id = session_id
 
-    # Passed to knowledge.ingest_document
     result = knowledge.ingest_document(
-        db=db, 
-        filename=file.filename, 
-        content=text_content, 
-        workspace=workspace, 
-        session_id=active_session_id, 
-        is_global=is_global 
+        db=db,
+        filename=file.filename,
+        content=text_content,
+        workspace_id=ws.id,
+        session_id=active_session_id,
+        is_global=is_global,
     )
-    
+
     return {
-        "message": f"Successfully ingested {file.filename}", 
+        "message": f"Successfully ingested {file.filename}",
         "details": result,
-        "session_id": active_session_id 
+        "session_id": active_session_id,
     }
 
 @router.get("/folders")
 def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
-    return db.query(models.Folder).filter(models.Folder.workspace == workspace).all()
+    ws = get_or_default(db, workspace)
+    return db.query(models.Folder).filter(models.Folder.workspace_id == ws.id).all()
+
 
 @router.post("/folders")
 def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
+    ws = get_or_default(db, folder.workspace)
     if db.query(models.Folder).filter(models.Folder.id == folder.id).first():
         raise HTTPException(status_code=409, detail="Folder with that id already exists.")
-    new_folder = models.Folder(id=folder.id, name=folder.name, workspace=folder.workspace)
+    new_folder = models.Folder(id=folder.id, name=folder.name, workspace_id=ws.id)
     db.add(new_folder)
     try:
         db.commit()
@@ -369,7 +385,7 @@ def get_ollama_models():
         models = [m["name"] for m in r.json().get("models", []) if "embed" not in m["name"].lower()]
         return models if models else["gemma4:e4b"]
     except Exception as e:
-        return["gemma4:e4b"] 
+        return["gemma4:e4b"]
 
 @router.get("/api/prompts")
 def get_prompts():
@@ -445,7 +461,7 @@ def branch_session(session_id: str, body: BranchRequest, db: Session = Depends(d
 
     # Avoid stacking "(Branch) (Branch) (Branch) ..." when re-branching a branch.
     branched_title = old_session.title if old_session.title.endswith("(Branch)") else f"{old_session.title} (Branch)"
-    new_session = models.Session(title=branched_title, mode=old_session.mode)
+    new_session = models.Session(title=branched_title, workspace_id=old_session.workspace_id)
     db.add(new_session)
     db.commit()
     db.refresh(new_session)

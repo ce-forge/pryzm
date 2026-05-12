@@ -18,9 +18,16 @@ def search_knowledge_base(query: str, workspace: str, session_id: str = None) ->
     """Searches the internal documentation and knowledge base for a specific query."""
     db = SessionLocal()
     try:
+        # The `workspace` arg here is the slug (injected by ai_engine via
+        # workspace.slug). Resolve to id for the new search_chunks signature.
+        from services.workspaces import get_by_slug
+        try:
+            ws = get_by_slug(db, workspace)
+        except Exception:
+            return f"Knowledge base search failed: workspace not found ({workspace})"
         # Stricter threshold than the auto-RAG path: the LLM picked this tool
         # deliberately, so we want precision over recall.
-        results = search_chunks(db, query, workspace, session_id=session_id, threshold=0.45, top_k=3)
+        results = search_chunks(db, query, workspace_id=ws.id, session_id=session_id, threshold=0.45, top_k=3)
         if not results:
             return "No relevant documentation found in the knowledge base."
 

@@ -15,7 +15,7 @@ class SessionResponse(BaseModel):
 
     id: str
     title: str
-    mode: str
+    workspace_id: str
     folder_id: Optional[str] = None
     is_pinned: Optional[bool] = False
     created_at: datetime
