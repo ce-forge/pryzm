@@ -19,3 +19,9 @@ frontend/.next/
 
 .DS_Store
 Thumbs.db
+
+# Dev dashboard runtime artefacts (UMAP pickle, future runtime files).
+# Kept here on main so the pickle stays ignored regardless of which
+# branch is checked out — see backend/data/.gitkeep on feature/dev-dashboard.
+backend/data/*
+!backend/data/.gitkeep
