@@ -13,13 +13,13 @@ def get_embedding(text: str) -> list[float]:
     url = f"{OLLAMA_URL}/api/embeddings"
     payload = {
         "model": EMBED_MODEL,
-        "prompt": text
+        "prompt": text,
     }
-    response = requests.post(url, json=payload)
+    response = requests.post(url, json=payload, timeout=30)
     response.raise_for_status()
-    return response.json().get("embedding",[])
+    return response.json().get("embedding", [])
 
-# Passed the new is_global flag
+
 def ingest_document(db: Session, filename: str, content: str, workspace: str = "itCopilot", session_id: str = None, is_global: bool = False):
     new_doc = models.Document(filename=filename, workspace=workspace, session_id=session_id, is_global=is_global)
     db.add(new_doc)
@@ -29,22 +29,24 @@ def ingest_document(db: Session, filename: str, content: str, workspace: str = "
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
-        separators=["\n\n", "\n", ".", " ", ""]
+        separators=["\n\n", "\n", ".", " ", ""],
     )
-    
+
     chunks = splitter.split_text(content)
-    
-    for i, chunk_text in enumerate(chunks):
-        contextualized_text = f"Source Document: {filename}\nContent: {chunk_text}"
-        
-        vector = get_embedding(contextualized_text)
-        
-        doc_chunk = models.DocumentChunk(
+
+    # Store the raw chunk text and embed it as-is. The filename is already
+    # carried on the parent Document; injecting it into every chunk's content
+    # AND its embedding vector (the previous behaviour) polluted the
+    # vector space — every query had to compete against "Source Document: ..."
+    # boilerplate. Filename gets re-attached at retrieval time so the model
+    # still sees provenance per chunk.
+    for chunk_text in chunks:
+        vector = get_embedding(chunk_text)
+        db.add(models.DocumentChunk(
             document_id=new_doc.id,
-            content=contextualized_text,
-            embedding=vector
-        )
-        db.add(doc_chunk)
+            content=chunk_text,
+            embedding=vector,
+        ))
 
     db.commit()
     return {"status": "success", "chunks_created": len(chunks), "document_id": new_doc.id}
@@ -124,11 +126,17 @@ def search_chunks(
     )
 
 
+def _label_chunk(chunk) -> str:
+    """Re-attach the source filename at retrieval time. Stored chunk.content
+    is now the raw text only; the model still benefits from knowing which
+    document each excerpt came from."""
+    filename = chunk.document.filename if chunk.document else "unknown"
+    return f"[from {filename}]\n{chunk.content}"
+
+
 def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id: str = None, top_k: int = 3):
     if query == "document overview" and session_id:
-        # Get the most recently uploaded document for this session, then return up
-        # to top_k of its chunks. DocumentChunk has no ordering column, so we can't
-        # guarantee the chunks are the *start* of the document — just a sample.
+        # Most recent document for this session, sampled up to top_k chunks.
         recent_doc = (
             db.query(models.Document)
             .filter(models.Document.session_id == session_id)
@@ -143,7 +151,7 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
                 .all()
             )
             if chunks:
-                context_blocks = [chunk.content for chunk in chunks]
+                context_blocks = [f"[from {recent_doc.filename}]\n{c.content}" for c in chunks]
                 formatted_context = "\n\n=== FILE EXCERPTS ===\n"
                 formatted_context += "\n\n---\n\n".join(context_blocks)
                 return {"context": formatted_context, "sources": [recent_doc.filename]}
@@ -152,8 +160,8 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
     if not results:
         return None
 
-    unique_sources = list(set([chunk.document.filename for chunk in results]))
-    context_blocks = [chunk.content for chunk in results]
+    unique_sources = list({chunk.document.filename for chunk in results})
+    context_blocks = [_label_chunk(chunk) for chunk in results]
     formatted_context = format_rag_context(context_blocks)
     return {
         "context": formatted_context,

@@ -24,7 +24,11 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
   const promptState = usePrompt(messages);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const { scrollRef, onScroll, scrollToBottom } = useAutoScroll(messages);
+  const { scrollRef, onScroll } = useAutoScroll({
+    messages,
+    streamingText: myStreamingText ?? "",
+    isProcessing: currentIsProcessing,
+  });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string, index: number } | null>(null);
 
   useEffect(() => {
@@ -34,15 +38,6 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
       textareaRef.current.focus();
     }
   }, [activeSessionKey]);
-
-  useEffect(() => {
-    if (currentIsProcessing && myStreamingText) {
-      scrollToBottom();
-    } else if (!currentIsProcessing) {
-      const timer = setTimeout(() => scrollToBottom(), 50);
-      return () => clearTimeout(timer);
-    }
-  }, [myStreamingText, currentIsProcessing, scrollToBottom]);
 
   const search = useSearch(messages, chatContainerRef);
 

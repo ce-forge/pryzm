@@ -20,6 +20,15 @@ export default function ChatBubble({ message, index, activeSessionKey, searchQue
   const [editValue, setEditValue] = useState(message.content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // useState only captures the initial message.content. If the parent updates
+  // this bubble (e.g. after an external edit, branch, or rerun) the local
+  // editValue would stay stale until the user reopens the editor. Sync when
+  // the message changes, but only while NOT actively editing — otherwise the
+  // user's in-progress typing would get clobbered.
+  useEffect(() => {
+    if (!isEditing) setEditValue(message.content);
+  }, [message.id, message.content, isEditing]);
+
   useEffect(() => {
     if (isEditing && textareaRef.current) {
       textareaRef.current.style.height = "auto";

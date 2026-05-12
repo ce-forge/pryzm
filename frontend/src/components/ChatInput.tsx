@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { FileUpload } from "@/types/chat"; 
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
+import { APP_CONFIG } from "@/utils/constants";
 import { PlusIcon, SendIcon, StopIcon, TerminalIcon, LoadingIcon, CancelIcon, DatabaseIcon } from "./Icons";
 
 interface ChatInputProps {
@@ -131,7 +132,7 @@ export default function ChatInput({
                       </div>
                     )}
 
-                    <span className="text-[10px] text-gray-600 ml-2 font-mono select-none">~{totalTokens} / 8192</span>
+                    <span className="text-[10px] text-gray-600 ml-2 font-mono select-none">~{totalTokens} / {APP_CONFIG.VISIBLE_TOKEN_LIMIT}</span>
                 </div>
                 
                 <div className="flex items-center">

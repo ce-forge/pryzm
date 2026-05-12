@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useCallback } from "react";
+import { encode } from "gpt-tokenizer";
 import { Message } from "@/types/chat";
 
 export function usePrompt(messages: Message[]) {
@@ -8,10 +9,17 @@ export function usePrompt(messages: Message[]) {
   const [tempPrompt, setTempPrompt] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  const totalTokens = useMemo(() => {
-    const allText = messages.map(m => m.content).join(" ") + " " + prompt;
-    return Math.ceil(allText.length / 4);
-  }, [messages, prompt]);
+  // BPE token count via gpt-tokenizer (cl100k_base). Generic vocabulary, so
+  // the number is still an approximation against any specific local model
+  // (Qwen/Gemma have their own tokenizers) — but ~5-10x closer than the old
+  // length/4 heuristic. Split into two memos so typing only re-tokenizes the
+  // short prompt input, not the entire message history every keystroke.
+  const messagesTokens = useMemo(
+    () => encode(messages.map((m) => m.content).join(" ")).length,
+    [messages],
+  );
+  const promptTokens = useMemo(() => encode(prompt).length, [prompt]);
+  const totalTokens = messagesTokens + promptTokens;
 
   const saveToHistory = useCallback((text: string) => {
     if (!text.trim()) return;

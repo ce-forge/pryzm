@@ -1,6 +1,6 @@
 from tools.registry import tool
 from db.database import SessionLocal
-from services.knowledge import search_chunks
+from services.knowledge import search_chunks, _label_chunk
 from utils.formatters import format_tool_results
 
 
@@ -24,8 +24,8 @@ def search_knowledge_base(query: str, workspace: str, session_id: str = None) ->
         if not results:
             return "No relevant documentation found in the knowledge base."
 
-        context_blocks = [chunk.content for chunk in results]
-        unique_sources = list(set([chunk.document.filename for chunk in results]))
+        context_blocks = [_label_chunk(chunk) for chunk in results]
+        unique_sources = list({chunk.document.filename for chunk in results})
         return format_tool_results(unique_sources, context_blocks)
     except Exception as e:
         return f"Knowledge base search failed with error: {str(e)}"

@@ -17,5 +17,9 @@ export const APP_CONFIG = {
   API_URL: getBaseUrl(),
   DEFAULT_MODEL: "gemma4:e4b",
   DEFAULT_WORKSPACE: "it_copilot",
-  MAX_TOKENS: 8192
+  // The model's num_ctx is 8192 (see backend/core/ai_engine.py). Out of that
+  // we reserve ~2K tokens for the system prompt, tool definitions, memory
+  // summary, and a sensible response budget — so the user-facing counter
+  // tops out below the technical ceiling.
+  VISIBLE_TOKEN_LIMIT: 6000,
 };

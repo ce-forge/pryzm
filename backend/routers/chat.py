@@ -313,6 +313,11 @@ def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
 
 @router.delete("/folders/{folder_id}")
 def delete_folder(folder_id: str, db: Session = Depends(database.get_db)):
+    # Null out folder_id on any sessions that lived in this folder so they
+    # show up in "Unsorted Logs" rather than carrying a dangling reference.
+    db.query(models.Session).filter(models.Session.folder_id == folder_id).update(
+        {"folder_id": None}, synchronize_session=False,
+    )
     db.query(models.Folder).filter(models.Folder.id == folder_id).delete()
     db.commit()
     return {"status": "success"}
@@ -348,8 +353,19 @@ def delete_prompt_override(key: str):
     return {"status": "deleted", "key": key}
 
 @router.patch("/messages/{message_id}")
-def update_message(message_id: str, payload: MessageUpdate, db: Session = Depends(database.get_db)):
-    msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+def update_message(
+    message_id: str,
+    payload: MessageUpdate,
+    session_id: Optional[str] = None,
+    db: Session = Depends(database.get_db),
+):
+    """Edit the content of a message. If a session_id query param is supplied,
+    the message must belong to that session — guards against another client
+    accidentally editing messages outside the chat it has open."""
+    query = db.query(models.Message).filter(models.Message.id == message_id)
+    if session_id is not None:
+        query = query.filter(models.Message.session_id == session_id)
+    msg = query.first()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
 
@@ -358,15 +374,22 @@ def update_message(message_id: str, payload: MessageUpdate, db: Session = Depend
     return {"status": "success"}
 
 @router.delete("/messages/{message_id}")
-def delete_message(message_id: str, db: Session = Depends(database.get_db)):
-    msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+def delete_message(
+    message_id: str,
+    session_id: Optional[str] = None,
+    db: Session = Depends(database.get_db),
+):
+    query = db.query(models.Message).filter(models.Message.id == message_id)
+    if session_id is not None:
+        query = query.filter(models.Message.session_id == session_id)
+    msg = query.first()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
-    
-    session_id = msg.session_id
+
+    session_id_resp = msg.session_id
     db.delete(msg)
     db.commit()
-    return {"status": "success", "session_id": session_id}
+    return {"status": "success", "session_id": session_id_resp}
 
 @router.post("/sessions/{session_id}/branch")
 def branch_session(session_id: str, body: BranchRequest, db: Session = Depends(database.get_db)):
