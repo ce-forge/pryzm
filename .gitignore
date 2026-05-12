@@ -4,13 +4,15 @@ ollama_models/
 pgdata/
 router_config.txt
 backend/venv/
-backend/__pycache__/
+
+# Python bytecode anywhere in the tree. The original `backend/__pycache__/`
+# only matched the top-level directory, so nested caches (db/, routers/,
+# services/, alembic/, ...) ended up tracked.
+**/__pycache__/
+*.pyc
 
 frontend/node_modules/
 frontend/.next/
-
-claude.md
-.claude
 
 *.db
 *.sqlite3
