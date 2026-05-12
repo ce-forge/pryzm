@@ -7,6 +7,7 @@ import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import WorkspaceSettings from "./WorkspaceSettings";
 import { Workspace } from "@/hooks/useWorkspaces";
 import { getWorkspaceColorClasses } from "@/utils/workspaceColors";
+import { WorkspaceSprite } from "@/utils/workspaceSprites";
 
 type SettingsTarget =
   | { workspace: Workspace; mode: "edit" }
@@ -42,7 +43,10 @@ export default function WorkspaceSwitcher() {
       >
         <span className="flex items-center gap-2 min-w-0">
           {activeWorkspace && (
-            <span className={`w-2 h-2 rounded-full shrink-0 ${getWorkspaceColorClasses(activeWorkspace.color).dot}`} />
+            <WorkspaceSprite
+              color={activeWorkspace.color}
+              className={`w-4 h-4 shrink-0 ${getWorkspaceColorClasses(activeWorkspace.color).text}`}
+            />
           )}
           <span className="truncate font-medium">{activeWorkspace?.display_name ?? "Loading..."}</span>
         </span>
@@ -64,11 +68,16 @@ export default function WorkspaceSwitcher() {
                 <button
                   onClick={() => switchTo(w.slug)}
                   className={`flex-1 text-left px-3 py-2 text-sm ${
-                    activeWorkspace?.slug === w.slug ? "text-blue-400" : "text-gray-300"
+                    activeWorkspace?.slug === w.slug
+                      ? getWorkspaceColorClasses(w.color).text
+                      : "text-gray-300"
                   }`}
                 >
                   <span className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full shrink-0 ${getWorkspaceColorClasses(w.color).dot}`} />
+                    <WorkspaceSprite
+                      color={w.color}
+                      className={`w-4 h-4 shrink-0 ${getWorkspaceColorClasses(w.color).text}`}
+                    />
                     <span className="truncate">{w.display_name}</span>
                     {w.is_builtin && (
                       <span className="text-[9px] uppercase tracking-wider text-gray-500 shrink-0">built-in</span>

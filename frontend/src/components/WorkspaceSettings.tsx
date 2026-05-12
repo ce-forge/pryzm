@@ -12,6 +12,7 @@ import {
   getWorkspaceColorClasses,
   type WorkspaceColor,
 } from "@/utils/workspaceColors";
+import { WorkspaceSprite } from "@/utils/workspaceSprites";
 
 interface EditProps {
   mode: "edit";
@@ -208,22 +209,28 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
             )}
           </div>
 
-          {/* Workspace color */}
+          {/* Workspace sprite */}
           <div>
-            <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Workspace color</label>
+            <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Workspace sprite</label>
             <div className="flex items-center gap-2">
               {WORKSPACE_COLOR_NAMES.map((c) => {
-                const classes = getWorkspaceColorClasses(c);
                 const isSelected = color === c;
+                const classes = getWorkspaceColorClasses(c);
                 return (
                   <button
                     key={c}
+                    type="button"
                     onClick={() => handleColorChange(c)}
-                    title={c}
-                    className={`w-6 h-6 rounded-full transition-all ${classes.dot} ${
-                      isSelected ? `ring-2 ring-offset-2 ring-offset-[#1e1f20] ${classes.ring}` : "opacity-70 hover:opacity-100"
+                    className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${classes.text} ${
+                      isSelected
+                        ? `ring-2 ring-offset-2 ring-offset-[#1e1f20] ${classes.ring} bg-[#282a2c]`
+                        : "hover:bg-[#282a2c]/60"
                     }`}
-                  />
+                    title={c}
+                    aria-label={`${c} sprite`}
+                  >
+                    <WorkspaceSprite color={c} className="w-6 h-6" />
+                  </button>
                 );
               })}
             </div>
