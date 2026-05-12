@@ -6,6 +6,7 @@ import { useChatContext } from "@/context/ChatContext";
 import { APP_CONFIG } from "@/utils/constants";
 import SessionItem from "./SessionItem";
 import ConfirmModal from "./ConfirmModal";
+import InlineCreateForm from "./InlineCreateForm";
 
 interface SessionInfo {
   id: string;
@@ -140,16 +141,8 @@ export default function SessionDirectory() {
     } catch (err) {}
   };
 
-  const submitNewFolder = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleaned = newFolderName.trim();
-    if (!cleaned) {
-      setIsCreatingFolder(false);
-      setNewFolderName("");
-      return;
-    }
-    // UUIDv4 instead of Date.now() — two rapid creates can otherwise collide.
-    const newFolder = { id: uuid(), name: cleaned, workspace };
+  const createFolderImpl = async (name: string) => {
+    const newFolder = { id: uuid(), name, workspace };
     setFolders([{ ...newFolder, isOpen: true }, ...folders]);
     setIsCreatingFolder(false);
     setNewFolderName("");
@@ -235,22 +228,11 @@ export default function SessionDirectory() {
       </div>
 
       {isCreatingFolder && (
-        <form onSubmit={submitNewFolder} className="px-3 py-1.5">
-          <input
-            autoFocus
-            value={newFolderName}
-            placeholder="Folder name"
-            onChange={(e) => setNewFolderName(e.target.value)}
-            onBlur={submitNewFolder}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setIsCreatingFolder(false);
-                setNewFolderName("");
-              }
-            }}
-            className="w-full bg-[#131314] text-[#e3e3e3] text-sm px-2 py-0.5 rounded outline-none border border-blue-500/50"
-          />
-        </form>
+        <InlineCreateForm
+          placeholder="Folder name"
+          onSubmit={(name) => createFolderImpl(name)}
+          onCancel={() => setIsCreatingFolder(false)}
+        />
       )}
 
       {folders.map(folder => (
