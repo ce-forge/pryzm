@@ -26,6 +26,13 @@ export interface UpdatePayload {
   preferred_model?: string | null;
 }
 
+export interface RemoveResult {
+  deleted: boolean;
+  removed_sessions: number;
+  removed_folders: number;
+  removed_documents: number;
+}
+
 /**
  * Owns the list of workspaces + CRUD helpers. Reads once on mount; callers
  * trigger refetch after mutations. Components consume this via ChatContext.
@@ -50,43 +57,63 @@ export function useWorkspaces() {
   useEffect(() => { refresh(); }, [refresh]);
 
   const create = useCallback(async (payload: CreatePayload): Promise<Workspace | null> => {
-    const r = await fetch(`${APP_CONFIG.API_URL}/workspaces`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!r.ok) return null;
-    const ws = await r.json();
-    await refresh();
-    return ws;
+    try {
+      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) return null;
+      const ws = await r.json();
+      await refresh();
+      return ws;
+    } catch (e) {
+      console.error("Failed to create workspace", e);
+      return null;
+    }
   }, [refresh]);
 
   const update = useCallback(async (slug: string, payload: UpdatePayload): Promise<Workspace | null> => {
-    const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!r.ok) return null;
-    const ws = await r.json();
-    await refresh();
-    return ws;
+    try {
+      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!r.ok) return null;
+      const ws = await r.json();
+      await refresh();
+      return ws;
+    } catch (e) {
+      console.error("Failed to update workspace", e);
+      return null;
+    }
   }, [refresh]);
 
-  const remove = useCallback(async (slug: string): Promise<{ removed_sessions: number; removed_folders: number; removed_documents: number } | null> => {
-    const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}`, { method: "DELETE" });
-    if (!r.ok) return null;
-    const body = await r.json();
-    await refresh();
-    return body;
+  const remove = useCallback(async (slug: string): Promise<RemoveResult | null> => {
+    try {
+      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}`, { method: "DELETE" });
+      if (!r.ok) return null;
+      const body = await r.json();
+      await refresh();
+      return body;
+    } catch (e) {
+      console.error("Failed to remove workspace", e);
+      return null;
+    }
   }, [refresh]);
 
   const reset = useCallback(async (slug: string): Promise<Workspace | null> => {
-    const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}/reset`, { method: "POST" });
-    if (!r.ok) return null;
-    const ws = await r.json();
-    await refresh();
-    return ws;
+    try {
+      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}/reset`, { method: "POST" });
+      if (!r.ok) return null;
+      const ws = await r.json();
+      await refresh();
+      return ws;
+    } catch (e) {
+      console.error("Failed to reset workspace", e);
+      return null;
+    }
   }, [refresh]);
 
   return { workspaces, loaded, refresh, create, update, remove, reset };

@@ -39,7 +39,6 @@ export default function SessionDirectory() {
 
   // Inline create-folder UI state, mirrors the rename-folder pattern below.
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
-  const [newFolderName, setNewFolderName] = useState("");
   // Folder pending delete confirmation, or null when no confirm is open.
   const [folderPendingDelete, setFolderPendingDelete] = useState<FolderInfo | null>(null);
 
@@ -145,7 +144,6 @@ export default function SessionDirectory() {
     const newFolder = { id: uuid(), name, workspace };
     setFolders([{ ...newFolder, isOpen: true }, ...folders]);
     setIsCreatingFolder(false);
-    setNewFolderName("");
     try {
       await fetch(`${API_URL}/folders`, {
         method: "POST",
@@ -217,7 +215,7 @@ export default function SessionDirectory() {
       <div className="flex items-center justify-between px-3 mt-2 mb-1">
         <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Log Directories</span>
         <button
-          onClick={() => { setIsCreatingFolder(true); setNewFolderName(""); }}
+          onClick={() => setIsCreatingFolder(true)}
           className="text-gray-500 hover:text-[#e3e3e3] transition-colors p-1"
           title="New Folder"
         >
@@ -230,7 +228,7 @@ export default function SessionDirectory() {
       {isCreatingFolder && (
         <InlineCreateForm
           placeholder="Folder name"
-          onSubmit={(name) => createFolderImpl(name)}
+          onSubmit={createFolderImpl}
           onCancel={() => setIsCreatingFolder(false)}
         />
       )}
