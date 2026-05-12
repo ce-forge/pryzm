@@ -128,15 +128,15 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
         while loop_count < max_loops:
             loop_count += 1
             
-            payload = {"model": model_name, 
-                       "messages": full_messages, 
+            payload = {"model": model_name,
+                       "messages": full_messages,
                        "stream": False,
-                       "s": {"num_ctx": 8192}
+                       "options": {"num_ctx": 8192}
                        }
             if tools_payload:
                 payload["tools"] = tools_payload
-                
-            resp = requests.post(url, json=payload)
+
+            resp = requests.post(url, json=payload, timeout=120)
             resp.raise_for_status()
             data = resp.json()
             message = data.get("message", {})

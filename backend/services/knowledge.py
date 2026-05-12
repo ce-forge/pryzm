@@ -51,22 +51,27 @@ def ingest_document(db: Session, filename: str, content: str, workspace: str = "
 
 def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id: str = None, top_k: int = 3):
     if query == "document overview" and session_id:
-        results = (
-            db.query(models.DocumentChunk)
-            .join(models.Document)
+        # Get the most recently uploaded document for this session, then return up
+        # to top_k of its chunks. DocumentChunk has no ordering column, so we can't
+        # guarantee the chunks are the *start* of the document — just a sample.
+        recent_doc = (
+            db.query(models.Document)
             .filter(models.Document.session_id == session_id)
-            .order_by(models.DocumentChunk.created_at.desc())
-            .limit(top_k)
-            .all()
+            .order_by(models.Document.created_at.desc())
+            .first()
         )
-        if results:
-            unique_sources = list(set([chunk.document.filename for chunk in results]))
-            context_blocks = [chunk.content for chunk in results]
-            
-            formatted_context = "\n\n=== FILE EXCERPTS (START OF DOCUMENT) ===\n"
-            formatted_context += "\n\n---\n\n".join(context_blocks)
-            
-            return {"context": formatted_context, "sources": unique_sources}
+        if recent_doc:
+            chunks = (
+                db.query(models.DocumentChunk)
+                .filter(models.DocumentChunk.document_id == recent_doc.id)
+                .limit(top_k)
+                .all()
+            )
+            if chunks:
+                context_blocks = [chunk.content for chunk in chunks]
+                formatted_context = "\n\n=== FILE EXCERPTS ===\n"
+                formatted_context += "\n\n---\n\n".join(context_blocks)
+                return {"context": formatted_context, "sources": [recent_doc.filename]}
     
     query_vector = get_embedding(query)
     if not query_vector:
