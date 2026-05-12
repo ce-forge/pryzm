@@ -6,6 +6,7 @@ import { APP_CONFIG } from "@/utils/constants";
 import { LoadingIcon } from "./Icons";
 import ConfirmModal from "./ConfirmModal"; // NEW IMPORT
 import { useChatContext } from "@/context/ChatContext";
+import { isSidebarScrolling } from "@/hooks/useSidebarPrefetchGuard";
 
 interface SessionItemProps {
   s: { id: string; title: string; is_pinned?: boolean; folder_id?: string | null };
@@ -35,8 +36,9 @@ export default function SessionItem({
   const handleMouseEnter = () => {
     if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
     hoverTimerRef.current = window.setTimeout(() => {
+      if (isSidebarScrolling()) return;
       session.prefetchSession(s.id);
-    }, 150);
+    }, 250);
   };
   const handleMouseLeave = () => {
     if (hoverTimerRef.current) {

@@ -5,6 +5,7 @@ import { useChatContext } from "@/context/ChatContext";
 import SettingsModal from "./Settings";
 import SessionDirectory from "./SessionDirectory";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
+import { markSidebarScrolling } from "@/hooks/useSidebarPrefetchGuard";
 
 interface SidebarProps {
   isOpen: boolean;
@@ -45,7 +46,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         </div>
 
         {/* MIDDLE: The Folder Engine */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar px-3 space-y-2 pb-12">
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-3 space-y-2 pb-12" onScroll={markSidebarScrolling}>
             <SessionDirectory />
         </div>
 
