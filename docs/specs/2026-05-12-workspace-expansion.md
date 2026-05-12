@@ -40,6 +40,11 @@ workspaces
   enabled_tools  JSONB        NOT NULL DEFAULT '[]'::jsonb
                                                 -- list of tool name strings;
                                                 -- e.g. ["rename_chat_session", "check_port"]
+  preferred_model VARCHAR     NULL              -- optional Ollama model pin;
+                                                -- e.g. "gemma3-vision" for an
+                                                -- image-analyst workspace. NULL =
+                                                -- use the global default model
+                                                -- (the existing Settings picker).
   is_builtin     BOOLEAN      NOT NULL DEFAULT FALSE
                                                 -- powers "Reset to default" affordance
   created_at     TIMESTAMPTZ  NOT NULL DEFAULT clock_timestamp()
@@ -50,7 +55,8 @@ workspaces
 - `slug` is human-readable, used in URL query params (`?workspace=research-bot`) and as the identifier the LLM emits in cross-workspace tool calls (future `delegate_to_workspace("research-bot")`). Immutable in this version — slug mutability with redirect handling can come later without schema changes.
 - `display_name` is what the user sees in the switcher and chat header. Edit-friendly.
 - `enabled_tools` is canonical at runtime. The `@tool(workspaces=[...])` decorator is *seed data only* — its only job is to populate the built-ins' `enabled_tools` during the initial migration.
-- `is_builtin` flags `it_copilot` and `personal` so the UI can render a "Reset to default" button that re-seeds `display_name`, `system_prompt`, and `enabled_tools` from the on-disk defaults. User-created workspaces have `is_builtin=false` and no reset (delete is the equivalent).
+- `preferred_model` lets each workspace pin a specific Ollama model — the natural extension of "workspace = agent" to "agent has a brain of its own choosing." Image-analyst pins a vision model, code-bot pins a code-tuned model, generic workspaces leave it NULL and inherit the global default. Built-ins are seeded with NULL so their behaviour matches today.
+- `is_builtin` flags `it_copilot` and `personal` so the UI can render a "Reset to default" button that re-seeds `display_name`, `system_prompt`, `enabled_tools`, and `preferred_model` from the on-disk defaults. User-created workspaces have `is_builtin=false` and no reset (delete is the equivalent).
 - `created_at` uses `clock_timestamp()` (real wall time, see Group B fix on `branch_session`) so concurrent creates don't share a timestamp.
 
 ### FK changes on existing tables
@@ -95,10 +101,10 @@ To keep the migration's seed values in sync with what the running code expects (
 
 | Method | Path | Body / Query | Returns |
 |---|---|---|---|
-| `GET` | `/workspaces` | — | `[{id, slug, display_name, system_prompt, enabled_tools, is_builtin, created_at}, ...]` |
+| `GET` | `/workspaces` | — | `[{id, slug, display_name, system_prompt, enabled_tools, preferred_model, is_builtin, created_at}, ...]` |
 | `GET` | `/workspaces/{slug}` | — | single workspace |
-| `POST` | `/workspaces` | `{display_name: str, clone_from: Optional[str]}` | created workspace |
-| `PATCH` | `/workspaces/{slug}` | `{display_name?, system_prompt?, enabled_tools?}` | updated workspace |
+| `POST` | `/workspaces` | `{display_name: str, clone_from: Optional[str]}` | created workspace (clone copies `preferred_model` too) |
+| `PATCH` | `/workspaces/{slug}` | `{display_name?, system_prompt?, enabled_tools?, preferred_model?}` | updated workspace |
 | `DELETE` | `/workspaces/{slug}` | — | `{deleted: true, removed_sessions: N, removed_folders: M, removed_documents: K}` |
 | `POST` | `/workspaces/{slug}/reset` | — | re-seeded workspace (only valid when `is_builtin=true`; returns 409 otherwise) |
 
@@ -110,6 +116,7 @@ To keep the migration's seed values in sync with what the running code expects (
 - **PATCH validation**:
   - `enabled_tools` values must all be present in the live `AVAILABLE_TOOLS` registry; unknown names → 400.
   - `system_prompt` length capped at some reasonable bound (e.g. 50 KB) to prevent unbounded growth.
+  - `preferred_model`, if non-null, must be present in `/api/models` at PATCH time → 400 otherwise. (At chat time, the resolver tolerates a stale value: see "model resolution" below.)
 - **Reset**: only valid for `is_builtin=true`. Reads `core/prompts/<slug>.txt` and the decorator-declared `workspaces=[...]` lists, rewrites the workspace's `system_prompt` and `enabled_tools` accordingly. `display_name` is also reset (in case the user renamed it).
 
 ### Modified endpoints
@@ -119,6 +126,18 @@ The existing `/sessions`, `/folders`, `/upload`, `/analyze` and friends currentl
 - They still accept `workspace=<slug>`. The backend resolves slug → workspace_id at the start of each handler and uses the UUID for DB ops.
 - Unknown slugs return `404` (`{"detail": "Workspace not found: foo"}`).
 - The default value falls back to `it_copilot` when omitted (existing behavior).
+
+### Model resolution at chat time
+
+The `/analyze` endpoint picks the model to send to Ollama in this order, most specific first:
+
+1. `workspace.preferred_model` (if the active workspace has one pinned)
+2. `request.model` (the model picked in the global Settings, sent in the chat body)
+3. `APP_CONFIG.DEFAULT_MODEL` (final fallback)
+
+A workspace pin overrides the request body deliberately: pinning is the user's explicit "this agent NEEDS this brain" statement, and accidental overrides via the global picker would defeat the pin. The chat header surfaces which model is in use so this isn't silent (e.g. `Image Analyst · gemma3-vision`).
+
+If a workspace's `preferred_model` was valid at PATCH time but the model has since been uninstalled / renamed in Ollama, the resolver falls through to step 2, prints a one-line warning via the request logger, and the chat continues. We do NOT block the user mid-conversation for a recoverable config drift.
 
 ### Backward compatibility
 
@@ -157,6 +176,7 @@ Modal, parallel pattern to existing `ConfirmModal` and `Settings`.
 Fields:
 - **Display name** — text input, debounced PATCH on blur.
 - **System prompt** — textarea, debounced PATCH on blur. Sized for comfortable editing (multi-line, resizable).
+- **Preferred model** — dropdown populated from `/api/models`, with "Use default model (current global picker)" as the first / null option. Changing it PATCHes `preferred_model`.
 - **Enabled tools** — list of checkboxes, one per tool in `AVAILABLE_TOOLS`. Toggle = PATCH `{enabled_tools: [...]}`. Each row shows the tool name + its decorator-declared description as a hint.
 - **Reset to default** — button, only visible when `is_builtin=true`. Opens a confirm modal then POSTs `/workspaces/{slug}/reset`.
 - **Delete workspace** — danger button. Opens a confirm modal showing the destructive count: "Delete `Research Bot` and its 12 sessions, 3 folders, 2 documents? This cannot be undone." On confirm, DELETE the workspace and navigate to the next remaining one.
@@ -177,7 +197,8 @@ Tiny component, refactored out of the existing folder-create flow in `SessionDir
 
 - `Sidebar.tsx` — replace the tab toggle with `<WorkspaceSwitcher />`. The "+ New chat" button and rest of the sidebar stay.
 - `SessionDirectory.tsx` — refactor its inline create-folder JSX to use the new `InlineCreateForm`. Behavior unchanged.
-- `ChatHeader.tsx` — currently has a hardcoded `IT COPILOT` / `PERSONAL` badge based on a `workspace?.toLowerCase().includes('copilot')` check. Change to use the active workspace's `display_name` directly.
+- `ChatHeader.tsx` — currently has a hardcoded `IT COPILOT` / `PERSONAL` badge based on a `workspace?.toLowerCase().includes('copilot')` check. Change to use the active workspace's `display_name` directly. When `workspace.preferred_model` is set, append it in a muted style next to the name (e.g. `Image Analyst · gemma3-vision`) so the model swap isn't silent.
+- `Settings.tsx` — relabel the existing model picker from "Active AI Model" to "Default AI Model (used when a workspace doesn't pin its own)". No behaviour change beyond the label.
 - `useSession.ts` — `workspace` URL param semantics unchanged (still a slug). The hook gains a `workspace` object (resolved from the slug) for the rest of the app to consume.
 
 ## Tool Capability vs Policy
@@ -208,7 +229,9 @@ Decision: **option A** — DB is the sole runtime source of truth.
   def delegate_to_workspace(target_workspace_slug, query, workspace, session_id):
       # Look up target by slug, run its chat pipeline, return result.
   ```
-  Then create a `council` workspace (via the same `POST /workspaces`) and toggle this tool on. No schema changes needed.
+  Then create a `council` workspace (via the same `POST /workspaces`) and toggle this tool on. No schema changes needed. Combined with `preferred_model`, the council pattern naturally supports capability-based routing — the orchestrator can route to a vision-pinned image-analyst, a code-pinned code-bot, etc.
+
+  **Performance note (informational)**: each delegation is a fresh Ollama call with the target workspace's `preferred_model`. Ollama loads the model into VRAM on demand. If the council routes across many specialists pinning *different* models on a VRAM-constrained machine, model unload/reload can dominate latency. The tuning knob is Ollama's `keep_alive` parameter (how long an idle model stays loaded) — not something this spec needs to address, but worth knowing when the council is built.
 
 - **Project B (users + admin gating)**: layered on top, never below. The plan:
   - Add `users`, `workspace_users` (assignments with role enum), `sessions` (auth sessions, not chat sessions) tables.
@@ -230,6 +253,9 @@ Autotest probes to add in `/tmp/pryzm_autotest.py`:
 - `workspaces/patch-display-name` — PATCH; verify slug unchanged, display_name updated.
 - `workspaces/patch-system-prompt` — PATCH; verify persistence.
 - `workspaces/patch-enabled-tools-unknown-name` — PATCH with `["definitely_not_a_real_tool"]`; verify 400.
+- `workspaces/patch-preferred-model-unknown` — PATCH with a model name not in `/api/models`; verify 400.
+- `workspaces/preferred-model-resolution` — PATCH a workspace's `preferred_model`, send a chat with a *different* `model` in the request body, verify Ollama is called with the pinned one (workspace wins).
+- `workspaces/preferred-model-fallback` — PATCH `preferred_model` to a model, then simulate it disappearing (e.g. set to a known-bad value via raw SQL), chat, verify resolver falls back to the request model without erroring.
 - `workspaces/delete-cascade-counts` — create a workspace with a session/folder/doc, DELETE, verify response counts and DB cascade.
 - `workspaces/delete-last-blocked` — try to delete when only one remains; verify 409.
 - `workspaces/reset-builtin` — PATCH `it_copilot.system_prompt` to something custom, POST `/workspaces/it_copilot/reset`, verify the prompt matches `core/prompts/it_copilot.txt`.
