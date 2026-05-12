@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import Optional, List
+from typing import Dict, Optional, List
 import json
 
 from db import database, models
@@ -9,8 +9,10 @@ from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from services import knowledge
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
-                     FolderUpdate, MessageHistory, FolderCreate, BranchRequest)
+                     FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
+                     MessageUpdate)
 from sqlalchemy import tuple_, func as sqlfunc
+from sqlalchemy.exc import IntegrityError
 from config import settings
 from utils.formatters import format_error
 import requests
@@ -242,13 +244,28 @@ def analyze_data(
 
 @router.post("/upload")
 async def upload_document(
-    file: UploadFile = File(...), 
+    file: UploadFile = File(...),
     workspace: str = Form("it_copilot"),
-    session_id: Optional[str] = Form(None), 
-    is_global: bool = Form(False),  # <-- ADDED
+    session_id: Optional[str] = Form(None),
+    is_global: bool = Form(False),
     db: Session = Depends(database.get_db)
 ):
-    content = await file.read()
+    # Stream the upload in 8KB chunks and bail as soon as we cross the
+    # configured ceiling. Reading the whole body unbounded (await file.read())
+    # would let a single request balloon the worker's memory.
+    max_bytes = settings.UPLOAD_MAX_BYTES
+    buf = bytearray()
+    while True:
+        chunk = await file.read(8192)
+        if not chunk:
+            break
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds upload limit of {max_bytes} bytes.",
+            )
+    content = bytes(buf)
     try:
         text_content = content.decode("utf-8")
     except UnicodeDecodeError:
@@ -282,10 +299,18 @@ def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.ge
 
 @router.post("/folders")
 def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
+    if db.query(models.Folder).filter(models.Folder.id == folder.id).first():
+        raise HTTPException(status_code=409, detail="Folder with that id already exists.")
     new_folder = models.Folder(id=folder.id, name=folder.name, workspace=folder.workspace)
     db.add(new_folder)
-    db.commit()
-    return {"status": "success"}
+    try:
+        db.commit()
+    except IntegrityError:
+        # Defensive — covers the rare race where two requests pass the SELECT
+        # check before either commits.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Folder with that id already exists.")
+    return {"status": "success", "id": folder.id}
 
 @router.delete("/folders/{folder_id}")
 def delete_folder(folder_id: str, db: Session = Depends(database.get_db)):
@@ -308,17 +333,28 @@ def get_prompts():
     return MICRO_PROMPTS.get_all()
 
 @router.patch("/api/prompts")
-def update_prompts(payload: dict):
+def update_prompts(payload: Dict[str, str]):
+    """Upsert one or more prompt overrides. Values are constrained to strings
+    by the schema so callers can't smuggle non-string JSON into the file.
+    To remove an override (and fall back to the default), DELETE the key."""
     MICRO_PROMPTS.save_prompts(payload)
     return {"status": "success"}
 
+@router.delete("/api/prompts/{key}")
+def delete_prompt_override(key: str):
+    """Drop a single prompt override so the default takes effect again."""
+    removed = MICRO_PROMPTS.delete_prompt(key)
+    if not removed:
+        raise HTTPException(status_code=404, detail="No override exists for that key.")
+    return {"status": "deleted", "key": key}
+
 @router.patch("/messages/{message_id}")
-def update_message(message_id: str, payload: dict, db: Session = Depends(database.get_db)):
+def update_message(message_id: str, payload: MessageUpdate, db: Session = Depends(database.get_db)):
     msg = db.query(models.Message).filter(models.Message.id == message_id).first()
     if not msg:
         raise HTTPException(status_code=404, detail="Message not found")
-    
-    msg.content = payload.get("content", msg.content)
+
+    msg.content = payload.content
     db.commit()
     return {"status": "success"}
 

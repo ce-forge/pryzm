@@ -42,6 +42,20 @@ class PromptManager:
     def save_prompts(self, new_data: dict):
         """Saves updated prompts from the UI to the local config file."""
         self.prompts.update(new_data)
+        self._flush()
+
+    def delete_prompt(self, key: str) -> bool:
+        """Remove a per-user prompt override. Returns True if a key was removed,
+        False if it wasn't present. The default-file entry (if any) is left
+        intact; the next __getitem__ for `key` will fall back to the default.
+        """
+        if key not in self.prompts:
+            return False
+        self.prompts.pop(key)
+        self._flush()
+        return True
+
+    def _flush(self) -> None:
         with open(MICRO_PROMPTS_FILE, "w") as f:
             json.dump(self.prompts, f, indent=4)
 

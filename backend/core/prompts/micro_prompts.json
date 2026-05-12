@@ -1,7 +1,6 @@
 {
     "rag_file_upload_instruction": "[System Note: The user has attached a file and the relevant extracted text is provided above. Carefully read the user's message. If the user explicitly asks a question or gives a command (e.g., 'summarize', 'explain', 'what is...'), execute that command using the provided text. If the user did NOT ask a question and simply uploaded the file (or said something generic like 'here is the file'), ONLY acknowledge that you received and analyzed the file, and ask what they would like to do with it. Maintain a clinical IT professional tone.]",
     "title_generator_system": "You are a title generator. Based on the user message, generate a concise 2 to 4 word title. Return ONLY the title text. Do not use quotes or punctuation.",
-    "title_default": "New Diagnostic",
     "title_document_default": "Document Analysis",
     "fallback_thought_loop": "I don't have enough local context to answer that right now. Could you provide more details or upload the relevant documentation?",
     "fallback_tool_failure": "I executed the necessary tools, but the operation failed or returned no usable data.",

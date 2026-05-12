@@ -48,6 +48,9 @@ class FolderCreate(BaseModel):
 class BranchRequest(BaseModel):
     up_to_message_id: str
 
+class MessageUpdate(BaseModel):
+    content: str
+
 class SystemStatus(BaseModel):
     api: str
     redis: str

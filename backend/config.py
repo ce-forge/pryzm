@@ -40,4 +40,16 @@ class Settings(BaseSettings):
     MEMORY_CONDENSE_THRESHOLD: int = 15  # When to trigger the background condenser
     MEMORY_CONDENSE_RETAIN: int = 5  # How many recent messages to exclude from the summary
 
+    # Upload bytes ceiling. /upload streams the request body and bails with
+    # HTTP 413 once cumulative bytes exceed this. Bumped here, not in the
+    # endpoint — keep tunables in one place.
+    UPLOAD_MAX_BYTES: int = 100 * 1024  # 100 KiB
+
+    # When False (default), the network diagnostic tools refuse to operate on
+    # RFC1918, loopback, link-local, multicast, CGNAT, and reserved IPs — and
+    # also refuse any hostname that resolves to one of those ranges, defeating
+    # DNS-rebinding attempts. Flip to True for deployments where the whole
+    # point is to diagnose the user's local network.
+    NETWORK_TOOLS_ALLOW_PRIVATE: bool = False
+
 settings = Settings()
