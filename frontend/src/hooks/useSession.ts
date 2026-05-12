@@ -42,6 +42,9 @@ export function useSession() {
   const messageCacheRef = useRef(messageCache);
   messageCacheRef.current = messageCache;
 
+  // Tracks in-flight prefetch requests to avoid duplicate concurrent fetches.
+  const prefetchingRef = useRef<Set<string>>(new Set());
+
   /**
    * Loads session history and title.
    * @param force - If true, ignores the cache and fetches fresh data from DB.
@@ -93,6 +96,30 @@ export function useSession() {
     return () => window.removeEventListener("chatCreated", handleSync);
   }, [currentSession, workspace, loadSessionData]);
 
+  /**
+   * Side-effect-free cache warm-up called on session row hover.
+   * Does nothing if the session is already cached, already being fetched,
+   * or the id is falsy / "temp_new_chat".
+   */
+  const prefetchSession = useCallback(async (id: string): Promise<void> => {
+    if (!id || id === "temp_new_chat" || id.startsWith("optimistic-")) return;
+    if (messageCacheRef.current[id]?.length) return;      // already cached
+    if (prefetchingRef.current.has(id)) return;           // already in-flight
+
+    prefetchingRef.current.add(id);
+    try {
+      const res = await fetch(`${APP_CONFIG.API_URL}/sessions/${id}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        setMessageCache(prev => ({ ...prev, [id]: data }));
+      }
+    } catch {
+      // Prefetch is best-effort; swallow errors silently.
+    } finally {
+      prefetchingRef.current.delete(id);
+    }
+  }, [setMessageCache]);
+
   const navigateToSession = useCallback((id: string) => {
     isNavigatingRef.current = true;
     setCurrentSession(id);
@@ -105,6 +132,6 @@ export function useSession() {
     currentSession, setCurrentSession, sessionTitle, setSessionTitle,
     messages, messageCache, setMessageCache, workspace,
     isNavigatingRef, streamingSessionIdsRef, isInitialLoading,
-    navigateToSession, router, urlSessionId
+    navigateToSession, prefetchSession, router, urlSessionId
   };
 }

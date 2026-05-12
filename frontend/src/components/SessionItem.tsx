@@ -5,6 +5,7 @@ import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { APP_CONFIG } from "@/utils/constants";
 import { LoadingIcon } from "./Icons";
 import ConfirmModal from "./ConfirmModal"; // NEW IMPORT
+import { useChatContext } from "@/context/ChatContext";
 
 interface SessionItemProps {
   s: { id: string; title: string; is_pinned?: boolean; folder_id?: string | null };
@@ -18,6 +19,7 @@ export default function SessionItem({
   s, workspace, currentSessionId, isStreaming, setSessions
 }: SessionItemProps) {
   const router = useRouter();
+  const { session } = useChatContext();
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(s.title);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
@@ -25,6 +27,23 @@ export default function SessionItem({
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   useOnClickOutside(dropdownRef, () => setIsDropdownOpen(false));
+
+  // Prefetch the session's messages on hover so the first click renders
+  // without a loading spinner (the cache is already warm by the time the
+  // user clicks).
+  const hoverTimerRef = useRef<number | null>(null);
+  const handleMouseEnter = () => {
+    if (hoverTimerRef.current) window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = window.setTimeout(() => {
+      session.prefetchSession(s.id);
+    }, 150);
+  };
+  const handleMouseLeave = () => {
+    if (hoverTimerRef.current) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
 
   const API_URL = APP_CONFIG.API_URL;
 
@@ -88,10 +107,12 @@ export default function SessionItem({
 
   return (
     <>
-      <div 
+      <div
         // Disabled drag if modal is open to prevent UI collision
         draggable={!isDropdownOpen && !isEditing && !showDeleteModal}
         onDragStart={(e) => e.dataTransfer.setData("application/x-pryzm-session", s.id)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
         className={containerClasses}
       >
         <div className="flex items-center justify-between w-full relative">
