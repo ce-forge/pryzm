@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 
 class InferenceRequest(BaseModel):
@@ -71,12 +71,17 @@ class WorkspaceResponse(BaseModel):
     enabled_tools: List[str]
     preferred_model: Optional[str] = None
     is_builtin: bool
+    color: Optional[str] = None
     created_at: datetime
+
+
+WORKSPACE_COLOR = Literal["blue", "orange", "emerald", "red", "amber", "violet", "cyan", "pink"]
 
 
 class WorkspaceCreate(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=80)
     clone_from: Optional[str] = None  # slug of source workspace; None = blank defaults
+    color: Optional[WORKSPACE_COLOR] = None
 
 
 class WorkspaceUpdate(BaseModel):
@@ -84,6 +89,7 @@ class WorkspaceUpdate(BaseModel):
     system_prompt: Optional[str] = Field(None, max_length=50_000)
     enabled_tools: Optional[List[str]] = None
     preferred_model: Optional[str] = None  # explicit null = clear the pin
+    color: Optional[WORKSPACE_COLOR] = None
 
 
 class WorkspaceDeleteResponse(BaseModel):

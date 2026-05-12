@@ -6,6 +6,12 @@ import { useChatContext } from "@/context/ChatContext";
 import { APP_CONFIG } from "@/utils/constants";
 import { Workspace } from "@/hooks/useWorkspaces";
 import ConfirmModal from "./ConfirmModal";
+import {
+  WORKSPACE_COLOR_NAMES,
+  DEFAULT_WORKSPACE_COLOR,
+  getWorkspaceColorClasses,
+  type WorkspaceColor,
+} from "@/utils/workspaceColors";
 
 interface EditProps {
   mode: "edit";
@@ -25,11 +31,13 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const { workspacesApi } = useChatContext();
   const router = useRouter();
 
-  // Edit-mode initial values (undefined in create mode until "Start from" is picked).
   const [name, setName] = useState(workspace?.display_name ?? "");
   const [prompt, setPrompt] = useState(workspace?.system_prompt ?? "");
   const [preferredModel, setPreferredModel] = useState<string | null>(workspace?.preferred_model ?? null);
   const [enabledTools, setEnabledTools] = useState<string[]>(workspace?.enabled_tools ?? []);
+  const [color, setColor] = useState<WorkspaceColor>(
+    (workspace?.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR
+  );
 
   const [availableTools, setAvailableTools] = useState<{ name: string; description: string }[]>([]);
   const [installedModels, setInstalledModels] = useState<string[]>([]);
@@ -37,7 +45,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const [confirmReset, setConfirmReset] = useState(false);
 
   // Create-mode state.
-  const [startFrom, setStartFrom] = useState<string>(""); // slug or "" for blank
+  const [startFrom, setStartFrom] = useState<string>("");
   const [nameError, setNameError] = useState("");
   const [isCreating, setIsCreating] = useState(false);
 
@@ -64,6 +72,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       setPrompt("");
       setPreferredModel(null);
       setEnabledTools([]);
+      setColor(DEFAULT_WORKSPACE_COLOR);
     } else {
       const source = workspacesApi.workspaces.find((w) => w.slug === slug);
       if (source) {
@@ -71,6 +80,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
         setPrompt(source.system_prompt);
         setPreferredModel(source.preferred_model);
         setEnabledTools([...source.enabled_tools]);
+        setColor((source.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
       }
     }
   };
@@ -87,6 +97,12 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
     setEnabledTools(next);
     if (mode === "edit") save({ enabled_tools: next });
     else dirtyRef.current = true;
+  };
+
+  const handleColorChange = (c: WorkspaceColor) => {
+    setColor(c);
+    dirtyRef.current = true;
+    if (mode === "edit") save({ color: c });
   };
 
   const confirmDeleteWorkspace = async () => {
@@ -121,6 +137,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       const ws = await workspacesApi.create({
         display_name: trimmed,
         clone_from: startFrom || null,
+        color,
       });
       if (ws) {
         onClose();
@@ -189,6 +206,27 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
             {mode === "edit" && (
               <p className="text-xs text-gray-500 mt-1">Slug: <code className="font-mono">{workspace.slug}</code> (immutable)</p>
             )}
+          </div>
+
+          {/* Workspace color */}
+          <div>
+            <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Workspace color</label>
+            <div className="flex items-center gap-2">
+              {WORKSPACE_COLOR_NAMES.map((c) => {
+                const classes = getWorkspaceColorClasses(c);
+                const isSelected = color === c;
+                return (
+                  <button
+                    key={c}
+                    onClick={() => handleColorChange(c)}
+                    title={c}
+                    className={`w-6 h-6 rounded-full transition-all ${classes.dot} ${
+                      isSelected ? `ring-2 ring-offset-2 ring-offset-[#1e1f20] ${classes.ring}` : "opacity-70 hover:opacity-100"
+                    }`}
+                  />
+                );
+              })}
+            </div>
           </div>
 
           {/* System prompt */}

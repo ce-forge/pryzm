@@ -21,6 +21,7 @@ class Workspace(Base):
     enabled_tools = Column(JSONB, nullable=False, server_default="[]")
     preferred_model = Column(String, nullable=True)
     is_builtin = Column(Boolean, nullable=False, default=False, server_default="false")
+    color = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.clock_timestamp())
 
     sessions = relationship("Session", back_populates="workspace", cascade="all, delete-orphan")

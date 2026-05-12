@@ -144,3 +144,10 @@ DEFAULT_DISPLAY_NAMES: dict[str, str] = {
     "it_copilot": "IT Copilot",
     "personal": "Personal",
 }
+
+
+# Default colors for built-in workspaces. Used by /reset and the migration seed.
+DEFAULT_COLORS: dict[str, str] = {
+    "personal": "orange",
+    "it_copilot": "blue",
+}

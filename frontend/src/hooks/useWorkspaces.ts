@@ -11,12 +11,14 @@ export interface Workspace {
   enabled_tools: string[];
   preferred_model: string | null;
   is_builtin: boolean;
+  color: string | null;
   created_at: string;
 }
 
 export interface CreatePayload {
   display_name: string;
   clone_from?: string | null;
+  color?: string;
 }
 
 export interface UpdatePayload {
@@ -24,6 +26,7 @@ export interface UpdatePayload {
   system_prompt?: string;
   enabled_tools?: string[];
   preferred_model?: string | null;
+  color?: string | null;
 }
 
 export interface RemoveResult {

@@ -15,6 +15,7 @@ from services.workspaces import (
     get_by_slug,
     slugify_unique,
     read_default_prompt,
+    DEFAULT_COLORS,
     DEFAULT_ENABLED_TOOLS,
     DEFAULT_DISPLAY_NAMES,
 )
@@ -103,6 +104,7 @@ def create_workspace(
         system_prompt=system_prompt,
         enabled_tools=enabled_tools,
         preferred_model=preferred_model,
+        color=payload.color,
         is_builtin=False,
     )
     db.add(ws)
@@ -142,6 +144,9 @@ def update_workspace(
         if data["preferred_model"] is not None:
             _validate_preferred_model(data["preferred_model"])
         ws.preferred_model = data["preferred_model"]
+
+    if "color" in data:
+        ws.color = data["color"]
 
     db.commit()
     db.refresh(ws)
@@ -197,8 +202,9 @@ def reset_workspace(slug: str, db: Session = Depends(database.get_db)):
         )
     ws.enabled_tools = DEFAULT_ENABLED_TOOLS.get(slug, [])
     ws.preferred_model = None
-    # Display name reset to its canonical form too.
+    # Display name and color reset to their canonical forms too.
     ws.display_name = DEFAULT_DISPLAY_NAMES.get(slug, ws.display_name)
+    ws.color = DEFAULT_COLORS.get(slug, ws.color)
     db.commit()
     db.refresh(ws)
     return ws

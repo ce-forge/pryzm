@@ -1,5 +1,6 @@
 import React from "react";
 import { useChatContext } from "@/context/ChatContext";
+import { getWorkspaceColorClasses } from "@/utils/workspaceColors";
 
 interface ChatHeaderProps {
   sessionTitle: string;
@@ -14,6 +15,7 @@ export default function ChatHeader({
   const { activeWorkspace } = useChatContext();
   const wsName = activeWorkspace?.display_name ?? "Pryzm";
   const wsModel = activeWorkspace?.preferred_model;
+  const wsColorClasses = getWorkspaceColorClasses(activeWorkspace?.color);
 
   return (
     <header className="flex items-center justify-between p-4 shrink-0 border-b border-[#333537]/30 bg-[#131314]/80 backdrop-blur-sm z-10 sticky top-0 gap-4">
@@ -33,7 +35,7 @@ export default function ChatHeader({
               <span className="text-[11px] text-gray-500 font-medium tracking-wider uppercase shrink-0">
                 DaiNamik Pryzm
               </span>
-              <span className="shrink-0 inline-flex items-center px-1.5 py-[2px] rounded text-[9px] leading-none font-bold uppercase tracking-wider border bg-blue-500/10 text-blue-400 border-blue-500/20">
+              <span className={`shrink-0 inline-flex items-center px-1.5 py-[2px] rounded text-[9px] leading-none font-bold uppercase tracking-wider border ${wsColorClasses.badge}`}>
                 {wsName}
               </span>
               {wsModel && (

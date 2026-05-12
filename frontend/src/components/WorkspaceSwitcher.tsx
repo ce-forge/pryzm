@@ -6,6 +6,7 @@ import { useChatContext } from "@/context/ChatContext";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import WorkspaceSettings from "./WorkspaceSettings";
 import { Workspace } from "@/hooks/useWorkspaces";
+import { getWorkspaceColorClasses } from "@/utils/workspaceColors";
 
 type SettingsTarget =
   | { workspace: Workspace; mode: "edit" }
@@ -39,7 +40,12 @@ export default function WorkspaceSwitcher() {
         onClick={() => setIsOpen(!isOpen)}
         className="w-full flex items-center justify-between bg-[#131314] border border-[#333537] rounded-lg px-3 py-2 text-sm text-[#e3e3e3] hover:bg-[#282a2c]/50 transition-colors"
       >
-        <span className="truncate font-medium">{activeWorkspace?.display_name ?? "Loading..."}</span>
+        <span className="flex items-center gap-2 min-w-0">
+          {activeWorkspace && (
+            <span className={`w-2 h-2 rounded-full shrink-0 ${getWorkspaceColorClasses(activeWorkspace.color).dot}`} />
+          )}
+          <span className="truncate font-medium">{activeWorkspace?.display_name ?? "Loading..."}</span>
+        </span>
         <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
@@ -62,6 +68,7 @@ export default function WorkspaceSwitcher() {
                   }`}
                 >
                   <span className="flex items-center gap-2">
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${getWorkspaceColorClasses(w.color).dot}`} />
                     <span className="truncate">{w.display_name}</span>
                     {w.is_builtin && (
                       <span className="text-[9px] uppercase tracking-wider text-gray-500 shrink-0">built-in</span>
