@@ -2,15 +2,14 @@ import React, { useEffect, useState } from "react";
 import { APP_CONFIG } from "@/utils/constants";
 
 export default function SettingsModal({ workspace, close }: { workspace: string, close: () => void }) {
-  const [activeTab, setActiveTab] = useState<"general" | "behavior">("general");
   const [models, setModels] = useState<string[]>([]);
-  
+
   const[selectedModel, setSelectedModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
   const[initialModel, setInitialModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
-  
+
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const[initialPrompts, setInitialPrompts] = useState<Record<string, string>>({});
-  
+
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
@@ -43,10 +42,10 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prompts)
       });
-      
+
       setInitialModel(selectedModel);
       setInitialPrompts(prompts);
-      
+
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
     } catch (e) {}
@@ -55,7 +54,7 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#1e1f20] w-full max-w-2xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
+      <div className="bg-[#1e1f20] w-full max-w-3xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
         <div className="flex justify-between items-center p-5 border-b border-[#333537] bg-[#131314]">
           <h2 className="text-lg font-bold text-[#e3e3e3]">Pryzm Settings</h2>
           <button onClick={close} className="text-gray-400 hover:text-white transition-colors">
@@ -63,52 +62,39 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
           </button>
         </div>
 
-        <div className="flex flex-1 overflow-hidden min-h-[400px]">
-          <div className="w-48 border-r border-[#333537] bg-[#131314]/50 p-4 space-y-2 shrink-0">
-            <button onClick={() => setActiveTab("general")} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'general' ? 'bg-[#282a2c] text-blue-400' : 'text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c]/50'}`}>General</button>
-            <button onClick={() => setActiveTab("behavior")} className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === 'behavior' ? 'bg-[#282a2c] text-blue-400' : 'text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c]/50'}`}>AI Behavior</button>
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+          <div>
+            <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Default AI Model</label>
+            <p className="text-xs text-gray-500 mb-3">Used when a workspace doesn&apos;t pin its own model. Workspaces with a pinned model override this.</p>
+            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors appearance-none">
+              {models.length === 0 && <option value={selectedModel}>{selectedModel} (Loading...)</option>}
+              {models.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
           </div>
 
-          <div className="flex-1 p-6 overflow-y-auto custom-scrollbar bg-[#1e1f20]">
-            {activeTab === "general" && (
-              <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Default AI Model</label>
-                  <p className="text-xs text-gray-500 mb-3">Used when a workspace doesn&apos;t pin its own model. Workspaces with a pinned model override this.</p>
-                  <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors appearance-none">
-                    {models.length === 0 && <option value={selectedModel}>{selectedModel} (Loading...)</option>}
-                    {models.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
+          <div className="border-t border-[#333537] pt-6">
+            <h3 className="text-sm font-semibold text-[#e3e3e3] mb-1">Micro-Prompts</h3>
+            <p className="text-xs text-gray-500 mb-4">Customize the Just-In-Time (JIT) instructions injected into the engine during edge cases.</p>
+            <div className="space-y-6">
+              {Object.entries(prompts).map(([key, value]) => (
+                <div key={key} className="flex flex-col gap-1.5">
+                  <label className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">{key.replace(/_/g, ' ')}</label>
+                  <textarea value={value} onChange={(e) => setPrompts({ ...prompts,[key]: e.target.value })} className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 min-h-[60px] resize-y custom-scrollbar" />
                 </div>
-              </div>
-            )}
-
-            {activeTab === "behavior" && (
-              <div className="space-y-6">
-                <div className="mb-4">
-                  <h3 className="text-sm font-semibold text-[#e3e3e3]">Micro-Prompts</h3>
-                  <p className="text-xs text-gray-500 mt-1">Customize the Just-In-Time (JIT) instructions injected into the engine during edge cases.</p>
-                </div>
-                {Object.entries(prompts).map(([key, value]) => (
-                  <div key={key} className="flex flex-col gap-1.5">
-                    <label className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">{key.replace(/_/g, ' ')}</label>
-                    <textarea value={value} onChange={(e) => setPrompts({ ...prompts,[key]: e.target.value })} className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 min-h-[60px] resize-y custom-scrollbar" />
-                  </div>
-                ))}
-              </div>
-            )}
+              ))}
+            </div>
           </div>
         </div>
 
         <div className="p-4 border-t border-[#333537] flex justify-end items-center bg-[#131314] shrink-0">
           <button onClick={close} className="px-5 py-2 text-gray-400 hover:text-white font-medium text-sm transition-colors mr-2">Close</button>
-          
-          <button 
-            onClick={handleSave} 
+
+          <button
+            onClick={handleSave}
             disabled={!hasChanges || isSaving}
-            className={`px-6 py-2 font-semibold rounded-lg text-sm transition-all flex items-center gap-2 
-              ${showSuccess ? 'bg-emerald-600 text-white' : 
-                hasChanges ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20' : 
+            className={`px-6 py-2 font-semibold rounded-lg text-sm transition-all flex items-center gap-2
+              ${showSuccess ? 'bg-emerald-600 text-white' :
+                hasChanges ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-lg shadow-blue-900/20' :
                 'bg-[#282a2c] text-gray-500 cursor-not-allowed'}`}
           >
             {isSaving ? 'Saving...' : showSuccess ? (
