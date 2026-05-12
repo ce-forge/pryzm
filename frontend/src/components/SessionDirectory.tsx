@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useChatContext } from "@/context/ChatContext";
+import { APP_CONFIG } from "@/utils/constants";
 import SessionItem from "./SessionItem";
 
 interface SessionInfo {
@@ -21,7 +22,7 @@ interface FolderInfo {
 export default function SessionDirectory() {
   const { session } = useChatContext();
   const router = useRouter();
-  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+  const API_URL = APP_CONFIG.API_URL;
   
   const workspace = session.workspace;
   const currentSessionId = session.currentSession;

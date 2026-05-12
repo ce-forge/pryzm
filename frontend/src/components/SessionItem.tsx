@@ -2,6 +2,7 @@ import React, { useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
+import { APP_CONFIG } from "@/utils/constants";
 import { LoadingIcon } from "./Icons";
 import ConfirmModal from "./ConfirmModal"; // NEW IMPORT
 
@@ -25,7 +26,7 @@ export default function SessionItem({
   const dropdownRef = useRef<HTMLDivElement>(null);
   useOnClickOutside(dropdownRef, () => setIsDropdownOpen(false));
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+  const API_URL = APP_CONFIG.API_URL;
 
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

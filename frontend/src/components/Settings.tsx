@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { APP_CONFIG } from "@/utils/constants";
 
 export default function SettingsModal({ workspace, close }: { workspace: string, close: () => void }) {
   const [activeTab, setActiveTab] = useState<"general" | "behavior">("general");
@@ -13,7 +14,7 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+  const API_URL = APP_CONFIG.API_URL;
 
   useEffect(() => {
     fetch(`${API_URL}/api/models`)

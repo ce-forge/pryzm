@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { APP_CONFIG } from "@/utils/constants";
 
 export function useMessageActions(
   workspace: string,
@@ -9,7 +10,7 @@ export function useMessageActions(
   navigateToSession: (id: string) => void,
   selectedModel: string
 ) {
-  const API_URL = process.env.NEXT_PUBLIC_API_URL;
+  const API_URL = APP_CONFIG.API_URL;
 
   const saveEdit = useCallback(async (msgId: string | undefined, index: number, newContent: string, rerun: boolean) => {
     if (!msgId || msgId.startsWith('temp-')) return;
