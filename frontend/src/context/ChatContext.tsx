@@ -8,10 +8,13 @@ import { useTestSuite } from "@/hooks/useTestSuite";
 import { useMessageActions } from "@/hooks/useMessageActions";
 import { APP_CONFIG } from "@/utils/constants";
 
-const ChatContext = createContext<any>(null);
-
-export function ChatProvider({ children }: { children: React.ReactNode }) {
-  
+/**
+ * Compose all chat-related hooks into a single value object. The context's
+ * type is inferred from this hook's return shape (see ChatContextValue
+ * below), so adding/removing fields here automatically propagates to every
+ * consumer of useChatContext() with no separate interface to maintain.
+ */
+function useChatValue() {
   const [selectedModel, setSelectedModel] = useState(() => {
     if (typeof window !== "undefined") {
       return localStorage.getItem("pryzm_model") || APP_CONFIG.DEFAULT_MODEL;
@@ -43,10 +46,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   );
 
   const currentKey = session.currentSession || "temp_new_chat";
-  
+
   const currentIsProcessing =
     session.streamingSessionIdsRef.current.has(currentKey);
-    
+
   const currentIsTesting = tester.activeTestSessions.has(currentKey);
 
   const handleInference = async (rawPrompt: string) => {
@@ -58,7 +61,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     const pendingUploads = uploader.uploads.filter(
-      (u: any) => u.status === "pending"
+      (u) => u.status === "pending"
     );
 
     if (pendingUploads.length > 0) {
@@ -66,15 +69,15 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     }
 
     const successfulUploads = uploader.uploads.filter(
-      (u: any) => u.status === "success"
+      (u) => u.status === "success"
     );
 
     const documentIds = successfulUploads
-      .map((u: any) => u.document_id)
-      .filter(Boolean);
+      .map((u) => u.document_id)
+      .filter((id): id is string => Boolean(id));
 
     let attachedPrefix = successfulUploads
-      .map((u: any) => `[Attached_File:${u.file.name}]`)
+      .map((u) => `[Attached_File:${u.file.name}]`)
       .join("\n");
 
     if (attachedPrefix) {
@@ -105,9 +108,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     ai.sendMessage,
     session.navigateToSession,
     selectedModel
-  )
+  );
 
-  const value = {
+  return {
     session,
     uploader,
     ai,
@@ -118,14 +121,27 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     currentIsTesting,
     handleInference,
     stopAllInference,
-    msgActions
+    msgActions,
   };
-
-  return (
-    <ChatContext.Provider value={value}>
-      {children}
-    </ChatContext.Provider>
-  );
 }
 
-export const useChatContext = () => useContext(ChatContext);
+export type ChatContextValue = ReturnType<typeof useChatValue>;
+
+const ChatContext = createContext<ChatContextValue | null>(null);
+
+export function ChatProvider({ children }: { children: React.ReactNode }) {
+  const value = useChatValue();
+  return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;
+}
+
+/**
+ * Throws if called outside <ChatProvider>. Callers can therefore treat the
+ * returned object as always-defined and let TypeScript narrow accordingly.
+ */
+export const useChatContext = (): ChatContextValue => {
+  const ctx = useContext(ChatContext);
+  if (!ctx) {
+    throw new Error("useChatContext must be used inside <ChatProvider>");
+  }
+  return ctx;
+};

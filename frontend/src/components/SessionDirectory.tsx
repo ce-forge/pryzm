@@ -1,10 +1,11 @@
 "use client";
 
 import React, { useEffect, useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
+import { v4 as uuid } from "uuid";
 import { useChatContext } from "@/context/ChatContext";
 import { APP_CONFIG } from "@/utils/constants";
 import SessionItem from "./SessionItem";
+import ConfirmModal from "./ConfirmModal";
 
 interface SessionInfo {
   id: string;
@@ -21,7 +22,6 @@ interface FolderInfo {
 
 export default function SessionDirectory() {
   const { session } = useChatContext();
-  const router = useRouter();
   const API_URL = APP_CONFIG.API_URL;
   
   const workspace = session.workspace;
@@ -35,7 +35,13 @@ export default function SessionDirectory() {
   const [activeFolderDropdown, setActiveFolderDropdown] = useState<string | null>(null);
   const [foldersLoaded, setFoldersLoaded] = useState(false);
   const [dragTarget, setDragTarget] = useState<string | null>(null);
-  
+
+  // Inline create-folder UI state, mirrors the rename-folder pattern below.
+  const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState("");
+  // Folder pending delete confirmation, or null when no confirm is open.
+  const [folderPendingDelete, setFolderPendingDelete] = useState<FolderInfo | null>(null);
+
   const [loadedWorkspace, setLoadedWorkspace] = useState(workspace);
 
   useEffect(() => {
@@ -87,8 +93,16 @@ export default function SessionDirectory() {
     fetch(`${API_URL}/folders?workspace=${workspace}`)
       .then(res => res.json())
       .then(data => {
-        const savedOpen = localStorage.getItem(`pryzm_folders_open_${workspace}`);
-        const openSet = savedOpen ? new Set(JSON.parse(savedOpen)) : new Set();
+        // localStorage can hold corrupted JSON if the user (or another tab)
+        // wrote garbage; treat parse failure as "no folders open" instead of
+        // crashing the directory render.
+        let openSet = new Set<string>();
+        try {
+          const savedOpen = localStorage.getItem(`pryzm_folders_open_${workspace}`);
+          if (savedOpen) openSet = new Set(JSON.parse(savedOpen));
+        } catch (e) {
+          console.warn("Corrupted pryzm_folders_open_* in localStorage; ignoring.", e);
+        }
         setFolders(data.map((f: any) => ({ ...f, isOpen: openSet.has(f.id) })));
         setFoldersLoaded(true);
         setLoadedWorkspace(workspace);
@@ -126,51 +140,60 @@ export default function SessionDirectory() {
     } catch (err) {}
   };
 
-  const handleCreateFolder = async () => {
-    const name = prompt("Enter new folder name:");
-    if (name && name.trim()) {
-      const newFolder = { id: Date.now().toString(), name: name.trim(), workspace };
-      setFolders([{ ...newFolder, isOpen: true }, ...folders]);
+  const submitNewFolder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleaned = newFolderName.trim();
+    if (!cleaned) {
+      setIsCreatingFolder(false);
+      setNewFolderName("");
+      return;
+    }
+    // UUIDv4 instead of Date.now() — two rapid creates can otherwise collide.
+    const newFolder = { id: uuid(), name: cleaned, workspace };
+    setFolders([{ ...newFolder, isOpen: true }, ...folders]);
+    setIsCreatingFolder(false);
+    setNewFolderName("");
+    try {
       await fetch(`${API_URL}/folders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newFolder)
+        body: JSON.stringify(newFolder),
       });
+    } catch (err) {
+      console.error("Folder create failed", err);
     }
   };
 
   const handleRenameFolderSubmit = async (e: React.FormEvent, id: string) => {
     e.preventDefault();
-    if (!editFolderTitle.trim()) return setEditingFolderId(null);
-    setFolders(prev => prev.map(f => f.id === id ? { ...f, name: editFolderTitle } : f));
+    const cleaned = editFolderTitle.trim();
+    if (!cleaned) return setEditingFolderId(null);
+    setFolders(prev => prev.map(f => f.id === id ? { ...f, name: cleaned } : f));
     setEditingFolderId(null);
     try {
       await fetch(`${API_URL}/folders/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editFolderTitle })
+        body: JSON.stringify({ name: cleaned }),
       });
     } catch (err) {}
   };
 
-  // CLEAN FIX: Halt thread for confirm() BEFORE doing state updates.
-  const handleDeleteFolder = async (e: React.MouseEvent, folderId: string) => {
+  const requestDeleteFolder = (e: React.MouseEvent, folder: FolderInfo) => {
     e.preventDefault();
     e.stopPropagation();
-
-    // 1. Ask first!
-    if (!window.confirm("Delete this folder? Sessions inside will not be deleted but will become unsorted.")) {
-        setActiveFolderDropdown(null);
-        return;
-    }
-
-    // 2. Only do state updates after they explicitly hit OK
     setActiveFolderDropdown(null);
+    setFolderPendingDelete(folder);
+  };
+
+  const confirmDeleteFolder = async () => {
+    if (!folderPendingDelete) return;
+    const folderId = folderPendingDelete.id;
+    setFolderPendingDelete(null);
     setFolders(prev => prev.filter(f => f.id !== folderId));
-    
     try {
       await fetch(`${API_URL}/folders/${folderId}`, { method: "DELETE" });
-      fetchSessions(); 
+      fetchSessions();
     } catch (err) {}
   };
 
@@ -200,13 +223,36 @@ export default function SessionDirectory() {
 
       <div className="flex items-center justify-between px-3 mt-2 mb-1">
         <span className="text-[11px] font-bold uppercase tracking-wider text-gray-500">Log Directories</span>
-        <button onClick={handleCreateFolder} className="text-gray-500 hover:text-[#e3e3e3] transition-colors p-1" title="New Folder">
+        <button
+          onClick={() => { setIsCreatingFolder(true); setNewFolderName(""); }}
+          className="text-gray-500 hover:text-[#e3e3e3] transition-colors p-1"
+          title="New Folder"
+        >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 13h6m-3-3v6m-9 1V7a2 2 0 012-2h6l2 2h6a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
           </svg>
         </button>
       </div>
-      
+
+      {isCreatingFolder && (
+        <form onSubmit={submitNewFolder} className="px-3 py-1.5">
+          <input
+            autoFocus
+            value={newFolderName}
+            placeholder="Folder name"
+            onChange={(e) => setNewFolderName(e.target.value)}
+            onBlur={submitNewFolder}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setIsCreatingFolder(false);
+                setNewFolderName("");
+              }
+            }}
+            className="w-full bg-[#131314] text-[#e3e3e3] text-sm px-2 py-0.5 rounded outline-none border border-blue-500/50"
+          />
+        </form>
+      )}
+
       {folders.map(folder => (
         <div 
           key={folder.id} 
@@ -273,8 +319,8 @@ export default function SessionDirectory() {
                       >
                         Rename
                       </button>
-                      <button 
-                        onClick={(e) => handleDeleteFolder(e, folder.id)} 
+                      <button
+                        onClick={(e) => requestDeleteFolder(e, folder)}
                         className="text-left px-3 py-1.5 text-xs hover:bg-red-500/10 text-red-400"
                       >
                         Delete
@@ -337,6 +383,14 @@ export default function SessionDirectory() {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        isOpen={!!folderPendingDelete}
+        title={`Delete folder "${folderPendingDelete?.name ?? ""}"?`}
+        description="Sessions inside will not be deleted but will become unsorted."
+        onConfirm={confirmDeleteFolder}
+        onCancel={() => setFolderPendingDelete(null)}
+      />
     </>
   );
 }

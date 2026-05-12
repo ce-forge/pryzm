@@ -35,8 +35,15 @@ export function useSession() {
     if (urlSessionId !== currentSession) setCurrentSession(urlSessionId);
   }, [urlSessionId, currentSession]);
 
+  // The cache is read inside loadSessionData via a ref so that updates to
+  // messageCache don't recreate the callback. Without this the effect that
+  // depends on loadSessionData re-fires on every chunk during streaming,
+  // rebinding the chatCreated listener and re-fetching sessions repeatedly.
+  const messageCacheRef = useRef(messageCache);
+  messageCacheRef.current = messageCache;
+
   /**
-   * Loads session history and title. 
+   * Loads session history and title.
    * @param force - If true, ignores the cache and fetches fresh data from DB.
    */
   const loadSessionData = useCallback(async (force = false) => {
@@ -45,7 +52,7 @@ export function useSession() {
       return;
     }
 
-    const cacheLen = messageCache[currentSession]?.length || 0;
+    const cacheLen = messageCacheRef.current[currentSession]?.length || 0;
 
     // We fetch if the cache is empty OR if we are forcing a sync (after AI finishes)
     if (force || cacheLen === 0) {
@@ -56,8 +63,8 @@ export function useSession() {
           // CRITICAL: This overwrites "temp-" IDs with real DB UUIDs
           setMessageCache(prev => ({ ...prev, [currentSession]: historyData }));
         }
-      } catch (error) { 
-        console.error("History sync failed:", error); 
+      } catch (error) {
+        console.error("History sync failed:", error);
       }
     }
 
@@ -73,7 +80,7 @@ export function useSession() {
         }
       }
     } catch (e) {}
-  }, [currentSession, workspace, messageCache]);
+  }, [currentSession, workspace, setMessageCache]);
 
   // Initial Load & Event Listener for Sync
   useEffect(() => {

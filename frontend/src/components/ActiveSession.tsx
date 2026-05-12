@@ -69,21 +69,23 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
 
             {messages.map((m: any, i: number) => {
               const isLastStreaming = currentIsProcessing && i === messages.length - 1 && m.role === "assistant";
-              
+
               // Stream text directly into the bubble properties
               const displayContent = (isLastStreaming && myStreamingText) ? myStreamingText : m.content;
-              const stableKey = `msg-${i}`;
+              // Prefer the message id so React state survives deletes/inserts; index
+              // is a last-resort fallback for the (rare) case a message has no id.
+              const stableKey = m.id ?? `idx-${i}`;
 
               return (
                 <React.Fragment key={stableKey}>
                   <ChatTimestamp timestamp={m.timestamp} previousTimestamp={i > 0 ? messages[i-1].timestamp : undefined} isFirstMessage={i === 0} />
-                  <ChatBubble 
-                    message={{ ...m, content: displayContent }} 
-                    index={i} 
-                    activeSessionKey={activeSessionKey} 
-                    searchQuery={search.searchQuery} 
-                    isStreaming={isLastStreaming} 
-                    onDeleteRequest={(id, idx) => setDeleteConfirm({ id, index: idx })} 
+                  <ChatBubble
+                    message={{ ...m, content: displayContent }}
+                    index={i}
+                    activeSessionKey={activeSessionKey}
+                    searchQuery={search.searchQuery}
+                    isStreaming={isLastStreaming}
+                    onDeleteRequest={(id, idx) => setDeleteConfirm({ id, index: idx })}
                   />
                 </React.Fragment>
               );
