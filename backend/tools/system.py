@@ -5,11 +5,12 @@ from db.models import Session
 @tool(
     properties={
         "new_title": {
-            "type": "string", 
+            "type": "string",
             "description": "The new title. If the user asks you to rename the chat but doesn't provide a specific name, you MUST invent a concise, context-aware title based on the current conversation yourself."
         }
     },
-    required=["new_title"]
+    required=["new_title"],
+    workspaces=["it_copilot", "personal"],
 )
 def rename_chat_session(new_title: str, session_id: str = None, workspace: str = None) -> str:
     """Renames the current chat session to the requested title."""

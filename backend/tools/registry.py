@@ -1,17 +1,31 @@
 AVAILABLE_TOOLS = {}
-TOOL_DEFINITIONS =[]
+TOOL_DEFINITIONS = []
 
-def tool(properties, required=None):
-    """
-    A decorator that automatically converts a Python function 
-    into a compatible JSON tool for the LLM.
+# Per-tool workspace allowlist. Maps tool name -> list of workspace names
+# (e.g. "it_copilot", "personal") in which the tool is exposed to the LLM.
+# Populated by the @tool decorator. The eventual UI-driven workspace tool
+# config (see project_workspace_roadmap memory) will overlay this default.
+TOOL_WORKSPACES: dict[str, list[str]] = {}
+
+
+def tool(properties, required=None, workspaces=None):
+    """A decorator that turns a Python function into an LLM-callable tool.
+
+    workspaces: list of workspace names in which the tool is exposed. Defaults
+    to ["it_copilot"] to preserve historical behavior — every existing tool was
+    only available in the IT Copilot workspace. Pass a longer list to opt a
+    tool into additional workspaces (e.g. rename_chat_session is allowed in
+    "personal" too because users like that affordance everywhere).
     """
     if required is None:
-        required =[]
-        
+        required = []
+    if workspaces is None:
+        workspaces = ["it_copilot"]
+
     def decorator(func):
         AVAILABLE_TOOLS[func.__name__] = func
-        
+        TOOL_WORKSPACES[func.__name__] = list(workspaces)
+
         TOOL_DEFINITIONS.append({
             "type": "function",
             "function": {
@@ -20,9 +34,24 @@ def tool(properties, required=None):
                 "parameters": {
                     "type": "object",
                     "properties": properties,
-                    "required": required
-                }
-            }
+                    "required": required,
+                },
+            },
         })
         return func
     return decorator
+
+
+def get_tools_for_workspace(workspace: str):
+    """Return (callable_map, definitions_list) restricted to tools exposed in
+    the given workspace. This is the seam where a future UI-driven override
+    will plug in — for now it just filters by the decorator-declared allowlist.
+    """
+    allowed_names = {
+        name for name, spaces in TOOL_WORKSPACES.items() if workspace in spaces
+    }
+    callables = {name: fn for name, fn in AVAILABLE_TOOLS.items() if name in allowed_names}
+    definitions = [
+        d for d in TOOL_DEFINITIONS if d["function"]["name"] in allowed_names
+    ]
+    return callables, definitions

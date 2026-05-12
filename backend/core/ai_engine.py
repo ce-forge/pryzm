@@ -9,7 +9,7 @@ from db import database
 from services import knowledge
 from config import settings
 import tools
-from tools.registry import AVAILABLE_TOOLS, TOOL_DEFINITIONS
+from tools.registry import AVAILABLE_TOOLS, TOOL_DEFINITIONS, get_tools_for_workspace
 from core.prompt_manager import MICRO_PROMPTS
 from utils.formatters import (
     format_tool_execution, 
@@ -61,14 +61,18 @@ def get_system_prompt(mode: str, tool_names: str) -> str:
 
 def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None, model_name: str = "gemma4:e4b"):
     url = f"{BASE_OLLAMA_URL}/api/chat"
-    
-    if mode == "it_copilot":
-        tool_names = ", ".join(AVAILABLE_TOOLS.keys())
+
+    # Each workspace gets the subset of tools that opted into it via the
+    # @tool(workspaces=[...]) decorator. Workspaces with no exposed tools
+    # (or unrecognised workspace names) just won't advertise any to the LLM.
+    workspace_tools, workspace_tool_defs = get_tools_for_workspace(mode)
+    if workspace_tools:
+        tool_names = ", ".join(workspace_tools.keys())
         system_msg = {"role": "system", "content": get_system_prompt(mode, tool_names)}
-        tools_payload = TOOL_DEFINITIONS
+        tools_payload = workspace_tool_defs
     else:
         system_msg = {"role": "system", "content": get_system_prompt(mode, "")}
-        tools_payload = None 
+        tools_payload = None
        
     memory_content = ""
     active_messages =[]
@@ -154,8 +158,8 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                         except:
                             args = {}
                     
-                    if func_name in AVAILABLE_TOOLS:
-                        func = AVAILABLE_TOOLS[func_name]
+                    if func_name in workspace_tools:
+                        func = workspace_tools[func_name]
                         
                         valid_params = inspect.signature(func).parameters.keys()
                         safe_args = {k: v for k, v in args.items() if k in valid_params}
