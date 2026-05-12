@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useChatContext } from "@/context/ChatContext";
 import { APP_CONFIG } from "@/utils/constants";
 import { Workspace } from "@/hooks/useWorkspaces";
@@ -12,7 +13,8 @@ interface Props {
 }
 
 export default function WorkspaceSettings({ workspace, onClose }: Props) {
-  const { workspacesApi, session } = useChatContext();
+  const { workspacesApi } = useChatContext();
+  const router = useRouter();
 
   const [name, setName] = useState(workspace.display_name);
   const [prompt, setPrompt] = useState(workspace.system_prompt);
@@ -50,8 +52,7 @@ export default function WorkspaceSettings({ workspace, onClose }: Props) {
       const remaining = workspacesApi.workspaces.filter((w) => w.slug !== workspace.slug);
       const next = remaining[0];
       if (next) {
-        session.navigateToSession("");
-        window.location.search = `?workspace=${next.slug}`;
+        router.replace(`/?workspace=${next.slug}`);
       }
     }
     onClose();

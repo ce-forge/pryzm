@@ -1,13 +1,15 @@
 "use client";
 
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useChatContext } from "@/context/ChatContext";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import InlineCreateForm from "./InlineCreateForm";
 import WorkspaceSettings from "./WorkspaceSettings";
 
 export default function WorkspaceSwitcher() {
-  const { workspacesApi, activeWorkspace, session } = useChatContext();
+  const { workspacesApi, activeWorkspace } = useChatContext();
+  const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [cloneFrom, setCloneFrom] = useState<string | null>(null);
@@ -17,9 +19,21 @@ export default function WorkspaceSwitcher() {
 
   const switchTo = (slug: string) => {
     setIsOpen(false);
-    session.navigateToSession("");
-    window.location.search = `?workspace=${slug}`;
+    // Soft navigation — preserves React state for the new workspace (which
+    // will rehydrate via useSession's URL watcher + useWorkspaces' refresh).
+    router.replace(`/?workspace=${slug}`);
   };
+
+  // Silent redirect when the URL points at an unknown/deleted workspace slug.
+  // Picks the first workspace by created_at (typically it_copilot) and
+  // replaces the URL. Only runs once workspaces have loaded so we don't
+  // race the initial fetch.
+  useEffect(() => {
+    if (workspacesApi.loaded && !activeWorkspace && workspacesApi.workspaces.length > 0) {
+      const fallback = workspacesApi.workspaces[0];
+      router.replace(`/?workspace=${fallback.slug}`);
+    }
+  }, [workspacesApi.loaded, activeWorkspace, workspacesApi.workspaces, router]);
 
   const handleCreate = async (display_name: string) => {
     const ws = await workspacesApi.create({ display_name, clone_from: cloneFrom });
