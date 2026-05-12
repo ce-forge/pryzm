@@ -50,12 +50,14 @@ export function useMessageActions(
 
   const branchSession = useCallback(async (msgId: string) => {
     if (!msgId || msgId.startsWith('temp-')) return;
-    
+
     try {
-      const res = await fetch(`${API_URL}/sessions/${activeSessionKey}/branch?up_to_message_id=${msgId}`, {
-        method: "POST"
+      const res = await fetch(`${API_URL}/sessions/${activeSessionKey}/branch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ up_to_message_id: msgId }),
       });
-      
+
       if (res.ok) {
         const data = await res.json();
         if (data.new_session_id) {

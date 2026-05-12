@@ -9,11 +9,12 @@ from utils.formatters import format_rag_context, format_tool_results
 @tool(
     properties={
         "query": {
-            "type": "string", 
+            "type": "string",
             "description": "The search query, topic, or specific filename to look up."
         }
     },
-    required=["query"]
+    required=["query"],
+    workspaces=["it_copilot", "personal"],
 )
 def search_knowledge_base(query: str, workspace: str, session_id: str = None) -> str:
     """

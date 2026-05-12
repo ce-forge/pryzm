@@ -21,12 +21,15 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://127.0.0.1:6379"
     OLLAMA_URL: str = "http://127.0.0.1:11434"
 
-    CORS_ORIGINS: list[str] =[
+    # Explicit allowlist. Combining "*" with allow_credentials=True (set in
+    # main.py) is rejected by browsers, so wildcarding is off. If a deployment
+    # needs additional origins (e.g. a tunnel for remote access), they should
+    # be appended here or surfaced via env var rather than re-introducing "*".
+    CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
         "http://192.168.0.108:3000",
         "http://192.168.0.108",
-        "*"
     ]
 
     model_config = SettingsConfigDict(env_file="../.env", extra="ignore")

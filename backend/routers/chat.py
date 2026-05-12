@@ -8,8 +8,9 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from services import knowledge
-from schemas import (InferenceRequest, SessionResponse, SessionUpdate, 
-                     FolderUpdate, MessageHistory, FolderCreate)
+from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
+                     FolderUpdate, MessageHistory, FolderCreate, BranchRequest)
+from sqlalchemy import tuple_, func as sqlfunc
 from config import settings
 from utils.formatters import format_error
 import requests
@@ -333,49 +334,82 @@ def delete_message(message_id: str, db: Session = Depends(database.get_db)):
     return {"status": "success", "session_id": session_id}
 
 @router.post("/sessions/{session_id}/branch")
-def branch_session(session_id: str, up_to_message_id: str, db: Session = Depends(database.get_db)):
-    # 1. Get original session
+def branch_session(session_id: str, body: BranchRequest, db: Session = Depends(database.get_db)):
     old_session = db.query(models.Session).filter(models.Session.id == session_id).first()
-    
-    # 2. Create new session
-    new_session = models.Session(
-        title=f"{old_session.title} (Branch)",
-        mode=old_session.mode
-    )
+    if not old_session:
+        raise HTTPException(status_code=404, detail="Source session not found")
+
+    target = db.query(models.Message).filter(
+        models.Message.id == body.up_to_message_id,
+        models.Message.session_id == session_id,
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="up_to_message_id does not belong to this session")
+
+    # Avoid stacking "(Branch) (Branch) (Branch) ..." when re-branching a branch.
+    branched_title = old_session.title if old_session.title.endswith("(Branch)") else f"{old_session.title} (Branch)"
+    new_session = models.Session(title=branched_title, mode=old_session.mode)
     db.add(new_session)
     db.commit()
     db.refresh(new_session)
-    
-    # 3. Copy messages up to the specific one
+
+    # Pull only user/assistant rows in chronological order. Memory rows are
+    # skipped because their JSON payload references message IDs that won't
+    # exist in the new branch and would corrupt the condenser state.
     messages = db.query(models.Message).filter(
-        models.Message.session_id == session_id
-    ).order_by(models.Message.created_at).all()
-    
+        models.Message.session_id == session_id,
+        models.Message.role.in_(["user", "assistant"]),
+    ).order_by(models.Message.created_at, models.Message.id).all()
+
     for m in messages:
+        # clock_timestamp() returns real wall-clock time per row, so each
+        # copy gets a distinct created_at. The default `now()` would have
+        # given every row in this transaction the same timestamp, breaking
+        # any later truncate that orders by created_at.
         new_msg = models.Message(
             session_id=new_session.id,
             role=m.role,
-            content=m.content
+            content=m.content,
+            status=m.status,
+            created_at=sqlfunc.clock_timestamp(),
         )
         db.add(new_msg)
-        if m.id == up_to_message_id:
+        if m.id == body.up_to_message_id:
             break
-            
+
     db.commit()
     return {"new_session_id": new_session.id}
 
 @router.delete("/sessions/{session_id}/truncate/{message_id}")
 def truncate_session(session_id: str, message_id: str, db: Session = Depends(database.get_db)):
-    """Deletes all messages in a session that occurred AFTER the specified message_id."""
-    target_msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+    """Delete all messages in a session that occurred AFTER the specified message_id.
+
+    Uses (created_at, id) as a tuple ordering so two messages sharing a
+    created_at (which can happen when multiple rows commit in the same
+    transaction — see branch_session) still produce a deterministic split.
+    """
+    target_msg = db.query(models.Message).filter(
+        models.Message.id == message_id,
+        models.Message.session_id == session_id,
+    ).first()
     if not target_msg:
         raise HTTPException(status_code=404, detail="Target message not found")
 
-    # Delete everything created after the target message's timestamp in this session
     deleted_count = db.query(models.Message).filter(
         models.Message.session_id == session_id,
-        models.Message.created_at > target_msg.created_at
+        tuple_(models.Message.created_at, models.Message.id) >
+            (target_msg.created_at, target_msg.id),
     ).delete(synchronize_session=False)
-    
+
+    # If the memory row references a now-deleted message_id, the condenser
+    # would silently restart from index 0 next time and re-summarize content
+    # already baked into the summary. Easier and safer to just drop the
+    # memory row whenever the session is truncated — the next condense pass
+    # rebuilds from whatever survives.
+    db.query(models.Message).filter(
+        models.Message.session_id == session_id,
+        models.Message.role == "memory",
+    ).delete(synchronize_session=False)
+
     db.commit()
     return {"status": "success", "deleted_count": deleted_count}

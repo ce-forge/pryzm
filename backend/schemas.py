@@ -45,6 +45,9 @@ class FolderCreate(BaseModel):
     name: str
     workspace: str
 
+class BranchRequest(BaseModel):
+    up_to_message_id: str
+
 class SystemStatus(BaseModel):
     api: str
     redis: str

@@ -115,25 +115,28 @@ export function useInference(
         if (msgs.length === 0) return prev;
         const newMsgs = [...msgs];
         newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], content: fullAssistantMessage };
-        
-        // Finalize both buckets
-        const next = { ...prev, [optimisticId]: newMsgs };
+
+        // Finalize the real-id bucket if we got a handoff; otherwise leave
+        // the optimistic bucket as the canonical store. We only mirror into
+        // the optimistic bucket DURING the stream to avoid blanking the UI
+        // during the URL change; once the stream ends, the real bucket owns
+        // the conversation and the optimistic key can be discarded.
         if (realDbId !== null) {
-            next[realDbId] = newMsgs;
+            const { [optimisticId]: _opt, ...rest } = prev;
+            return { ...rest, [realDbId]: newMsgs };
         }
-        return next;
+        return { ...prev, [optimisticId]: newMsgs };
       });
-      
-      // Safely delete both buckets using TS rest properties
-      setStreamingContent(prev => { 
-        const { [optimisticId]: optRemoved, ...rest1 } = prev;
+
+      setStreamingContent(prev => {
+        const { [optimisticId]: _optRemoved, ...rest1 } = prev;
         if (realDbId !== null) {
-            const { [realDbId]: dbRemoved, ...rest2 } = rest1;
+            const { [realDbId]: _dbRemoved, ...rest2 } = rest1;
             return rest2;
         }
-        return rest1; 
+        return rest1;
       });
-      
+
       streamingSessionIdsRef.current.delete(optimisticId);
       if (realDbId !== null) streamingSessionIdsRef.current.delete(realDbId);
       window.dispatchEvent(new Event("chatCreated"));
