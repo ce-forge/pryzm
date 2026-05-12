@@ -37,6 +37,7 @@ class MessageHistory(BaseModel):
     id: str
     role: str
     content: str
+    status: str = "complete"
     timestamp: Optional[str] = None
 
 class FolderCreate(BaseModel):

@@ -26,6 +26,10 @@ class Message(Base):
     session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
     role = Column(String, nullable=False)
     content = Column(Text, nullable=False)
+    # Lifecycle of the assistant generation that produced this row. Always
+    # "complete" for user/memory rows. The /analyze finally block flips this
+    # to "aborted" or "failed" when the stream did not reach a clean end.
+    status = Column(String, nullable=False, default="complete", server_default="complete")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     session = relationship("Session", back_populates="messages")
 

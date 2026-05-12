@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Optional, List
@@ -33,11 +33,12 @@ def get_session_history(session_id: str, db: Session = Depends(database.get_db))
         models.Message.role.in_(["user", "assistant"]) 
     ).order_by(models.Message.created_at).all()
     
-    return [{"id": m.id, 
-            "role": m.role, 
+    return [{"id": m.id,
+            "role": m.role,
             "content": m.content,
-            "timestamp": m.created_at.isoformat() if m.created_at else None
-            } 
+            "status": m.status,
+            "timestamp": m.created_at.isoformat() if m.created_at else None,
+            }
             for m in messages
     ]
 
@@ -72,67 +73,115 @@ def delete_session(session_id: str, db: Session = Depends(database.get_db)):
     return {"status": "deleted"}
 
 @router.post("/analyze")
-def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_db)):
-    chat_session = None
-    
-    if request.session_id:
-        chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
-        
-    if not chat_session:
-        generated_title = ai_engine.generate_title(request.prompt, request.model)
-        chat_session = models.Session(title=generated_title, mode=request.mode)
-        db.add(chat_session)
-        db.commit()
-        db.refresh(chat_session)
-    elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
-        chat_session.title = ai_engine.generate_title(request.prompt, request.model)
-        db.commit()
-        db.refresh(chat_session)
-        
-    if request.attachments:
-        db.query(models.Document).filter(
-            models.Document.id.in_(request.attachments)
-        ).update({"session_id": chat_session.id}, synchronize_session=False)
-        db.commit()
+def analyze_data(
+    http_request: Request,
+    request: InferenceRequest,
+):
+    # We manage the upfront DB session manually instead of using
+    # Depends(get_db) so the connection is returned to the pool BEFORE the
+    # long-lived streaming response begins. With Depends, the dependency's
+    # cleanup runs after the StreamingResponse finishes, which can hold the
+    # connection for the full generation lifetime and exhaust the pool when
+    # multiple sessions stream concurrently.
+    db = database.SessionLocal()
+    try:
+        chat_session = None
 
-    if not request.skip_db_save:
-        user_msg = models.Message(session_id=chat_session.id, role="user", content=request.prompt)
-        db.add(user_msg)
-        db.commit()
-    else:
-        print(f"SKIPPING DB SAVE for session {chat_session.id}")
+        if request.session_id:
+            chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
 
-    history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
-    safe_messages =[{"role": msg.role, "content": msg.content} for msg in history]
+        if not chat_session:
+            generated_title = ai_engine.generate_title(request.prompt, request.model)
+            chat_session = models.Session(title=generated_title, mode=request.mode)
+            db.add(chat_session)
+            db.commit()
+            db.refresh(chat_session)
+        elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
+            chat_session.title = ai_engine.generate_title(request.prompt, request.model)
+            db.commit()
+            db.refresh(chat_session)
 
-    def generate():
-        yield json.dumps({"status": "started", "session_id": chat_session.id}) + "\n"
-        
+        if request.attachments:
+            db.query(models.Document).filter(
+                models.Document.id.in_(request.attachments)
+            ).update({"session_id": chat_session.id}, synchronize_session=False)
+            db.commit()
+
+        if not request.skip_db_save:
+            user_msg = models.Message(session_id=chat_session.id, role="user", content=request.prompt)
+            db.add(user_msg)
+            db.commit()
+
+        history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
+        safe_messages = [{"role": msg.role, "content": msg.content} for msg in history]
+
+        # Capture identifiers needed inside the generator so we don't reach into
+        # `chat_session` after the local `db` is closed below.
+        session_id = chat_session.id
+        mode = request.mode
+        model_name = request.model
+    finally:
+        db.close()
+
+    async def generate():
+        yield json.dumps({"status": "started", "session_id": session_id}) + "\n"
+
         full_response = ""
+        completed = False
+        disconnected = False
+
         try:
-            for chunk in ai_engine.stream_chat(safe_messages, request.mode, chat_session.id, request.model): 
+            for chunk in ai_engine.stream_chat(safe_messages, mode, session_id, model_name):
+                if await http_request.is_disconnected():
+                    disconnected = True
+                    break
                 full_response += chunk
                 yield json.dumps({"chunk": chunk}) + "\n"
-                
-            yield json.dumps({"done": True}) + "\n"
-            
+
+            if not disconnected:
+                yield json.dumps({"done": True}) + "\n"
+                completed = True
+
         except Exception as e:
             error_msg = format_error(str(e), "Fatal Stream Error")
             full_response += error_msg
-            yield json.dumps({"chunk": error_msg}) + "\n"
+            try:
+                yield json.dumps({"chunk": error_msg}) + "\n"
+            except Exception:
+                # If the client is already gone, we can't yield; still want the
+                # finally block to persist what we have.
+                pass
 
         finally:
+            if completed:
+                status = "complete"
+            elif disconnected:
+                status = "aborted"
+                full_response += "\n\n*[Response aborted by user.]*"
+            else:
+                status = "failed"
+
             if full_response.strip():
                 background_db = database.SessionLocal()
                 try:
-                    ai_msg = models.Message(session_id=chat_session.id, role="assistant", content=full_response)
+                    ai_msg = models.Message(
+                        session_id=session_id,
+                        role="assistant",
+                        content=full_response,
+                        status=status,
+                    )
                     background_db.add(ai_msg)
                     background_db.commit()
-                    
-                    all_msgs = background_db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
-                    
+
+                    # Memory condenser only summarises clean (status=complete)
+                    # user/assistant exchanges — aborted or failed turns are
+                    # noise we don't want to bake into long-term memory.
+                    all_msgs = background_db.query(models.Message).filter(
+                        models.Message.session_id == session_id
+                    ).order_by(models.Message.created_at).all()
+
                     memory_msg = next((m for m in all_msgs if m.role == "memory"), None)
-                    
+
                     last_id = None
                     old_summary = ""
                     if memory_msg:
@@ -140,11 +189,14 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
                             mem_data = json.loads(memory_msg.content)
                             last_id = mem_data.get("last_summarized_id")
                             old_summary = mem_data.get("summary", "")
-                        except:
+                        except Exception:
                             old_summary = memory_msg.content
 
-                    active_msgs = [m for m in all_msgs if m.role in ["user", "assistant"]]
-                    
+                    active_msgs = [
+                        m for m in all_msgs
+                        if m.role in ["user", "assistant"] and m.status == "complete"
+                    ]
+
                     start_idx = 0
                     if last_id:
                         for i, m in enumerate(active_msgs):
@@ -153,28 +205,32 @@ def analyze_data(request: InferenceRequest, db: Session = Depends(database.get_d
                                 break
 
                     unsummarized = active_msgs[start_idx:]
-                    
+
                     if len(unsummarized) > settings.MEMORY_CONDENSE_THRESHOLD:
                         retain_count = settings.MEMORY_CONDENSE_RETAIN
-                        to_summarize = unsummarized[:-retain_count] 
+                        to_summarize = unsummarized[:-retain_count]
                         new_last_id = to_summarize[-1].id
-                        
-                        msg_dicts =[{"role": m.role, "content": m.content} for m in to_summarize]
-                        new_summary_text = ai_engine.condense_chat_memory(old_summary, msg_dicts, request.model)
-                        
+
+                        msg_dicts = [{"role": m.role, "content": m.content} for m in to_summarize]
+                        new_summary_text = ai_engine.condense_chat_memory(old_summary, msg_dicts, model_name)
+
                         new_mem_data = {
                             "last_summarized_id": new_last_id,
-                            "summary": new_summary_text
+                            "summary": new_summary_text,
                         }
-                        
+
                         if memory_msg:
                             memory_msg.content = json.dumps(new_mem_data)
                         else:
-                            new_mem = models.Message(session_id=chat_session.id, role="memory", content=json.dumps(new_mem_data))
+                            new_mem = models.Message(
+                                session_id=session_id,
+                                role="memory",
+                                content=json.dumps(new_mem_data),
+                            )
                             background_db.add(new_mem)
-                            
+
                         background_db.commit()
-                        
+
                 except Exception as e:
                     background_db.rollback()
                     print(f"Failed to process background memory: {e}")
