@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from db import database
-from routers import health, chat
+from routers import health, chat, workspaces
 from services.tasks import garbage_collection_task
 
 
@@ -74,4 +74,5 @@ app.add_middleware(RequestLogger)
 
 
 app.include_router(health.router)
+app.include_router(workspaces.router)
 app.include_router(chat.router)
