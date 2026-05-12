@@ -22,20 +22,59 @@ import requests
 router = APIRouter(tags=["AI Chat"])
 
 @router.get("/sessions", response_model=List[SessionResponse])
-def get_sessions(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
-    return db.query(models.Session).filter(models.Session.mode == workspace).order_by(models.Session.created_at.desc()).all()
+def get_sessions(
+    workspace: str = "it_copilot",
+    folder_id: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    db: Session = Depends(database.get_db),
+):
+    """List sessions for a workspace, newest first.
+
+    folder_id (optional) — restrict to a single folder. Omit to return all
+    sessions in the workspace; "unsorted" sessions (folder_id NULL) are
+    currently filtered client-side, since query params can't cleanly express
+    'null match'.
+
+    limit/offset (optional) — pagination. With no params the response is
+    unbounded to preserve the existing frontend's 'load all' behaviour.
+    """
+    q = db.query(models.Session).filter(models.Session.mode == workspace)
+    if folder_id is not None:
+        q = q.filter(models.Session.folder_id == folder_id)
+    q = q.order_by(models.Session.created_at.desc())
+    if offset:
+        q = q.offset(offset)
+    if limit is not None:
+        q = q.limit(limit)
+    return q.all()
 
 @router.get("/sessions/{session_id}", response_model=List[MessageHistory])
-def get_session_history(session_id: str, db: Session = Depends(database.get_db)):
+def get_session_history(
+    session_id: str,
+    limit: Optional[int] = None,
+    offset: int = 0,
+    db: Session = Depends(database.get_db),
+):
+    """Return user/assistant messages in chronological order.
+
+    limit/offset (optional) — pagination. Defaults preserve the existing
+    'load everything' behaviour so the chat UI keeps working unchanged.
+    """
     session = db.query(models.Session).filter(models.Session.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-        
-    messages = db.query(models.Message).filter(
+
+    q = db.query(models.Message).filter(
         models.Message.session_id == session_id,
-        models.Message.role.in_(["user", "assistant"]) 
-    ).order_by(models.Message.created_at).all()
-    
+        models.Message.role.in_(["user", "assistant"]),
+    ).order_by(models.Message.created_at)
+    if offset:
+        q = q.offset(offset)
+    if limit is not None:
+        q = q.limit(limit)
+    messages = q.all()
+
     return [{"id": m.id,
             "role": m.role,
             "content": m.content,
