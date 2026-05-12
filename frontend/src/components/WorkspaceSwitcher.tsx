@@ -4,43 +4,34 @@ import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useChatContext } from "@/context/ChatContext";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
-import InlineCreateForm from "./InlineCreateForm";
 import WorkspaceSettings from "./WorkspaceSettings";
+import { Workspace } from "@/hooks/useWorkspaces";
+
+type SettingsTarget =
+  | { workspace: Workspace; mode: "edit" }
+  | { workspace: null; mode: "create" }
+  | null;
 
 export default function WorkspaceSwitcher() {
   const { workspacesApi, activeWorkspace } = useChatContext();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
-  const [isCreating, setIsCreating] = useState(false);
-  const [cloneFrom, setCloneFrom] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>(null);
   const ref = useRef<HTMLDivElement>(null);
-  useOnClickOutside(ref, () => { setIsOpen(false); setIsCreating(false); });
+  useOnClickOutside(ref, () => setIsOpen(false));
 
   const switchTo = (slug: string) => {
     setIsOpen(false);
-    // Soft navigation — preserves React state for the new workspace (which
-    // will rehydrate via useSession's URL watcher + useWorkspaces' refresh).
     router.replace(`/?workspace=${slug}`);
   };
 
   // Silent redirect when the URL points at an unknown/deleted workspace slug.
-  // Picks the first workspace by created_at (typically it_copilot) and
-  // replaces the URL. Only runs once workspaces have loaded so we don't
-  // race the initial fetch.
   useEffect(() => {
     if (workspacesApi.loaded && !activeWorkspace && workspacesApi.workspaces.length > 0) {
       const fallback = workspacesApi.workspaces[0];
       router.replace(`/?workspace=${fallback.slug}`);
     }
   }, [workspacesApi.loaded, activeWorkspace, workspacesApi.workspaces, router]);
-
-  const handleCreate = async (display_name: string) => {
-    const ws = await workspacesApi.create({ display_name, clone_from: cloneFrom });
-    setIsCreating(false);
-    setCloneFrom(null);
-    if (ws) switchTo(ws.slug);
-  };
 
   return (
     <div className="px-4 mb-4 relative" ref={ref}>
@@ -58,62 +49,67 @@ export default function WorkspaceSwitcher() {
         <div className="absolute left-4 right-4 top-full mt-1 bg-[#1e1f20] border border-[#333537] rounded-lg shadow-2xl z-50 overflow-hidden">
           <div className="max-h-64 overflow-y-auto custom-scrollbar">
             {workspacesApi.workspaces.map((w) => (
-              <button
+              <div
                 key={w.slug}
-                onClick={() => switchTo(w.slug)}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-[#282a2c] flex items-center justify-between ${
-                  activeWorkspace?.slug === w.slug ? "bg-[#282a2c]/50 text-blue-400" : "text-gray-300"
+                className={`flex items-center justify-between pr-1 hover:bg-[#282a2c] ${
+                  activeWorkspace?.slug === w.slug ? "bg-[#282a2c]/50" : ""
                 }`}
               >
-                <span className="truncate">{w.display_name}</span>
-                {w.is_builtin && <span className="text-[9px] uppercase tracking-wider text-gray-500">built-in</span>}
-              </button>
+                <button
+                  onClick={() => switchTo(w.slug)}
+                  className={`flex-1 text-left px-3 py-2 text-sm ${
+                    activeWorkspace?.slug === w.slug ? "text-blue-400" : "text-gray-300"
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span className="truncate">{w.display_name}</span>
+                    {w.is_builtin && (
+                      <span className="text-[9px] uppercase tracking-wider text-gray-500 shrink-0">built-in</span>
+                    )}
+                  </span>
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsOpen(false);
+                    setSettingsTarget({ workspace: w, mode: "edit" });
+                  }}
+                  title={`Settings for ${w.display_name}`}
+                  className="p-1.5 text-gray-500 hover:text-gray-300 hover:bg-[#333537] rounded transition-colors shrink-0"
+                >
+                  &#9881;
+                </button>
+              </div>
             ))}
           </div>
 
           <div className="border-t border-[#333537]">
-            {isCreating ? (
-              <div className="p-2 space-y-2">
-                <select
-                  value={cloneFrom ?? ""}
-                  onChange={(e) => setCloneFrom(e.target.value || null)}
-                  className="w-full bg-[#131314] text-[#e3e3e3] text-xs px-2 py-1 rounded border border-[#333537]"
-                >
-                  <option value="">Blank (default)</option>
-                  {workspacesApi.workspaces.map((w) => (
-                    <option key={w.slug} value={w.slug}>Clone from {w.display_name}</option>
-                  ))}
-                </select>
-                <InlineCreateForm
-                  placeholder="Workspace name"
-                  onSubmit={handleCreate}
-                  onCancel={() => { setIsCreating(false); setCloneFrom(null); }}
-                />
-              </div>
-            ) : (
-              <button
-                onClick={() => setIsCreating(true)}
-                className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-[#282a2c] hover:text-[#e3e3e3]"
-              >
-                + New workspace
-              </button>
-            )}
             <button
-              onClick={() => { setIsOpen(false); setShowSettings(true); }}
-              disabled={!activeWorkspace}
-              className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-[#282a2c] hover:text-[#e3e3e3] border-t border-[#333537] disabled:opacity-50"
+              onClick={() => {
+                setIsOpen(false);
+                setSettingsTarget({ workspace: null, mode: "create" });
+              }}
+              className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-[#282a2c] hover:text-[#e3e3e3]"
             >
-              &#9881; Workspace settings
+              + New workspace
             </button>
           </div>
         </div>
       )}
 
-      {showSettings && activeWorkspace && (
-        <WorkspaceSettings
-          workspace={activeWorkspace}
-          onClose={() => setShowSettings(false)}
-        />
+      {settingsTarget && (
+        settingsTarget.mode === "edit" ? (
+          <WorkspaceSettings
+            mode="edit"
+            workspace={settingsTarget.workspace}
+            onClose={() => setSettingsTarget(null)}
+          />
+        ) : (
+          <WorkspaceSettings
+            mode="create"
+            onClose={() => setSettingsTarget(null)}
+          />
+        )
       )}
     </div>
   );
