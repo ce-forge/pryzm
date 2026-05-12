@@ -21,6 +21,18 @@ from utils.formatters import (
 
 BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 
+# Reasoning models (Qwen 3.x, DeepSeek-R1, etc.) wrap their inner monologue
+# in <think>/<thinking> blocks that should never reach the user. We strip
+# *paired* blocks only, and only for an explicit tag allowlist — so legitimate
+# angle-bracket content (Vec<i32>, <email@x>, <3, HTML examples) passes through
+# untouched. KNOWN LIMITATION: if the assistant tries to *teach* the user about
+# <think> tags, the example will be stripped along with everything between the
+# tags. Re-run with rephrasing if you hit that case.
+_THINK_BLOCK_RE = re.compile(
+    r'<(think|thinking|scratchpad)\b[^>]*>.*?</\1>',
+    re.DOTALL | re.IGNORECASE,
+)
+
 def condense_chat_memory(old_memory: str, messages: list, model_name: str) -> str:
     """Runs asynchronously to summarize older messages and prevent context window overflow."""
     url = f"{BASE_OLLAMA_URL}/api/generate"
@@ -191,22 +203,33 @@ def stream_chat(messages: list, mode: str = "it_copilot", session_id: str = None
                 content = message.get("content")
                 if content is None:
                     content = ""
-                
-                content = re.sub(r'<[^>]+>', '', content).strip()
-                if content.startswith("thought") or "I must wait for the search results" in content:
+
+                content = _THINK_BLOCK_RE.sub('', content).strip()
+
+                # Catch the model stalling out: a one-or-two-word "thought"
+                # emission, or echoing the tool-loop instruction back at us.
+                # Tightened from the old "starts with 'thought'" check, which
+                # false-positived on any legitimate answer beginning with
+                # "Thoughts on …".
+                stripped = content.strip().lower()
+                is_thought_stall = (
+                    stripped in {"thought", "thoughts", "thought.", "thought:"}
+                    or "i must wait for the search results" in stripped
+                )
+                if is_thought_stall:
                     content = MICRO_PROMPTS["fallback_thought_loop"]
-                
+
                 if not content.strip():
                     if loop_count > 1:
                         content = MICRO_PROMPTS["fallback_tool_failure"]
                     else:
                         content = MICRO_PROMPTS["fallback_generic"]
-                
+
                 words = content.split(" ")
                 for i, word in enumerate(words):
                     yield word + (" " if i < len(words) - 1 else "")
                     time.sleep(0.01)
-                
+
                 finished_cleanly = True
                 break
                 
@@ -236,10 +259,15 @@ def generate_title(prompt: str, model_name: str = "gemma4:e4b") -> str:
         response = requests.post(url, json=payload, timeout=5)
         response.raise_for_status()
         text = response.json().get("response", "").strip(' \n"\'*.')
-        if len(text.split()) > 5:
-            words = clean_prompt.split()
-            return " ".join(words[:3]) + "..." if len(words) > 3 else clean_prompt
-        return text if text else MICRO_PROMPTS["title_default"]
+        if not text:
+            return MICRO_PROMPTS["title_default"]
+        # Cap rather than discard — a 6-word title from the model is usually
+        # better than the first 3 words of the user's prompt. Truncate to
+        # 5 words + ellipsis only when the title is genuinely over-long.
+        title_words = text.split()
+        if len(title_words) > 5:
+            text = " ".join(title_words[:5]) + "..."
+        return text
     except Exception:
         words = clean_prompt.split()
         return " ".join(words[:3]) + "..." if len(words) > 3 else MICRO_PROMPTS["title_default"]

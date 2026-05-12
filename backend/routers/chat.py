@@ -49,8 +49,7 @@ def get_session_history(session_id: str, db: Session = Depends(database.get_db))
 def update_session(session_id: str, payload: SessionUpdate, db: Session = Depends(database.get_db)):
     db_session = db.query(models.Session).filter(models.Session.id == session_id).first()
     if db_session:
-        update_data = payload.dict(exclude_unset=True) 
-        print(f"\n--- DEBUG UPDATE --- payload received: {update_data}\n")
+        update_data = payload.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(db_session, key, value)
         db.commit()

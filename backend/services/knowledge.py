@@ -49,6 +49,81 @@ def ingest_document(db: Session, filename: str, content: str, workspace: str = "
     db.commit()
     return {"status": "success", "chunks_created": len(chunks), "document_id": new_doc.id}
 
+def _strip_query_prefix(query: str) -> str:
+    """Lowercase the query and strip the common interrogative prefixes that
+    hurt the ILIKE substring fallback. Single source of truth — both the
+    auto-RAG path and the search_knowledge_base tool use this."""
+    return (
+        query.lower()
+        .replace("what is the ", "")
+        .replace("who is ", "")
+        .replace("what is ", "")
+        .strip()
+    )
+
+
+def search_chunks(
+    db: Session,
+    query: str,
+    workspace: str,
+    session_id: str = None,
+    threshold: float = 0.65,
+    top_k: int = 3,
+):
+    """Shared chunk-search routine used by both the auto-RAG path
+    (services/knowledge.py:retrieve_relevant_chunks) and the explicit
+    `search_knowledge_base` tool (tools/retrieval.py). Embeds the query,
+    runs a cosine-distance vector search filtered by workspace and the
+    session/global scope, and falls back to a case-insensitive substring
+    match when the vector search returns nothing.
+
+    The two callers pass different thresholds on purpose:
+    - Auto-RAG uses a permissive 0.65 because it runs hands-off; we'd
+      rather show the model a loosely-relevant chunk than skip RAG.
+    - The explicit tool uses a stricter 0.45 because the LLM chose to
+      look something up; precision over recall.
+
+    Returns the list of matching DocumentChunk rows (possibly empty).
+    """
+    query_vector = get_embedding(query)
+    if not query_vector:
+        return []
+
+    distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
+    scope_filter = or_(
+        models.Document.session_id == session_id,
+        models.Document.is_global == True,
+    )
+
+    results = (
+        db.query(models.DocumentChunk)
+        .join(models.Document)
+        .filter(
+            models.Document.workspace == workspace,
+            scope_filter,
+            distance < threshold,
+        )
+        .order_by(distance)
+        .limit(top_k)
+        .all()
+    )
+    if results:
+        return results
+
+    clean_query = _strip_query_prefix(query)
+    return (
+        db.query(models.DocumentChunk)
+        .join(models.Document)
+        .filter(
+            models.Document.workspace == workspace,
+            scope_filter,
+            models.DocumentChunk.content.ilike(f"%{clean_query}%"),
+        )
+        .limit(top_k)
+        .all()
+    )
+
+
 def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id: str = None, top_k: int = 3):
     if query == "document overview" and session_id:
         # Get the most recently uploaded document for this session, then return up
@@ -72,52 +147,15 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace: str, session_id
                 formatted_context = "\n\n=== FILE EXCERPTS ===\n"
                 formatted_context += "\n\n---\n\n".join(context_blocks)
                 return {"context": formatted_context, "sources": [recent_doc.filename]}
-    
-    query_vector = get_embedding(query)
-    if not query_vector:
-        return None
 
-    distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
-    
-    # Filter updated to check is_global instead of None
-    results = (
-        db.query(models.DocumentChunk)
-        .join(models.Document)
-        .filter(
-            models.Document.workspace == workspace,
-            or_(models.Document.session_id == session_id, models.Document.is_global == True),
-            distance < 0.65
-        )
-        .order_by(distance)
-        .limit(top_k)
-        .all()
-    )
-
-    if not results:
-        clean_query = query.lower().replace("what is the ", "").replace("who is ", "").replace("what is ", "").strip()
-        
-        # Filter updated to check is_global instead of None
-        results = (
-            db.query(models.DocumentChunk)
-            .join(models.Document)
-            .filter(
-                models.Document.workspace == workspace,
-                or_(models.Document.session_id == session_id, models.Document.is_global == True),
-                models.DocumentChunk.content.ilike(f"%{clean_query}%") 
-            )
-            .limit(top_k)
-            .all()
-        )
-
+    results = search_chunks(db, query, workspace, session_id=session_id, threshold=0.65, top_k=top_k)
     if not results:
         return None
 
     unique_sources = list(set([chunk.document.filename for chunk in results]))
     context_blocks = [chunk.content for chunk in results]
-    
     formatted_context = format_rag_context(context_blocks)
-    
     return {
         "context": formatted_context,
-        "sources": unique_sources
+        "sources": unique_sources,
     }

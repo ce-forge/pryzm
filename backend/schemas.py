@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -11,15 +11,14 @@ class InferenceRequest(BaseModel):
     skip_db_save: Optional[bool] = False
 
 class SessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     title: str
     mode: str
     folder_id: Optional[str] = None
     is_pinned: Optional[bool] = False
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 class SessionInfo(BaseModel):
     id: str

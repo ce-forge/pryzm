@@ -1,6 +1,7 @@
 import os
 import json
 import shutil
+import time
 
 BASE_DIR = os.path.dirname(__file__)
 PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
@@ -27,7 +28,24 @@ class PromptManager:
             with open(MICRO_PROMPTS_FILE, "r") as f:
                 self.prompts = json.load(f)
         except Exception as e:
-            print(f"Warning: Could not parse micro_prompts.json ({e}). Falling back to defaults.")
+            # The previous behaviour set self.prompts = {} and continued, which
+            # silently let the next save_prompts() overwrite the corrupt file
+            # with an empty dict — wiping any per-user overrides we couldn't
+            # read. Move the broken file aside instead so the user can recover
+            # it manually, then start fresh.
+            backup = f"{MICRO_PROMPTS_FILE}.corrupted-{int(time.time())}"
+            try:
+                os.rename(MICRO_PROMPTS_FILE, backup)
+                print(
+                    f"Warning: micro_prompts.json was unreadable ({e}). "
+                    f"Moved to {backup}; starting with defaults."
+                )
+            except OSError as rename_err:
+                print(
+                    f"Warning: micro_prompts.json was unreadable ({e}) and could "
+                    f"not be backed up ({rename_err}). Continuing with defaults; "
+                    f"any save will overwrite the broken file."
+                )
             self.prompts = {}
 
     def __getitem__(self, key):

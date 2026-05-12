@@ -12,7 +12,7 @@ from db.models import Session
     required=["new_title"],
     workspaces=["it_copilot", "personal"],
 )
-def rename_chat_session(new_title: str, session_id: str = None, workspace: str = None) -> str:
+def rename_chat_session(new_title: str, session_id: str = None) -> str:
     """Renames the current chat session to the requested title."""
     if not session_id:
         return "Tool execution failed: No active session ID provided."
