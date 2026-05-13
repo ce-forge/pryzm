@@ -10,6 +10,8 @@ backend/venv/
 # services/, alembic/, ...) ended up tracked.
 **/__pycache__/
 *.pyc
+.pytest_cache/
+**/.pytest_cache/
 
 frontend/node_modules/
 frontend/.next/
