@@ -80,3 +80,26 @@ def test_message_missing_404(db_session):
     with pytest.raises(HTTPException) as exc:
         _message_in_workspace_or_404("nonexistent", "ws-a", db_session)
     assert exc.value.status_code == 404
+
+
+def test_reset_rejects_non_builtin(db_session):
+    """Per Phase 2: reset endpoint must reject non-builtin workspaces with 400."""
+    from routers.workspaces import _validate_resettable
+    ws_a, _ws_b, _msg = _seed_two_workspaces_with_one_message(db_session)
+    # ws_a is is_builtin=False per the seed → reject.
+    with pytest.raises(HTTPException) as exc:
+        _validate_resettable(ws_a)
+    assert exc.value.status_code == 400
+
+
+def test_reset_accepts_builtin(db_session):
+    """Reset of a builtin workspace passes the validator."""
+    from routers.workspaces import _validate_resettable
+    ws_builtin = models.Workspace(
+        id="ws-builtin", slug="builtin", display_name="X",
+        system_prompt="", enabled_tools=[], is_builtin=True,
+        engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+    )
+    db_session.add(ws_builtin)
+    db_session.commit()
+    _validate_resettable(ws_builtin)  # must not raise
