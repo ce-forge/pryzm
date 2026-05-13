@@ -16,7 +16,10 @@ from db.models import Base  # noqa: E402
 import pgvector.sqlalchemy  # noqa: F401, E402
 
 config = context.config
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# Only set the URL from settings when it hasn't been supplied externally
+# (e.g. conftest.py sets it to the test DB before invoking alembic commands).
+if not config.get_main_option("sqlalchemy.url", default=None):
+    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
