@@ -54,3 +54,20 @@ def test_downgrade_restores_nullable_session_id(reset_test_db, alembic_cfg):
         """)).scalar()
     engine.dispose()
     assert is_nullable == "YES"
+
+
+def test_downgrade_restores_is_global_default_and_nullability(reset_test_db, alembic_cfg):
+    command.downgrade(alembic_cfg, "base")
+    command.upgrade(alembic_cfg, "head")
+    command.downgrade(alembic_cfg, "50d45d7ba8d6")  # T5's down_revision
+
+    engine = create_engine(reset_test_db, poolclass=NullPool)
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_name = 'documents' AND column_name = 'is_global'
+        """)).first()
+    engine.dispose()
+    assert row.is_nullable == "YES"
+    assert row.column_default is None
