@@ -1,9 +1,9 @@
-import os
-import requests
 import json
 import inspect
 import time
 import re
+
+import httpx
 
 from db import database, models
 from services import knowledge
@@ -11,15 +11,14 @@ from services.workspaces import resolve_tools_for_workspace, resolve_model_for_r
 from config import settings
 import tools  # triggers @tool registration as a side effect
 from core.prompt_manager import MICRO_PROMPTS
+from core import ollama
 from utils.formatters import (
-    format_tool_execution, 
-    format_file_analyzed, 
+    format_tool_execution,
+    format_file_analyzed,
     format_code_block,
-    format_knowledge_reference, 
+    format_knowledge_reference,
     format_error
 )
-
-BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 
 # Reasoning models (Qwen 3.x, DeepSeek-R1, etc.) wrap their inner monologue
 # in <think>/<thinking> blocks that should never reach the user. We strip
@@ -33,36 +32,35 @@ _THINK_BLOCK_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
-def condense_chat_memory(old_memory: str, messages: list, model_name: str) -> str:
+async def condense_chat_memory(
+    client: httpx.AsyncClient,
+    old_memory: str,
+    messages: list,
+    model_name: str,
+) -> str:
     """Runs asynchronously to summarize older messages and prevent context window overflow."""
-    url = f"{BASE_OLLAMA_URL}/api/generate"
-    
     chat_text = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in messages if m['role'] in ['user', 'assistant']])
-    
+
     prompt = f"{MICRO_PROMPTS['memory_condenser_system']}\n\n"
-    
+
     if old_memory:
         prompt += f"--- PREVIOUS MEMORY ---\n{old_memory}\n\n"
     prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
 
-    payload = {
-        "model": model_name,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"num_ctx": 8192}
-    }
-    
     try:
-        resp = requests.post(url, json=payload, timeout=60)
-        resp.raise_for_status()
-        return resp.json().get("response", "").strip()
+        response = await ollama.generate(client, prompt=prompt, model=model_name, options={"num_ctx": 8192})
+        return response.strip()
     except Exception as e:
         print(f"Memory Condensation Failed: {e}")
         return old_memory
 
-def stream_chat(messages: list, workspace_id: str, session_id: str = None, model_name: str = "gemma4:e4b"):
-    url = f"{BASE_OLLAMA_URL}/api/chat"
-
+async def stream_chat(
+    client: httpx.AsyncClient,
+    messages: list,
+    workspace_id: str,
+    session_id: str = None,
+    model_name: str = "gemma4:e4b",
+):
     # Fetch the workspace once (needed for tool list, prompt, and model pin).
     db = database.SessionLocal()
     try:
@@ -141,18 +139,12 @@ def stream_chat(messages: list, workspace_id: str, session_id: str = None, model
     try:
         while loop_count < max_loops:
             loop_count += 1
-            payload = {
-                "model": effective_model,
-                "messages": full_messages,
-                "stream": False,
-                "options": {"num_ctx": 8192},
-            }
-            if tools_payload:
-                payload["tools"] = tools_payload
-
-            resp = requests.post(url, json=payload, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
+            data = await ollama.chat(
+                client,
+                messages=full_messages,
+                tools=tools_payload,
+                model=effective_model,
+            )
             message = data.get("message", {})
 
             if message.get("tool_calls"):
@@ -226,26 +218,20 @@ def stream_chat(messages: list, workspace_id: str, session_id: str = None, model
     except Exception as e:
         yield f"\n[Engine Error: {str(e)}]"
 
-def generate_title(prompt: str, model_name: str = "gemma4:e4b") -> str:
-    url = f"{BASE_OLLAMA_URL}/api/generate"
-    
+async def generate_title(
+    client: httpx.AsyncClient,
+    prompt: str,
+    model_name: str = "gemma4:e4b",
+) -> str:
     clean_prompt = re.sub(r'\[Attached_File:.*?\]', '', prompt).strip()
     if not clean_prompt:
         return MICRO_PROMPTS["title_document_default"]
 
     system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
-    payload = {
-        "model": model_name, 
-        "prompt": system_prompt, 
-        "stream": False,
-        "options": {"num_ctx": 4096}
-        }    
-    
     try:
-        response = requests.post(url, json=payload, timeout=5)
-        response.raise_for_status()
-        text = response.json().get("response", "").strip(' \n"\'*.')
+        text = await ollama.generate(client, prompt=system_prompt, model=model_name, options={"num_ctx": 4096})
+        text = text.strip(' \n"\'*.')
         if not text:
             return MICRO_PROMPTS["title_default"]
         # Cap rather than discard — a 6-word title from the model is usually

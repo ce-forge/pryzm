@@ -68,6 +68,35 @@ async def list_models(client: httpx.AsyncClient) -> list[str]:
     return [m["name"] for m in resp.json().get("models", [])]
 
 
+async def chat(
+    client: httpx.AsyncClient,
+    messages: list,
+    tools: list | None,
+    model: str,
+    options: dict | None = None,
+) -> dict:
+    """POST /api/chat with stream=False. Returns the full message dict.
+
+    Used by ai_engine.stream_chat — the engine receives the whole payload first,
+    then fake-streams it word-by-word. If `tools` is None, the field is omitted.
+    """
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"num_ctx": 8192},
+    }
+    if tools is not None:
+        payload["tools"] = tools
+    if options:
+        payload["options"].update(options)
+
+    url = f"{BASE_URL}/api/chat"
+    resp = await client.post(url, json=payload, timeout=120.0)
+    resp.raise_for_status()
+    return resp.json()
+
+
 async def generate(
     client: httpx.AsyncClient,
     prompt: str,
