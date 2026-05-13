@@ -11,6 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 
 from config import settings
@@ -82,3 +83,20 @@ def db_at_revision(alembic_cfg, reset_test_db):
 def db_at_head(db_at_revision):
     """DB migrated to head."""
     return db_at_revision("head")
+
+
+@pytest.fixture
+def db_session(db_at_head):
+    """A SQLAlchemy Session attached to the migrated test DB.
+
+    Yields a fresh session bound to the test DB at head. Closes the session
+    and disposes the engine on teardown to avoid connection leaks.
+    """
+    engine = db_at_head
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        engine.dispose()

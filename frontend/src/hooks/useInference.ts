@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Message } from "@/types/chat";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 
 export function useInference(
   workspace: string,
@@ -45,14 +45,14 @@ export function useInference(
     streamingSessionIdsRef.current.add(optimisticId);
 
     try {
-      const res = await fetch(`${APP_CONFIG.API_URL}/analyze`, {
+      const res = await apiFetch("/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          prompt: text, 
-          session_id: (activeSessionId === "temp_new_chat" || !activeSessionId) ? null : activeSessionId, 
+        body: JSON.stringify({
+          prompt: text,
+          session_id: (activeSessionId === "temp_new_chat" || !activeSessionId) ? null : activeSessionId,
           mode: workspace, model, attachments,
-          skip_db_save: skipUserAdd 
+          skip_db_save: skipUserAdd
         }),
         signal: controller.signal
       });

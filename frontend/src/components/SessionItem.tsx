@@ -2,7 +2,7 @@ import React, { useState, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 import { LoadingIcon } from "./Icons";
 import ConfirmModal from "./ConfirmModal"; // NEW IMPORT
 import { useChatContext } from "@/context/ChatContext";
@@ -47,20 +47,18 @@ export default function SessionItem({
     }
   };
 
-  const API_URL = APP_CONFIG.API_URL;
-
   const handleRenameSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editTitle.trim()) {
         setIsEditing(false);
         return setEditTitle(s.title);
     }
-    
+
     setSessions(prev => prev.map(item => item.id === s.id ? { ...item, title: editTitle } : item));
     setIsEditing(false);
-    
+
     try {
-      await fetch(`${API_URL}/sessions/${s.id}`, {
+      await apiFetch(`/sessions/${s.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: editTitle })
@@ -71,12 +69,12 @@ export default function SessionItem({
   const togglePin = async (e: React.MouseEvent) => {
     e.stopPropagation();
     const newStatus = !s.is_pinned;
-    
+
     setSessions(prev => prev.map(item => item.id === s.id ? { ...item, is_pinned: newStatus } : item));
     setIsDropdownOpen(false);
-    
+
     try {
-      await fetch(`${API_URL}/sessions/${s.id}`, {
+      await apiFetch(`/sessions/${s.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_pinned: newStatus })
@@ -99,7 +97,7 @@ export default function SessionItem({
     if (currentSessionId === s.id) router.push(`/?workspace=${workspace}`);
 
     try {
-      await fetch(`${API_URL}/sessions/${s.id}`, { method: "DELETE" });
+      await apiFetch(`/sessions/${s.id}`, { method: "DELETE" });
     } catch (err) { console.error("Delete failed", err); }
   };
 

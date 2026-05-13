@@ -12,6 +12,11 @@ class Settings(BaseSettings):
     DB_PORT: int = 5432
     DB_NAME: str
 
+    # Shared bearer token for all API clients. No default — Pydantic raises at
+    # startup if the env var is missing, which is the correct fail-fast shape
+    # for a required secret.
+    PRYZM_API_TOKEN: str
+
     @computed_field
     @property
     def DATABASE_URL(self) -> str:

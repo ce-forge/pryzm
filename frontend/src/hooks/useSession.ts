@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 import { Message } from "@/types/chat";
 
 export function useSession() {
@@ -60,7 +61,7 @@ export function useSession() {
     // We fetch if the cache is empty OR if we are forcing a sync (after AI finishes)
     if (force || cacheLen === 0) {
       try {
-        const historyRes = await fetch(`${APP_CONFIG.API_URL}/sessions/${currentSession}`, { cache: 'no-store' });
+        const historyRes = await apiFetch(`/sessions/${currentSession}`, { cache: 'no-store' });
         if (historyRes.ok) {
           const historyData = await historyRes.json();
           // CRITICAL: This overwrites "temp-" IDs with real DB UUIDs
@@ -73,7 +74,7 @@ export function useSession() {
 
     // Always refresh the title
     try {
-      const listRes = await fetch(`${APP_CONFIG.API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' });
+      const listRes = await apiFetch(`/sessions?workspace=${workspace}`, { cache: 'no-store' });
       if (listRes.ok) {
         const sessions = await listRes.json();
         const activeSesh = sessions.find((s: any) => s.id === currentSession);
@@ -108,7 +109,7 @@ export function useSession() {
 
     prefetchingRef.current.add(id);
     try {
-      const res = await fetch(`${APP_CONFIG.API_URL}/sessions/${id}`, { cache: 'no-store' });
+      const res = await apiFetch(`/sessions/${id}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         setMessageCache(prev => ({ ...prev, [id]: data }));

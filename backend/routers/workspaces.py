@@ -25,6 +25,21 @@ from tools.registry import AVAILABLE_TOOLS
 router = APIRouter(tags=["Workspaces"])
 
 
+def _validate_resettable(workspace: models.Workspace) -> None:
+    """Raise 400 if the workspace is not a builtin.
+
+    Reset re-seeds display_name, system_prompt, enabled_tools, etc. from the
+    BUILTIN_WORKSPACES registry — only meaningful for rows we own the source
+    of truth for. User-created workspaces have no canonical defaults to reset
+    to, so we reject the operation.
+    """
+    if not workspace.is_builtin:
+        raise HTTPException(
+            status_code=400,
+            detail="Reset is only allowed for builtin workspaces.",
+        )
+
+
 def _validate_enabled_tools(names: List[str]) -> None:
     """Reject names that aren't in the live tool registry."""
     unknown = [n for n in names if n not in AVAILABLE_TOOLS]
@@ -188,11 +203,7 @@ def delete_workspace(slug: str, db: Session = Depends(database.get_db)):
 @router.post("/workspaces/{slug}/reset", response_model=WorkspaceResponse)
 def reset_workspace(slug: str, db: Session = Depends(database.get_db)):
     ws = get_by_slug(db, slug)
-    if not ws.is_builtin:
-        raise HTTPException(
-            status_code=409,
-            detail="Reset is only available for built-in workspaces.",
-        )
+    _validate_resettable(ws)
     try:
         ws.system_prompt = read_default_prompt(slug)
     except FileNotFoundError:

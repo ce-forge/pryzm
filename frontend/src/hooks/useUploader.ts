@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { FileUpload } from "@/types/chat";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 
 export function useUploader(workspace: string) {
   const [uploads, setUploads] = useState<FileUpload[]>([]);
@@ -21,7 +21,7 @@ export function useUploader(workspace: string) {
       formData.append("workspace", workspace);
 
       try {
-        const res = await fetch(`${APP_CONFIG.API_URL}/upload`, {
+        const res = await apiFetch("/upload", {
           method: "POST",
           body: formData,
         });

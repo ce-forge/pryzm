@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 
 export interface Workspace {
   id: string;
@@ -46,7 +46,7 @@ export function useWorkspaces() {
 
   const refresh = useCallback(async () => {
     try {
-      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces`, { cache: "no-store" });
+      const r = await apiFetch("/workspaces", { cache: "no-store" });
       if (r.ok) {
         setWorkspaces(await r.json());
       }
@@ -61,7 +61,7 @@ export function useWorkspaces() {
 
   const create = useCallback(async (payload: CreatePayload): Promise<Workspace | null> => {
     try {
-      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces`, {
+      const r = await apiFetch("/workspaces", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -78,7 +78,7 @@ export function useWorkspaces() {
 
   const update = useCallback(async (slug: string, payload: UpdatePayload): Promise<Workspace | null> => {
     try {
-      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}`, {
+      const r = await apiFetch(`/workspaces/${slug}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -95,7 +95,7 @@ export function useWorkspaces() {
 
   const remove = useCallback(async (slug: string): Promise<RemoveResult | null> => {
     try {
-      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}`, { method: "DELETE" });
+      const r = await apiFetch(`/workspaces/${slug}`, { method: "DELETE" });
       if (!r.ok) return null;
       const body = await r.json();
       await refresh();
@@ -108,7 +108,7 @@ export function useWorkspaces() {
 
   const reset = useCallback(async (slug: string): Promise<Workspace | null> => {
     try {
-      const r = await fetch(`${APP_CONFIG.API_URL}/workspaces/${slug}/reset`, { method: "POST" });
+      const r = await apiFetch(`/workspaces/${slug}/reset`, { method: "POST" });
       if (!r.ok) return null;
       const ws = await r.json();
       await refresh();
