@@ -12,6 +12,7 @@ backend/venv/
 *.pyc
 .pytest_cache/
 **/.pytest_cache/
+backend/tests/e2e/_artifacts/
 
 frontend/node_modules/
 frontend/.next/
