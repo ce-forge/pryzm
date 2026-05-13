@@ -13,9 +13,10 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // Token section state
-  const [tokenValue, setTokenValue] = useState(() => typeof window !== 'undefined' ? (getToken() ?? "") : "");
-  const [tokenSaved, setTokenSaved] = useState(false);
+  // Token section state — stored token is NEVER bound to an input value
+  const [storedToken, setStoredToken] = useState<string | null>(() => typeof window !== 'undefined' ? getToken() : null);
+  const [isEditingToken, setIsEditingToken] = useState(false);
+  const [newToken, setNewToken] = useState("");
 
   useEffect(() => {
     apiFetch("/api/models")
@@ -55,21 +56,24 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   };
 
   const handleTokenSave = () => {
-    const trimmed = tokenValue.trim();
-    if (trimmed) {
-      setToken(trimmed);
-    } else {
-      clearToken();
-    }
-    setTokenSaved(true);
-    setTimeout(() => setTokenSaved(false), 2000);
+    const trimmed = newToken.trim();
+    if (!trimmed) return;
+    setToken(trimmed);
+    setStoredToken(trimmed);
+    setNewToken("");
+    setIsEditingToken(false);
+  };
+
+  const handleTokenCancel = () => {
+    setNewToken("");
+    setIsEditingToken(false);
   };
 
   const handleTokenClear = () => {
     clearToken();
-    setTokenValue("");
-    setTokenSaved(true);
-    setTimeout(() => setTokenSaved(false), 2000);
+    setStoredToken(null);
+    setNewToken("");
+    setIsEditingToken(false);
   };
 
   return (
@@ -88,30 +92,52 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
           <div>
             <h3 className="text-sm font-semibold text-[#e3e3e3] mb-1">Connection</h3>
             <p className="text-xs text-gray-500 mb-3">The bearer token used to authenticate with the backend. Matches <code className="font-mono text-xs bg-[#131314] px-1 py-0.5 rounded">PRYZM_API_TOKEN</code> in the backend&apos;s <code className="text-xs">.env</code> file.</p>
-            <div className="flex gap-2">
-              <input
-                type="password"
-                value={tokenValue}
-                onChange={(e) => setTokenValue(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleTokenSave()}
-                placeholder="Paste token"
-                className="flex-1 bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
-              />
-              <button
-                onClick={handleTokenSave}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tokenSaved ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
-              >
-                {tokenSaved ? "Saved" : "Save"}
-              </button>
-              {tokenValue && (
+            {storedToken && !isEditingToken ? (
+              <div className="flex items-center justify-between bg-[#131314] border border-[#333537] rounded-lg px-3 py-2">
+                <span className="text-sm text-slate-400">Token configured</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setIsEditingToken(true)}
+                    className="px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white transition-colors"
+                  >
+                    Change
+                  </button>
+                  <button
+                    onClick={handleTokenClear}
+                    className="px-4 py-1.5 rounded-lg text-sm font-medium bg-[#282a2c] hover:bg-[#333537] text-gray-400 transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={newToken}
+                  onChange={(e) => setNewToken(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleTokenSave()}
+                  placeholder="Paste new token"
+                  className="flex-1 bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
+                  autoFocus={isEditingToken}
+                />
                 <button
-                  onClick={handleTokenClear}
-                  className="px-4 py-2 rounded-lg text-sm font-medium bg-[#282a2c] hover:bg-[#333537] text-gray-400 transition-colors"
+                  onClick={handleTokenSave}
+                  disabled={!newToken.trim()}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white disabled:bg-[#282a2c] disabled:text-gray-500 disabled:cursor-not-allowed transition-all"
                 >
-                  Clear
+                  Save
                 </button>
-              )}
-            </div>
+                {isEditingToken && (
+                  <button
+                    onClick={handleTokenCancel}
+                    className="px-4 py-2 rounded-lg text-sm font-medium bg-[#282a2c] hover:bg-[#333537] text-gray-400 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="border-t border-[#333537] pt-6">
