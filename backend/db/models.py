@@ -86,6 +86,11 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    workspace_id = Column(
+        String,
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     content = Column(Text, nullable=False)
     embedding = Column(Vector(768))
     document = relationship("Document", back_populates="chunks")
