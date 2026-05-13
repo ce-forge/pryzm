@@ -44,6 +44,7 @@ def ingest_document(db: Session, filename: str, content: str, workspace_id: str,
         vector = get_embedding(chunk_text)
         db.add(models.DocumentChunk(
             document_id=new_doc.id,
+            workspace_id=workspace_id,
             content=chunk_text,
             embedding=vector,
         ))
