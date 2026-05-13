@@ -1,6 +1,4 @@
 """Verifies migration A: workspaces.engine_config (JSONB)."""
-import os
-
 import pytest
 from alembic import command
 from alembic.config import Config

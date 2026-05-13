@@ -25,7 +25,7 @@ DEFAULT_ENGINE_CONFIG = '{"backend": "ollama", "model": "gemma4:e4b"}'
 def upgrade() -> None:
     op.add_column(
         "workspaces",
-        sa.Column("engine_config", JSONB(astext_type=sa.Text()), nullable=True),
+        sa.Column("engine_config", JSONB(), nullable=True),
     )
 
     op.execute(
@@ -41,7 +41,7 @@ def upgrade() -> None:
 
     op.alter_column(
         "workspaces", "engine_config",
-        existing_type=JSONB(astext_type=sa.Text()),
+        existing_type=JSONB(),
         nullable=False,
         server_default=sa.text(f"'{DEFAULT_ENGINE_CONFIG}'::jsonb"),
     )
