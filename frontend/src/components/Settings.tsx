@@ -94,7 +94,7 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
                 value={tokenValue}
                 onChange={(e) => setTokenValue(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleTokenSave()}
-                placeholder={tokenValue ? "••••••••" : "Paste token"}
+                placeholder="Paste token"
                 className="flex-1 bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
               />
               <button
