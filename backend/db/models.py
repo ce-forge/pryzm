@@ -19,7 +19,12 @@ class Workspace(Base):
     display_name = Column(String, nullable=False)
     system_prompt = Column(Text, nullable=False, default="")
     enabled_tools = Column(JSONB, nullable=False, server_default="[]")
-    preferred_model = Column(String, nullable=True)
+    engine_config = Column(
+        JSONB,
+        nullable=False,
+        server_default='{"backend": "ollama", "model": "gemma4:e4b"}',
+    )
+    preferred_model = Column(String, nullable=True)  # DEPRECATED — drops at end of Phase 4
     is_builtin = Column(Boolean, nullable=False, default=False, server_default="false")
     color = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.clock_timestamp())
