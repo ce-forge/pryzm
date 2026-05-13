@@ -19,6 +19,10 @@ frontend/.next/
 *.db
 *.sqlite3
 
+# Local Postgres dumps (pg_dump output from pryzm_core / pryzm_test). These
+# are safety-net backups taken before destructive ops; never commit raw data.
+pryzm_*.sql
+
 .DS_Store
 Thumbs.db
 
