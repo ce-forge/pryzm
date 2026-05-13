@@ -11,6 +11,7 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 
 from config import settings
 
@@ -71,7 +72,7 @@ def db_at_revision(alembic_cfg, reset_test_db):
     def _go(revision: str):
         command.downgrade(alembic_cfg, "base")
         command.upgrade(alembic_cfg, revision)
-        engine = create_engine(reset_test_db)
+        engine = create_engine(reset_test_db, poolclass=NullPool)
         return engine
 
     return _go
