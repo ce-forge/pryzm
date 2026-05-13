@@ -1,11 +1,12 @@
 import asyncio
 import time
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
 from db import database
 from routers import health, chat, workspaces
+from core.auth import require_token
 from services.tasks import garbage_collection_task
 
 
@@ -74,5 +75,5 @@ app.add_middleware(RequestLogger)
 
 
 app.include_router(health.router)
-app.include_router(workspaces.router)
-app.include_router(chat.router)
+app.include_router(workspaces.router, dependencies=[Depends(require_token)])
+app.include_router(chat.router, dependencies=[Depends(require_token)])
