@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean
+import sqlalchemy as sa
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
@@ -19,7 +20,12 @@ class Workspace(Base):
     display_name = Column(String, nullable=False)
     system_prompt = Column(Text, nullable=False, default="")
     enabled_tools = Column(JSONB, nullable=False, server_default="[]")
-    preferred_model = Column(String, nullable=True)
+    engine_config = Column(
+        JSONB,
+        nullable=False,
+        server_default='{"backend": "ollama", "model": "gemma4:e4b"}',
+    )
+    preferred_model = Column(String, nullable=True)  # DEPRECATED — drops at end of Phase 4
     is_builtin = Column(Boolean, nullable=False, default=False, server_default="false")
     color = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.clock_timestamp())
@@ -45,8 +51,19 @@ class Session(Base):
 class Message(Base):
     __tablename__ = "messages"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
-    session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
-    role = Column(String, nullable=False)
+    session_id = Column(
+        String,
+        ForeignKey("sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    role = Column(
+        Enum("user", "assistant", "tool", "memory",
+             name="messages_role_check",
+             native_enum=False,
+             create_constraint=False),  # alembic owns the constraint
+        nullable=False,
+    )
     content = Column(Text, nullable=False)
     # Lifecycle of the assistant generation that produced this row. Always
     # "complete" for user/memory rows. The /analyze finally block flips this
@@ -70,7 +87,7 @@ class Document(Base):
     filename = Column(String, nullable=False)
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
-    is_global = Column(Boolean, default=False)
+    is_global = Column(Boolean, default=False, server_default=sa.text("false"), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     session = relationship("Session", back_populates="documents")
     workspace = relationship("Workspace", back_populates="documents")
@@ -81,6 +98,11 @@ class DocumentChunk(Base):
     __tablename__ = "document_chunks"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     document_id = Column(String, ForeignKey("documents.id", ondelete="CASCADE"), index=True)
+    workspace_id = Column(
+        String,
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     content = Column(Text, nullable=False)
     embedding = Column(Vector(768))
     document = relationship("Document", back_populates="chunks")

@@ -10,12 +10,18 @@ backend/venv/
 # services/, alembic/, ...) ended up tracked.
 **/__pycache__/
 *.pyc
+.pytest_cache/
+**/.pytest_cache/
 
 frontend/node_modules/
 frontend/.next/
 
 *.db
 *.sqlite3
+
+# Local Postgres dumps (pg_dump output from pryzm_core / pryzm_test). These
+# are safety-net backups taken before destructive ops; never commit raw data.
+pryzm_*.sql
 
 .DS_Store
 Thumbs.db
