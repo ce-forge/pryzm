@@ -46,8 +46,15 @@ def client(db_at_head, monkeypatch):
 
 @pytest.fixture
 def client_and_session(db_at_head, monkeypatch):
-    """Like client, but also yields a db_session sharing the same engine so
-    seeds are visible to the TestClient's routes."""
+    """TestClient + Session sharing a single SessionLocal.
+
+    Tests that seed data with one session and then call HTTP routes need the
+    TestClient's get_db dependency to open its session from the SAME
+    SessionLocal — otherwise the test-side commit lands in a different
+    connection's transaction view and the route handler sees no rows. The
+    client fixture above can't do this because it doesn't expose a test-side
+    session. This fixture yields both so they share the bind.
+    """
     monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "smoke-test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
 
