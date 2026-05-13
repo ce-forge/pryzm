@@ -116,8 +116,8 @@ async def stream_chat(
             rag_query = clean_user_text if clean_user_text else "document overview"
             db = database.SessionLocal()
             try:
-                rag_data = knowledge.retrieve_relevant_chunks(
-                    db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
+                rag_data = await knowledge.retrieve_relevant_chunks(
+                    client, db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
                 )
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]

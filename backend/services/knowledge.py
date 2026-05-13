@@ -1,26 +1,28 @@
-import requests
+import httpx
 from db import models
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import settings
 from utils.formatters import format_rag_context
+from core import ollama
 
-OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 EMBED_MODEL = "nomic-embed-text"
 
-def get_embedding(text: str) -> list[float]:
-    url = f"{OLLAMA_URL}/api/embeddings"
-    payload = {
-        "model": EMBED_MODEL,
-        "prompt": text,
-    }
-    response = requests.post(url, json=payload, timeout=30)
-    response.raise_for_status()
-    return response.json().get("embedding", [])
+
+async def get_embedding(client: httpx.AsyncClient, text: str) -> list[float]:
+    return await ollama.embed(client, text=text, model=EMBED_MODEL)
 
 
-def ingest_document(db: Session, filename: str, content: str, workspace_id: str, session_id: str = None, is_global: bool = False):
+async def ingest_document(
+    client: httpx.AsyncClient,
+    db: Session,
+    filename: str,
+    content: str,
+    workspace_id: str,
+    session_id: str = None,
+    is_global: bool = False,
+):
     new_doc = models.Document(filename=filename, workspace_id=workspace_id, session_id=session_id, is_global=is_global)
     db.add(new_doc)
     db.commit()
@@ -41,7 +43,7 @@ def ingest_document(db: Session, filename: str, content: str, workspace_id: str,
     # boilerplate. Filename gets re-attached at retrieval time so the model
     # still sees provenance per chunk.
     for chunk_text in chunks:
-        vector = get_embedding(chunk_text)
+        vector = await get_embedding(client, chunk_text)
         db.add(models.DocumentChunk(
             document_id=new_doc.id,
             workspace_id=workspace_id,
@@ -65,33 +67,20 @@ def _strip_query_prefix(query: str) -> str:
     )
 
 
-def search_chunks(
+def _query_chunks_by_vector(
     db: Session,
+    query_vector: list[float],
     query: str,
     workspace_id: str,
     session_id: str = None,
     threshold: float = 0.65,
     top_k: int = 3,
 ):
-    """Shared chunk-search routine used by both the auto-RAG path
-    (services/knowledge.py:retrieve_relevant_chunks) and the explicit
-    `search_knowledge_base` tool (tools/retrieval.py). Embeds the query,
-    runs a cosine-distance vector search filtered by workspace and the
-    session/global scope, and falls back to a case-insensitive substring
-    match when the vector search returns nothing.
+    """Pure-DB chunk search given a pre-computed embedding vector.
 
-    The two callers pass different thresholds on purpose:
-    - Auto-RAG uses a permissive 0.65 because it runs hands-off; we'd
-      rather show the model a loosely-relevant chunk than skip RAG.
-    - The explicit tool uses a stricter 0.45 because the LLM chose to
-      look something up; precision over recall.
-
-    Returns the list of matching DocumentChunk rows (possibly empty).
+    Separated from the embedding step so the sync tool path (tools/retrieval.py)
+    can supply its own vector without entering async context.
     """
-    query_vector = get_embedding(query)
-    if not query_vector:
-        return []
-
     distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
     scope_filter = or_(
         models.Document.session_id == session_id,
@@ -127,6 +116,56 @@ def search_chunks(
     )
 
 
+async def search_chunks(
+    client: httpx.AsyncClient,
+    db: Session,
+    query: str,
+    workspace_id: str,
+    session_id: str = None,
+    threshold: float = 0.65,
+    top_k: int = 3,
+):
+    """Async chunk-search used by the auto-RAG path. Embeds the query then
+    delegates to _query_chunks_by_vector for the DB work.
+
+    The two callers pass different thresholds on purpose:
+    - Auto-RAG uses a permissive 0.65 because it runs hands-off; we'd
+      rather show the model a loosely-relevant chunk than skip RAG.
+    - The explicit tool uses a stricter 0.45 because the LLM chose to
+      look something up; precision over recall.
+
+    Returns the list of matching DocumentChunk rows (possibly empty).
+    """
+    query_vector = await get_embedding(client, query)
+    if not query_vector:
+        return []
+    return _query_chunks_by_vector(db, query_vector, query, workspace_id, session_id, threshold, top_k)
+
+
+def search_chunks_sync(
+    db: Session,
+    query: str,
+    workspace_id: str,
+    session_id: str = None,
+    threshold: float = 0.65,
+    top_k: int = 3,
+):
+    """Sync chunk-search for use from tool functions (which are called
+    synchronously by ai_engine). Embeds via a direct HTTP POST to Ollama and
+    delegates to _query_chunks_by_vector for the DB work."""
+    import requests
+    url = f"{settings.OLLAMA_URL.strip().rstrip('/')}/api/embeddings"
+    try:
+        resp = requests.post(url, json={"model": EMBED_MODEL, "prompt": query}, timeout=30)
+        resp.raise_for_status()
+        query_vector = resp.json().get("embedding", [])
+    except Exception:
+        query_vector = []
+    if not query_vector:
+        return []
+    return _query_chunks_by_vector(db, query_vector, query, workspace_id, session_id, threshold, top_k)
+
+
 def _label_chunk(chunk) -> str:
     """Re-attach the source filename at retrieval time. Stored chunk.content
     is now the raw text only; the model still benefits from knowing which
@@ -135,7 +174,14 @@ def _label_chunk(chunk) -> str:
     return f"[from {filename}]\n{chunk.content}"
 
 
-def retrieve_relevant_chunks(db: Session, query: str, workspace_id: str, session_id: str = None, top_k: int = 3):
+async def retrieve_relevant_chunks(
+    client: httpx.AsyncClient,
+    db: Session,
+    query: str,
+    workspace_id: str,
+    session_id: str = None,
+    top_k: int = 3,
+):
     if query == "document overview" and session_id:
         # Most recent document for this session, sampled up to top_k chunks.
         recent_doc = (
@@ -157,7 +203,7 @@ def retrieve_relevant_chunks(db: Session, query: str, workspace_id: str, session
                 formatted_context += "\n\n---\n\n".join(context_blocks)
                 return {"context": formatted_context, "sources": [recent_doc.filename]}
 
-    results = search_chunks(db, query, workspace_id=workspace_id, session_id=session_id, threshold=0.65, top_k=top_k)
+    results = await search_chunks(client, db, query, workspace_id=workspace_id, session_id=session_id, threshold=0.65, top_k=top_k)
     if not results:
         return None
 

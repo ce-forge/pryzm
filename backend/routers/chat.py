@@ -16,7 +16,9 @@ from sqlalchemy import tuple_, func as sqlfunc
 from sqlalchemy.exc import IntegrityError
 from config import settings
 from utils.formatters import format_error
-import requests
+import httpx
+from core import ollama
+from core.deps import get_http_client
 
 
 
@@ -150,9 +152,10 @@ def delete_session(session_id: str, db: Session = Depends(database.get_db)):
     return {"status": "deleted"}
 
 @router.post("/analyze")
-def analyze_data(
+async def analyze_data(
     http_request: Request,
     request: InferenceRequest,
+    http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     # We manage the upfront DB session manually instead of using
     # Depends(get_db) so the connection is returned to the pool BEFORE the
@@ -169,7 +172,7 @@ def analyze_data(
             chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
 
         if not chat_session:
-            generated_title = ai_engine.generate_title(request.prompt, request.model)
+            generated_title = await ai_engine.generate_title(http_client, request.prompt, request.model)
             chat_session = models.Session(
                 title=generated_title,
                 workspace_id=workspace.id,
@@ -178,7 +181,7 @@ def analyze_data(
             db.commit()
             db.refresh(chat_session)
         elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
-            chat_session.title = ai_engine.generate_title(request.prompt, request.model)
+            chat_session.title = await ai_engine.generate_title(http_client, request.prompt, request.model)
             db.commit()
             db.refresh(chat_session)
 
@@ -219,7 +222,8 @@ def analyze_data(
         disconnected = False
 
         try:
-            for chunk in ai_engine.stream_chat(
+            async for chunk in ai_engine.stream_chat(
+                http_client,
                 safe_messages,
                 workspace_id=workspace_id,
                 session_id=session_id,
@@ -305,7 +309,7 @@ def analyze_data(
                         new_last_id = to_summarize[-1].id
 
                         msg_dicts = [{"role": m.role, "content": m.content} for m in to_summarize]
-                        new_summary_text = ai_engine.condense_chat_memory(old_summary, msg_dicts, request.model)
+                        new_summary_text = await ai_engine.condense_chat_memory(http_client, old_summary, msg_dicts, request.model)
 
                         new_mem_data = {
                             "last_summarized_id": new_last_id,
@@ -333,11 +337,13 @@ def analyze_data(
 
 @router.post("/upload")
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     workspace: str = Form("it_copilot"),
     session_id: Optional[str] = Form(None),
     is_global: bool = Form(False),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     ws = get_or_default(db, workspace)
     # Stream the upload in 8KB chunks and bail as soon as we cross the
@@ -367,7 +373,8 @@ async def upload_document(
         if existing_session:
             active_session_id = session_id
 
-    result = knowledge.ingest_document(
+    result = await knowledge.ingest_document(
+        http_client,
         db=db,
         filename=file.filename,
         content=text_content,
@@ -428,14 +435,13 @@ def get_tools_metadata():
     ]
 
 @router.get("/api/models")
-def get_ollama_models():
+async def get_ollama_models(http_client: httpx.AsyncClient = Depends(get_http_client)):
     try:
-        r = requests.get(f"{settings.OLLAMA_URL.strip().rstrip('/')}/api/tags", timeout=3)
-        r.raise_for_status()
-        models = [m["name"] for m in r.json().get("models", []) if "embed" not in m["name"].lower()]
-        return models if models else["gemma4:e4b"]
-    except Exception as e:
-        return["gemma4:e4b"]
+        all_models = await ollama.list_models(http_client)
+        chat_models = [m for m in all_models if "embed" not in m.lower()]
+        return chat_models if chat_models else ["gemma4:e4b"]
+    except Exception:
+        return ["gemma4:e4b"]
 
 @router.get("/api/prompts")
 def get_prompts():

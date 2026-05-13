@@ -1,9 +1,12 @@
-import requests as http_requests
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List
 
+import httpx
+
 from config import settings
+from core import ollama
+from core.deps import get_http_client
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -50,7 +53,7 @@ def _validate_enabled_tools(names: List[str]) -> None:
         )
 
 
-def _validate_preferred_model(model: str) -> None:
+async def _validate_preferred_model(client: httpx.AsyncClient, model: str) -> None:
     """Confirm the model exists in the Ollama /api/tags response AND is a
     chat-capable model (embedding-only models like nomic-embed-text are
     filtered out, matching chat.py:get_ollama_models). Done at PATCH time
@@ -59,17 +62,9 @@ def _validate_preferred_model(model: str) -> None:
     if model is None:
         return
     try:
-        r = http_requests.get(
-            f"{settings.OLLAMA_URL.strip().rstrip('/')}/api/tags",
-            timeout=3,
-        )
-        r.raise_for_status()
+        all_models = await ollama.list_models(client)
         # Filter out embedding-only models; they're not usable as chat models.
-        names = [
-            m["name"]
-            for m in r.json().get("models", [])
-            if "embed" not in m["name"].lower()
-        ]
+        names = [m for m in all_models if "embed" not in m.lower()]
     except Exception as e:
         raise HTTPException(
             status_code=503,
@@ -129,10 +124,11 @@ def create_workspace(
 
 
 @router.patch("/workspaces/{slug}", response_model=WorkspaceResponse)
-def update_workspace(
+async def update_workspace(
     slug: str,
     payload: WorkspaceUpdate,
     db: Session = Depends(database.get_db),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     ws = get_by_slug(db, slug)
 
@@ -157,7 +153,7 @@ def update_workspace(
     if "preferred_model" in data:
         # Explicit null clears the pin; non-null is validated against Ollama.
         if data["preferred_model"] is not None:
-            _validate_preferred_model(data["preferred_model"])
+            await _validate_preferred_model(http_client, data["preferred_model"])
         ws.preferred_model = data["preferred_model"]
 
     if "color" in data:
