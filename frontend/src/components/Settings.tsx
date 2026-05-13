@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch, getToken, setToken, clearToken } from "@/utils/apiClient";
 
 export default function SettingsModal({ workspace, close }: { workspace: string, close: () => void }) {
   const [models, setModels] = useState<string[]>([]);
@@ -13,15 +13,17 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  const API_URL = APP_CONFIG.API_URL;
+  // Token section state
+  const [tokenValue, setTokenValue] = useState(() => typeof window !== 'undefined' ? (getToken() ?? "") : "");
+  const [tokenSaved, setTokenSaved] = useState(false);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/models`)
+    apiFetch("/api/models")
       .then(r => r.json())
       .then(setModels)
       .catch(() => {});
 
-    fetch(`${API_URL}/api/prompts`)
+    apiFetch("/api/prompts")
       .then(r => r.json())
       .then(data => {
         setPrompts(data);
@@ -37,7 +39,7 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
     setIsSaving(true);
     localStorage.setItem("pryzm_model", selectedModel);
     try {
-      await fetch(`${API_URL}/api/prompts`, {
+      await apiFetch("/api/prompts", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(prompts)
@@ -52,6 +54,24 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
     setIsSaving(false);
   };
 
+  const handleTokenSave = () => {
+    const trimmed = tokenValue.trim();
+    if (trimmed) {
+      setToken(trimmed);
+    } else {
+      clearToken();
+    }
+    setTokenSaved(true);
+    setTimeout(() => setTokenSaved(false), 2000);
+  };
+
+  const handleTokenClear = () => {
+    clearToken();
+    setTokenValue("");
+    setTokenSaved(true);
+    setTimeout(() => setTokenSaved(false), 2000);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="bg-[#1e1f20] w-full max-w-3xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
@@ -63,7 +83,38 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
+
+          {/* Connection / API Token */}
           <div>
+            <h3 className="text-sm font-semibold text-[#e3e3e3] mb-1">Connection</h3>
+            <p className="text-xs text-gray-500 mb-3">The bearer token used to authenticate with the backend. Matches <code className="font-mono text-xs bg-[#131314] px-1 py-0.5 rounded">PRYZM_API_TOKEN</code> in the backend&apos;s <code className="text-xs">.env</code> file.</p>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={tokenValue}
+                onChange={(e) => setTokenValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleTokenSave()}
+                placeholder={tokenValue ? "••••••••" : "Paste token"}
+                className="flex-1 bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 transition-colors"
+              />
+              <button
+                onClick={handleTokenSave}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${tokenSaved ? 'bg-emerald-600 text-white' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
+              >
+                {tokenSaved ? "Saved" : "Save"}
+              </button>
+              {tokenValue && (
+                <button
+                  onClick={handleTokenClear}
+                  className="px-4 py-2 rounded-lg text-sm font-medium bg-[#282a2c] hover:bg-[#333537] text-gray-400 transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-[#333537] pt-6">
             <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Default AI Model</label>
             <p className="text-xs text-gray-500 mb-3">Used when a workspace doesn&apos;t pin its own model. Workspaces with a pinned model override this.</p>
             <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors appearance-none">

@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useChatContext } from "@/context/ChatContext";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 import { Workspace } from "@/hooks/useWorkspaces";
 import ConfirmModal from "./ConfirmModal";
 import {
@@ -55,11 +55,11 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const dirtyRef = useRef(false);
 
   useEffect(() => {
-    fetch(`${APP_CONFIG.API_URL}/api/tools`).then(r => r.ok ? r.json() : []).then((data) => {
+    apiFetch("/api/tools").then(r => r.ok ? r.json() : []).then((data) => {
       if (Array.isArray(data)) setAvailableTools(data);
     }).catch(() => {});
 
-    fetch(`${APP_CONFIG.API_URL}/api/models`).then(r => r.json()).then((data) => {
+    apiFetch("/api/models").then(r => r.json()).then((data) => {
       if (Array.isArray(data)) setInstalledModels(data);
     }).catch(() => {});
   }, []);

@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 
 export function useMessageActions(
   workspace: string,
@@ -10,12 +10,11 @@ export function useMessageActions(
   navigateToSession: (id: string) => void,
   selectedModel: string
 ) {
-  const API_URL = APP_CONFIG.API_URL;
-
   const saveEdit = useCallback(async (msgId: string | undefined, index: number, newContent: string, rerun: boolean) => {
     if (!msgId || msgId.startsWith('temp-')) return;
 
-    await fetch(`${API_URL}/messages/${msgId}`, {
+    // TODO: /messages/:id PATCH needs ?workspace=... param (T4 scope: wrapper only)
+    await apiFetch(`/messages/${msgId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ content: newContent })
@@ -23,7 +22,8 @@ export function useMessageActions(
 
     if (rerun) {
       // Truncate everything AFTER this user message
-      await fetch(`${API_URL}/sessions/${activeSessionKey}/truncate/${msgId}`, { method: "DELETE" });
+      // TODO: /sessions/:id/truncate/:msgId DELETE needs ?workspace=... param (T4 scope: wrapper only)
+      await apiFetch(`/sessions/${activeSessionKey}/truncate/${msgId}`, { method: "DELETE" });
       const truncated = messages.slice(0, index + 1);
       truncated[index] = { ...truncated[index], content: newContent };
       setMessageCache((prev: any) => ({ ...prev, [activeSessionKey]: truncated }));
@@ -44,15 +44,16 @@ export function useMessageActions(
     const assistantId = isPair ? messages[index+1].id : null;
     newMessages.splice(index, isPair ? 2 : 1);
     setMessageCache((prev: any) => ({ ...prev, [activeSessionKey]: newMessages }));
-    await fetch(`${API_URL}/messages/${msgId}`, { method: "DELETE" });
-    if (assistantId) await fetch(`${API_URL}/messages/${assistantId}`, { method: "DELETE" });
-  }, [messages, activeSessionKey, setMessageCache, API_URL]);
+    // TODO: /messages/:id DELETE needs ?workspace=... param (T4 scope: wrapper only)
+    await apiFetch(`/messages/${msgId}`, { method: "DELETE" });
+    if (assistantId) await apiFetch(`/messages/${assistantId}`, { method: "DELETE" });
+  }, [messages, activeSessionKey, setMessageCache]);
 
   const branchSession = useCallback(async (msgId: string) => {
     if (!msgId || msgId.startsWith('temp-')) return;
 
     try {
-      const res = await fetch(`${API_URL}/sessions/${activeSessionKey}/branch`, {
+      const res = await apiFetch(`/sessions/${activeSessionKey}/branch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ up_to_message_id: msgId }),
@@ -67,7 +68,7 @@ export function useMessageActions(
     } catch (err) {
       console.error("Failed to branch session:", err);
     }
-  }, [activeSessionKey, API_URL, navigateToSession]);
+  }, [activeSessionKey, navigateToSession]);
 
   const rerunAssistant = useCallback(async (index: number) => {
     if (index === 0 || messages[index].role !== 'assistant') return;
@@ -77,7 +78,8 @@ export function useMessageActions(
     if (!userMsg || userMsg.role !== 'user') return;
 
     // Truncate the DB starting right after the user message
-    await fetch(`${API_URL}/sessions/${activeSessionKey}/truncate/${userMsg.id}`, { method: "DELETE" });
+    // TODO: /sessions/:id/truncate/:msgId DELETE needs ?workspace=... param (T4 scope: wrapper only)
+    await apiFetch(`/sessions/${activeSessionKey}/truncate/${userMsg.id}`, { method: "DELETE" });
 
     // Truncate UI Cache to remove the old AI message and anything below it
     const truncated = messages.slice(0, index); 
@@ -85,9 +87,9 @@ export function useMessageActions(
 
     // Trigger generation based on the existing userMsg content
     sendMessage(userMsg.content, activeSessionKey, selectedModel, [], true);
-  }, [messages, activeSessionKey, setMessageCache, sendMessage, API_URL, selectedModel]);
+  }, [messages, activeSessionKey, setMessageCache, sendMessage, selectedModel]);
 
-  return { 
+  return {
     deleteMessage, 
     saveEdit, 
     branchSession, 

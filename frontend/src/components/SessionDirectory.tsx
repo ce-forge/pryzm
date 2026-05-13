@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { v4 as uuid } from "uuid";
 import { useChatContext } from "@/context/ChatContext";
-import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 import SessionItem from "./SessionItem";
 import ConfirmModal from "./ConfirmModal";
 import InlineCreateForm from "./InlineCreateForm";
@@ -23,8 +23,7 @@ interface FolderInfo {
 
 export default function SessionDirectory() {
   const { session } = useChatContext();
-  const API_URL = APP_CONFIG.API_URL;
-  
+
   const workspace = session.workspace;
   const currentSessionId = session.currentSession;
   const streamingSessionIdsRef = session.streamingSessionIdsRef;
@@ -73,7 +72,7 @@ export default function SessionDirectory() {
   }, [currentSessionId]);
 
   const fetchSessions = useCallback(() => {
-    fetch(`${API_URL}/sessions?workspace=${workspace}`, { cache: 'no-store' })
+    apiFetch(`/sessions?workspace=${workspace}`, { cache: 'no-store' })
       .then((res) => res.json())
       .then((data) => {
         setSessions(prev => {
@@ -87,10 +86,10 @@ export default function SessionDirectory() {
         });
       })
       .catch((err) => console.error("Error loading sessions:", err));
-  }, [API_URL, workspace, currentSessionId]);
+  }, [workspace, currentSessionId]);
 
   const fetchFolders = useCallback(() => {
-    fetch(`${API_URL}/folders?workspace=${workspace}`)
+    apiFetch(`/folders?workspace=${workspace}`)
       .then(res => res.json())
       .then(data => {
         // localStorage can hold corrupted JSON if the user (or another tab)
@@ -108,7 +107,7 @@ export default function SessionDirectory() {
         setLoadedWorkspace(workspace);
       })
       .catch(err => console.error("Error loading folders:", err));
-  }, [API_URL, workspace]);
+  }, [workspace]);
 
   useEffect(() => {
     fetchSessions();
@@ -132,7 +131,7 @@ export default function SessionDirectory() {
     setSessions((prev) => prev.map(s => s.id === sessionId ? { ...s, folder_id: folderId } : s));
     
     try {
-      await fetch(`${API_URL}/sessions/${sessionId}`, {
+      await apiFetch(`/sessions/${sessionId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ folder_id: folderId })
@@ -145,7 +144,7 @@ export default function SessionDirectory() {
     setFolders([{ ...newFolder, isOpen: true }, ...folders]);
     setIsCreatingFolder(false);
     try {
-      await fetch(`${API_URL}/folders`, {
+      await apiFetch("/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newFolder),
@@ -162,7 +161,7 @@ export default function SessionDirectory() {
     setFolders(prev => prev.map(f => f.id === id ? { ...f, name: cleaned } : f));
     setEditingFolderId(null);
     try {
-      await fetch(`${API_URL}/folders/${id}`, {
+      await apiFetch(`/folders/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: cleaned }),
@@ -183,7 +182,7 @@ export default function SessionDirectory() {
     setFolderPendingDelete(null);
     setFolders(prev => prev.filter(f => f.id !== folderId));
     try {
-      await fetch(`${API_URL}/folders/${folderId}`, { method: "DELETE" });
+      await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
       fetchSessions();
     } catch (err) {}
   };
