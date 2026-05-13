@@ -8,11 +8,10 @@ client at that point; today it's just one module talking to Ollama.
 The shared httpx.AsyncClient is owned by FastAPI's lifespan (see main.py).
 Callers obtain it via the get_http_client dependency in core.deps or directly
 from `request.app.state.http_client`.
-
-T0 ships only the stub signatures — T1 fills them in.
 """
 from __future__ import annotations
 
+import json
 from typing import AsyncIterator
 
 import httpx
@@ -29,19 +28,44 @@ async def chat_stream(
     tools: list | None,
     model: str,
 ) -> AsyncIterator[dict]:
-    """Stream the /api/chat response. Implementation lands in T1."""
-    raise NotImplementedError("chat_stream lands in Task 1")
-    yield  # makes this a generator function so the AsyncIterator return type holds
+    """POST /api/chat with stream=True. Yields parsed JSON chunks (one per NDJSON line).
+
+    If `tools` is None, the field is omitted from the payload (some smaller
+    models don't handle empty tool arrays).
+    """
+    payload: dict = {"model": model, "messages": messages, "stream": True}
+    if tools is not None:
+        payload["tools"] = tools
+
+    url = f"{BASE_URL}/api/chat"
+    async with client.stream("POST", url, json=payload) as resp:
+        resp.raise_for_status()
+        async for line in resp.aiter_lines():
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                # Ollama can emit partial/malformed lines under load — skip
+                # them rather than crashing the stream.
+                continue
 
 
 async def embed(client: httpx.AsyncClient, text: str, model: str) -> list[float]:
-    """Return an embedding vector for `text`. Implementation lands in T1."""
-    raise NotImplementedError("embed lands in Task 1")
+    """POST /api/embeddings. Returns the embedding vector."""
+    url = f"{BASE_URL}/api/embeddings"
+    payload = {"model": model, "prompt": text}
+    resp = await client.post(url, json=payload, timeout=30.0)
+    resp.raise_for_status()
+    return resp.json()["embedding"]
 
 
 async def list_models(client: httpx.AsyncClient) -> list[str]:
-    """Return the list of installed Ollama model tags. Implementation lands in T1."""
-    raise NotImplementedError("list_models lands in Task 1")
+    """GET /api/tags. Returns the list of installed model names."""
+    url = f"{BASE_URL}/api/tags"
+    resp = await client.get(url, timeout=5.0)
+    resp.raise_for_status()
+    return [m["name"] for m in resp.json().get("models", [])]
 
 
 async def generate(
@@ -50,5 +74,15 @@ async def generate(
     model: str,
     options: dict | None = None,
 ) -> str:
-    """Single-shot /api/generate call (used by condense + title). Lands in T1."""
-    raise NotImplementedError("generate lands in Task 1")
+    """POST /api/generate (non-streaming). Returns the response text.
+
+    Used by ai_engine.condense_chat_memory and ai_engine.generate_title — short,
+    single-shot completions where streaming is overhead.
+    """
+    url = f"{BASE_URL}/api/generate"
+    payload: dict = {"model": model, "prompt": prompt, "stream": False}
+    if options:
+        payload["options"] = options
+    resp = await client.post(url, json=payload, timeout=60.0)
+    resp.raise_for_status()
+    return resp.json()["response"]
