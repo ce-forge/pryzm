@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
@@ -51,7 +51,13 @@ class Message(Base):
     __tablename__ = "messages"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
-    role = Column(String, nullable=False)
+    role = Column(
+        Enum("user", "assistant", "tool", "memory",
+             name="messages_role_check",
+             native_enum=False,
+             create_constraint=False),  # alembic owns the constraint
+        nullable=False,
+    )
     content = Column(Text, nullable=False)
     # Lifecycle of the assistant generation that produced this row. Always
     # "complete" for user/memory rows. The /analyze finally block flips this
