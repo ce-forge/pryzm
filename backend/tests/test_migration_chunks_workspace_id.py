@@ -96,7 +96,7 @@ def test_fk_cascades_workspace_delete(db_at_head):
 def test_downgrade_drops_column_and_index(reset_test_db, alembic_cfg):
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
-    command.downgrade(alembic_cfg, "-1")
+    command.downgrade(alembic_cfg, "78445f9618d3")
 
     engine = create_engine(reset_test_db, poolclass=NullPool)
     with engine.connect() as conn:
