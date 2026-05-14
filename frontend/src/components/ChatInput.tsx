@@ -141,18 +141,20 @@ export default function ChatInput({
             
             <div className="flex justify-between items-center px-2 pb-1">
                 <div className="flex gap-1 items-center relative" ref={menuWrapperRef}>
-                    {/* Single hidden input with a wildcard accept. JS-side
-                        validation in processFiles (validExts) still rejects
-                        unsupported types with an error pill. Loose accept is
-                        what consistently surfaces Camera + Gallery + Files
-                        in the native picker across Samsung Internet, Chrome
-                        on Android 14/15, GNOME, KDE, macOS, Windows. */}
+                    {/* Explicit image MIME list. Samsung Internet's picker
+                        only surfaces Gallery (Photos) as a top-level entry
+                        when accept enumerates image types specifically; a
+                        wildcard or mixed accept buries Gallery under the
+                        SAF chooser. The trade-off is that text/PDF uploads
+                        via the picker are dropped — those still work
+                        through drag-and-drop on desktop (handleDrop calls
+                        processFiles directly, bypassing this filter). */}
                     <input
                       type="file"
                       multiple
                       className="hidden"
                       ref={fileInputRef}
-                      accept="*/*"
+                      accept="image/jpeg, image/png, image/webp"
                       onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))}
                     />
 
