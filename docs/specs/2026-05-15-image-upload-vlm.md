@@ -179,7 +179,9 @@ User content: `"Describe this image for our knowledge base."` plus the `image_ur
 
 ## Follow-ups (separate PRs)
 
-1. **Speculative decoding** with `AtomicChat/gemma-4-E4B-it-assistant-GGUF` (~80 MB draft model). Up to 3x decode speedup on E4B with no quality change. Helps chat-time generation; modest help on captioning (prefill-dominated). Single llama-swap config change + benchmark.
+1. **Speculative decoding** with `AtomicChat/gemma-4-E4B-it-assistant-GGUF` (~80 MB draft model). Up to 3x decode speedup on E4B with no quality change. Helps chat-time generation; modest help on captioning (prefill-dominated).
+   - **Blocked on llama.cpp support (as of 2026-05-15).** Investigated the integration — `-hfd AtomicChat/gemma-4-E4B-it-assistant-GGUF` downloads the file correctly, but the model's GGUF declares `general.architecture = "gemma4_assistant"` (a new MTP-specific architecture). The currently bundled `llama-server` (build `b9128-856c3adac`) fails with `unknown model architecture: 'gemma4_assistant'` and exits during startup. The feature waits on an upstream llama.cpp release that adds the architecture. When that lands, the config change is a single `-hfd` flag and a llama-swap restart; the benchmark harness from the investigation (median predicted/s across 4 runs, drop run 1 as the cold start) can be reused unchanged.
+   - Baseline measured on the current build: median 139.8 predicted/s on E4B at `--ctx-size 8192`, Q4_K_M, 300 output tokens.
 2. **Thumbnail UI surface.** Render a thumbnail of the original image next to chat bubbles that reference an image-derived Document. Needs a `/uploads/<doc_id>` static endpoint and a small frontend change. Trivial once Milestone 2 lands.
 3. **Audio ingest.** Gemma-4-E2B/E4B accept audio natively; same shape as image upload (base64 in chat completions). 30 s clip limit per the model card. A natural Milestone 4 if you want a real "drop a Zoom recording, ask about it" feature.
 4. **Multimodal embeddings.** The original future-features doc Item 5 mentioned this as the cleanest theoretical path. Now optional, since re-attach gives us pixel-level access where it matters.
