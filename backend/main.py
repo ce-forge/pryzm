@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     # Shared httpx client — one connection pool for the process lifetime.
     app.state.http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(
-            connect=settings.OLLAMA_CONNECT_TIMEOUT_SECONDS,
+            connect=settings.LLM_CONNECT_TIMEOUT_SECONDS,
             read=settings.LLM_TIMEOUT_SECONDS,
             write=10.0,
             pool=5.0,

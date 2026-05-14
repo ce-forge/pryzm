@@ -14,7 +14,6 @@ export default function ChatHeader({
 }: ChatHeaderProps) {
   const { activeWorkspace } = useWorkspaceContext();
   const wsName = activeWorkspace?.display_name ?? "Pryzm";
-  const wsModel = activeWorkspace?.model_name;
   const wsColorClasses = getWorkspaceColorClasses(activeWorkspace?.color);
 
   return (
@@ -38,11 +37,6 @@ export default function ChatHeader({
               <span className={`shrink-0 inline-flex items-center px-1.5 py-[2px] rounded text-[9px] leading-none font-bold uppercase tracking-wider border ${wsColorClasses.badge}`}>
                 {wsName}
               </span>
-              {wsModel && (
-                <span className="shrink-0 text-[10px] text-gray-500 font-mono truncate">
-                  · {wsModel}
-                </span>
-              )}
             </div>
           </div>
        </div>

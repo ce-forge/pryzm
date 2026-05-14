@@ -66,18 +66,18 @@ async def test_execute_tool_runs_async_directly():
 # ---------------------------------------------------------------------------
 
 def test_error_envelope_connect_error():
-    """httpx.ConnectError maps to ollama_unreachable."""
+    """httpx.ConnectError maps to llm_unreachable."""
     from routers.chat import _error_envelope
     env = _error_envelope(httpx.ConnectError("connection refused"))
-    assert env["code"] == "ollama_unreachable"
+    assert env["code"] == "llm_unreachable"
     assert "error" in env
 
 
 def test_error_envelope_read_timeout():
-    """httpx.ReadTimeout maps to ollama_timeout."""
+    """httpx.ReadTimeout maps to llm_timeout."""
     from routers.chat import _error_envelope
     env = _error_envelope(httpx.ReadTimeout("timed out"))
-    assert env["code"] == "ollama_timeout"
+    assert env["code"] == "llm_timeout"
 
 
 def test_error_envelope_asyncio_timeout():

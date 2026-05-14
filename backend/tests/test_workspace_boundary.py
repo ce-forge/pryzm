@@ -122,5 +122,5 @@ def test_builtin_record_has_required_fields():
         assert b.display_name
         assert b.system_prompt_file
         assert isinstance(b.enabled_tools, list)
-        assert b.engine_config["backend"] == "ollama"
-        assert b.engine_config["model"]
+        assert b.engine_config["backend"] == "llama_cpp"
+        # Phase B1: 'model' field dropped from engine_config

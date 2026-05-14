@@ -67,7 +67,6 @@ class WorkspaceResponse(BaseModel):
     display_name: str
     system_prompt: str
     enabled_tools: List[str]
-    model_name: Optional[str] = None  # extracted from engine_config.model for the wire
     is_builtin: bool
     color: Optional[str] = None
     created_at: datetime
@@ -86,7 +85,6 @@ class WorkspaceUpdate(BaseModel):
     display_name: Optional[str] = Field(None, min_length=1, max_length=80)
     system_prompt: Optional[str] = Field(None, max_length=50_000)
     enabled_tools: Optional[List[str]] = None
-    model_name: Optional[str] = None  # writes to engine_config.model; null = use default
     color: Optional[WORKSPACE_COLOR] = None
 
 

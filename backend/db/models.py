@@ -23,7 +23,7 @@ class Workspace(Base):
     engine_config = Column(
         JSONB,
         nullable=False,
-        server_default='{"backend": "ollama", "model": "gemma4:e4b"}',
+        server_default='{"backend": "llama_cpp"}',
     )
     is_builtin = Column(Boolean, nullable=False, default=False, server_default="false")
     color = Column(String(32), nullable=True)

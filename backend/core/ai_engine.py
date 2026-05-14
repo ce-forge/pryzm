@@ -11,7 +11,7 @@ from services import knowledge
 from config import settings
 import tools  # triggers @tool registration as a side effect
 from core.prompt_manager import MICRO_PROMPTS
-from core import ollama
+from core import llm_server
 from core.engine_config import EngineConfig
 from tools.registry import ResolvedToolSet
 from utils.formatters import (
@@ -51,7 +51,7 @@ async def condense_chat_memory(
     prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
 
     try:
-        response = await ollama.generate(client, prompt=prompt, model=engine_config.model, options={"num_ctx": 8192})
+        response = await llm_server.generate(client, prompt=prompt, model=llm_server.DEFAULT_CHAT_MODEL, options={"num_ctx": 8192})
         return response.strip()
     except Exception as e:
         print(f"Memory Condensation Failed: {e}")
@@ -92,7 +92,6 @@ async def stream_chat(
     is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
 ):
     workspace_tools = tool_set.callables
-    effective_model = engine_config.model
 
     # Substitute {tool_names} placeholder in the workspace's stored
     # system prompt. We need the system_prompt from the DB but do NOT
@@ -172,11 +171,11 @@ async def stream_chat(
                 return
 
             loop_count += 1
-            data = await ollama.chat(
+            data = await llm_server.chat(
                 client,
                 messages=full_messages,
                 tools=tools_payload,
-                model=effective_model,
+                model=llm_server.DEFAULT_CHAT_MODEL,
             )
             message = data.get("message", {})
 
@@ -288,7 +287,7 @@ async def generate_title(
     system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
     try:
-        text = await ollama.generate(client, prompt=system_prompt, model=engine_config.model, options={"num_ctx": 4096})
+        text = await llm_server.generate(client, prompt=system_prompt, model=llm_server.DEFAULT_CHAT_MODEL, options={"num_ctx": 4096})
         text = text.strip(' \n"\'*.')
         if not text:
             return MICRO_PROMPTS["title_default"]

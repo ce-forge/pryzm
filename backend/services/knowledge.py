@@ -5,13 +5,11 @@ from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import settings
 from utils.formatters import format_rag_context
-from core import ollama
-
-EMBED_MODEL = "nomic-embed-text"
+from core import llm_server
 
 
 async def get_embedding(client: httpx.AsyncClient, text: str) -> list[float]:
-    return await ollama.embed(client, text=text, model=EMBED_MODEL)
+    return await llm_server.embed(client, text=text, model=llm_server.DEFAULT_EMBED_MODEL)
 
 
 async def ingest_document(
@@ -151,14 +149,19 @@ def search_chunks_sync(
     top_k: int = 3,
 ):
     """Sync chunk-search for use from tool functions (which are called
-    synchronously by ai_engine). Embeds via a direct HTTP POST to Ollama and
-    delegates to _query_chunks_by_vector for the DB work."""
+    synchronously by ai_engine). Embeds via a direct HTTP POST to the LLM
+    server's /v1/embeddings endpoint and delegates to _query_chunks_by_vector
+    for the DB work."""
     import requests
-    url = f"{settings.OLLAMA_URL.strip().rstrip('/')}/api/embeddings"
+    url = f"{settings.LLM_SERVER_URL.strip().rstrip('/')}/v1/embeddings"
     try:
-        resp = requests.post(url, json={"model": EMBED_MODEL, "prompt": query}, timeout=30)
+        resp = requests.post(
+            url,
+            json={"model": llm_server.DEFAULT_EMBED_MODEL, "input": query},
+            timeout=30,
+        )
         resp.raise_for_status()
-        query_vector = resp.json().get("embedding", [])
+        query_vector = resp.json()["data"][0]["embedding"]
     except Exception:
         query_vector = []
     if not query_vector:

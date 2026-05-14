@@ -9,7 +9,7 @@ router = APIRouter(tags=["System Health"])
 def get_health():
     pg_status = database.ping_postgres()
     redis_status = database.ping_redis()
-    ollama_status = database.ping_ollama()
+    ollama_status = database.ping_llm_server()
 
     overall_status = "online"
     if "disconnected" in pg_status or "disconnected" in redis_status:

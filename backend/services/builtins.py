@@ -33,7 +33,7 @@ BUILTIN_WORKSPACES: list[BuiltinWorkspace] = [
             "check_port", "dns_lookup", "execute_ping", "get_public_ip",
             "rename_chat_session", "search_knowledge_base", "ssl_inspect", "traceroute",
         ],
-        engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        engine_config={"backend": "llama_cpp"},
     ),
     BuiltinWorkspace(
         slug="personal",
@@ -41,7 +41,7 @@ BUILTIN_WORKSPACES: list[BuiltinWorkspace] = [
         color="orange",
         system_prompt_file="personal.txt",
         enabled_tools=["rename_chat_session", "search_knowledge_base"],
-        engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        engine_config={"backend": "llama_cpp"},
     ),
 ]
 

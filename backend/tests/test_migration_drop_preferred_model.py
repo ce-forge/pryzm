@@ -51,18 +51,25 @@ def test_downgrade_restores_preferred_model_column(reset_test_db, alembic_cfg):
 
 
 def test_downgrade_backfills_preferred_model_from_engine_config(reset_test_db, alembic_cfg):
-    """Downgrade's UPDATE backfills preferred_model from engine_config->>'model'."""
+    """Downgrade restores preferred_model to the canonical default (gemma4:e4b).
+
+    Phase B1 (de5dfc455310) drops the per-row 'model' key from engine_config,
+    so the downgrade of that migration resets every row to the old default
+    shape: {"backend": "ollama", "model": "gemma4:e4b"}. As a result,
+    preferred_model is always backfilled to "gemma4:e4b" — per-workspace model
+    picks are not preserved across this migration pair.
+    """
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
 
-    # Seed a workspace with a specific model in engine_config at head.
+    # Seed a workspace at head (engine_config has no 'model' key in Phase B1+).
     seed_engine = create_engine(reset_test_db, poolclass=NullPool)
     with seed_engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
                                     enabled_tools, engine_config, is_builtin)
             VALUES ('ws-f', 'ws-f', 'WS F', '', '[]'::jsonb,
-                    '{"backend": "ollama", "model": "qwen3.6:27b"}'::jsonb, false)
+                    '{"backend": "llama_cpp"}'::jsonb, false)
         """))
     seed_engine.dispose()
 
@@ -74,4 +81,5 @@ def test_downgrade_backfills_preferred_model_from_engine_config(reset_test_db, a
             "SELECT preferred_model FROM workspaces WHERE id = 'ws-f'"
         )).scalar()
     verify_engine.dispose()
-    assert pm == "qwen3.6:27b"
+    # The downgrade of de5dfc455310 resets all rows to the default model.
+    assert pm == "gemma4:e4b"

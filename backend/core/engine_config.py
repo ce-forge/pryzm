@@ -4,9 +4,10 @@ The schema lives in db.models.Workspace.engine_config as JSONB. This module
 gives the rest of the codebase a typed handle on those values without each
 caller re-parsing the dict.
 
-Today only the ollama backend is supported. The future llama.cpp swap will
-extend the `backend` Literal here — that's a one-line change at that point,
-which is the whole reason we have this seam.
+Phase B1 dropped the `model` field — the backend hardcodes its model id in
+`core/llm_server.py`. The column stays as JSONB so future per-workspace
+overrides (e.g. council members forcing a specific model) can plug in
+without a migration.
 """
 from __future__ import annotations
 
@@ -18,22 +19,16 @@ from db import models
 
 
 class EngineConfig(BaseModel):
-    """Inference backend choice + model name for a workspace.
-
-    Future llama.cpp swap will add sampling/context params (n_ctx,
-    n_gpu_layers, temperature, etc.) here. For now: backend + model is the
-    minimum.
-    """
-    backend: Literal["ollama"]
-    model: str
+    """Inference backend choice for a workspace. Today the only value is
+    'llama_cpp'; Phase B2 may add backend-specific overrides here."""
+    backend: Literal["llama_cpp"]
 
 
 def engine_config_for(workspace: models.Workspace) -> EngineConfig:
     """Read the JSONB column on a Workspace row and return the typed model.
 
-    Raises pydantic ValidationError if the stored JSON doesn't match the schema —
-    that would mean someone wrote a malformed engine_config (defensive check
-    against direct SQL surgery; the migration in Phase 1 server-defaults to a
-    valid shape).
-    """
+    Raises pydantic ValidationError if the stored JSON doesn't match the
+    schema — that would mean someone wrote a malformed engine_config (defensive
+    check against direct SQL surgery; the migration server-defaults to a valid
+    shape)."""
     return EngineConfig.model_validate(workspace.engine_config)
