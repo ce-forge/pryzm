@@ -1,0 +1,54 @@
+# llama-swap configuration for Pryzm.
+#
+# Three model groups:
+#   - chat: chat-capable models, swapped on-demand (one in VRAM at a time)
+#   - always-on: embedding model, pinned in memory so RAG never pays swap cost
+#
+# Adding a new model: append to `models:` with the same shape, optionally
+# attach a `groups` list. Reload without restart: docker compose kill -s HUP llama-swap
+
+healthCheckTimeout: 3600   # allow first-request HuggingFace downloads to finish
+startPort: 9000            # llama-server instances bind 9000+
+
+groups:
+  "chat":
+    swap: true             # one chat model loaded at a time
+    exclusive: false       # don't unload always-on
+  "always-on":
+    swap: false
+    exclusive: false
+    persistent: true
+
+models:
+  # Tier-1 default (small).
+  "gemma-4-E2B-it":
+    cmd: >
+      /app/llama-server --port ${PORT}
+      -hf bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M
+      -ngl 99 --ctx-size 8192 --jinja --flash-attn
+      --cache-type-k q8_0 --cache-type-v q8_0
+    groups: ["chat"]
+    # Capability tags consumed by the future Router in Phase B2.
+    # `vision` is reserved for the day image input ships.
+    tags: []
+
+  # Tier-2 default (larger). HARDCODED DEFAULT for Phase B1 — every chat call
+  # uses this until the router lands in B2.
+  "gemma-4-E4B-it":
+    cmd: >
+      /app/llama-server --port ${PORT}
+      -hf bartowski/google_gemma-4-E4B-it-GGUF:Q4_K_M
+      -ngl 99 --ctx-size 8192 --jinja --flash-attn
+      --cache-type-k q8_0 --cache-type-v q8_0
+    groups: ["chat"]
+    tags: []
+
+  # Embedding model — pinned always-on so RAG queries don't pay swap cost.
+  "nomic-embed-text-v1.5":
+    cmd: >
+      /app/llama-server --port ${PORT}
+      -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0
+      -ngl 99 --embeddings --batch-size 8192
+      --rope-scaling yarn --rope-freq-scale 0.75
+    groups: ["always-on"]
+    tags: ["embedding"]
