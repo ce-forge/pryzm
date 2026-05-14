@@ -145,9 +145,15 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
             // as base64 data URLs by format_file_analyzed) don't blow up
             // the chat width. Same renderer also handles any markdown
             // image the user/LLM pastes into chat.
+            //
+            // Return null when src is missing or empty — Next warns that
+            // an empty-string src triggers a whole-page reload. This can
+            // happen mid-stream when the markdown parser sees `![alt](`
+            // before the url is fully buffered.
+            if (typeof src !== "string" || !src) return null;
             return (
               <img
-                src={typeof src === "string" ? src : ""}
+                src={src}
                 alt={alt || "attached image"}
                 loading="lazy"
                 className="my-2 max-w-[240px] max-h-[240px] rounded-lg border border-[#333537] object-contain"
