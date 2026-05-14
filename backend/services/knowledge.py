@@ -192,11 +192,57 @@ async def retrieve_relevant_chunks(
     session_id: str = None,
     top_k: int = 3,
     overview_mode: bool = False,
+    restrict_to_filenames: list[str] | None = None,
 ):
-    """Vector-search for relevant chunks. With overview_mode=True (and a
-    session id), bypasses semantic search and returns up to top_k chunks of
-    the most recently uploaded document — used when the user attached a file
-    but didn't include any text query of their own."""
+    """Vector-search for relevant chunks.
+
+    Three retrieval modes, most-specific first:
+
+    1. **restrict_to_filenames** — when the user attached one or more files
+       in this turn, retrieval is pinned to documents whose filename matches
+       one of those entries (within the current session or workspace
+       globals). Avoids returning chunks from unrelated docs when the
+       intent is clearly "tell me about THIS file."
+    2. **overview_mode** — no user text alongside the attachment; surface
+       up to top_k chunks of the most recently uploaded document in the
+       session.
+    3. **default** — workspace-wide semantic search bounded by cosine
+       distance, with an ILIKE substring fallback. Used when the user is
+       asking a free-form question with no attachment.
+    """
+    if restrict_to_filenames:
+        scoped_docs = (
+            db.query(models.Document)
+            .filter(
+                models.Document.workspace_id == workspace_id,
+                models.Document.filename.in_(restrict_to_filenames),
+                or_(
+                    models.Document.session_id == session_id,
+                    models.Document.is_global == True,
+                ),
+            )
+            .order_by(models.Document.created_at.desc())
+            .all()
+        )
+        if scoped_docs:
+            chunks = (
+                db.query(models.DocumentChunk)
+                .filter(models.DocumentChunk.document_id.in_([d.id for d in scoped_docs]))
+                .limit(max(top_k * 4, 8))
+                .all()
+            )
+            if chunks:
+                unique_sources = list({c.document.filename for c in chunks})
+                context_blocks = [_label_chunk(c) for c in chunks]
+                formatted_context = format_rag_context(context_blocks)
+                return {
+                    "context": formatted_context,
+                    "sources": unique_sources,
+                    "reattach_images": _collect_reattach_paths(scoped_docs),
+                }
+        # File was renamed / deleted between turns: fall through to the
+        # broader retrieval paths so the chat doesn't dead-end.
+
     if overview_mode and session_id:
         # Most recent document for this session, sampled up to top_k chunks.
         recent_doc = (

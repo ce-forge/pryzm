@@ -33,8 +33,12 @@ def test_build_catalog_from_real_yaml():
     assert "gemma-4-E4B-it" in catalog
     assert "nomic-embed-text-v1.5" in catalog
     assert catalog["nomic-embed-text-v1.5"] == {"embedding"}
-    assert catalog["gemma-4-E2B-it"] == {"vision"}
-    assert catalog["gemma-4-E4B-it"] == {"vision"}
+    # Chat-model tags are user-editable via the admin UI (and the live
+    # YAML can drift from anything baked into a test). Assert only what
+    # the router contract actually depends on: chat models do NOT carry
+    # the embedding tag.
+    assert "embedding" not in catalog["gemma-4-E2B-it"]
+    assert "embedding" not in catalog["gemma-4-E4B-it"]
 
 
 # ---------------------------------------------------------------------------
