@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useChatContext } from "@/context/ChatContext";
+import { useSessionContext } from "@/context/SessionContext";
 import SettingsModal from "./Settings";
 import SessionDirectory from "./SessionDirectory";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
@@ -13,7 +13,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
-  const { session } = useChatContext();
+  const session = useSessionContext();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   if (!isOpen) return null;

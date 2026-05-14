@@ -1,5 +1,5 @@
 import React from "react";
-import { useChatContext } from "@/context/ChatContext";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { getWorkspaceColorClasses } from "@/utils/workspaceColors";
 
 interface ChatHeaderProps {
@@ -12,7 +12,7 @@ interface ChatHeaderProps {
 export default function ChatHeader({
   sessionTitle, isSidebarOpen, setIsSidebarOpen, rightActions
 }: ChatHeaderProps) {
-  const { activeWorkspace } = useChatContext();
+  const { activeWorkspace } = useWorkspaceContext();
   const wsName = activeWorkspace?.display_name ?? "Pryzm";
   const wsModel = activeWorkspace?.model_name;
   const wsColorClasses = getWorkspaceColorClasses(activeWorkspace?.color);
