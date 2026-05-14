@@ -258,6 +258,9 @@ async def analyze_data(
         db.close()
 
     async def generate():
+        from core.llm_metrics import set_request_context
+        set_request_context(workspace_id=workspace_id, session_id=session_id)
+
         yield json.dumps({"status": "started", "session_id": session_id}) + "\n"
 
         full_response = ""
