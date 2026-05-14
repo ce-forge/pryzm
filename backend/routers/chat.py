@@ -9,7 +9,7 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from core.engine_config import engine_config_for
-from services import knowledge, image_describe
+from services import knowledge, image_describe, image_storage
 from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
@@ -414,6 +414,7 @@ async def upload_document(
             )
     content = bytes(buf)
     content_type = (file.content_type or "").lower()
+    storage_path: Optional[str] = None
     if content_type.startswith("image/"):
         try:
             text_content = await image_describe.describe(http_client, content, mime=content_type)
@@ -421,6 +422,10 @@ async def upload_document(
             raise HTTPException(status_code=400, detail=str(e))
         if not text_content.strip():
             raise HTTPException(status_code=422, detail="The model returned no description for this image.")
+        # Persist the original bytes. Done after captioning so a failed
+        # caption doesn't leak files on disk; done before ingest_document
+        # so the Document row carries the path from the moment it exists.
+        storage_path = image_storage.save_image(content, mime=content_type)
     else:
         try:
             text_content = content.decode("utf-8")
@@ -441,6 +446,7 @@ async def upload_document(
         workspace_id=ws.id,
         session_id=active_session_id,
         is_global=is_global,
+        storage_path=storage_path,
     )
 
     return {

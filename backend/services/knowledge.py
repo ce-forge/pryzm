@@ -20,8 +20,15 @@ async def ingest_document(
     workspace_id: str,
     session_id: str = None,
     is_global: bool = False,
+    storage_path: str | None = None,
 ):
-    new_doc = models.Document(filename=filename, workspace_id=workspace_id, session_id=session_id, is_global=is_global)
+    new_doc = models.Document(
+        filename=filename,
+        workspace_id=workspace_id,
+        session_id=session_id,
+        is_global=is_global,
+        storage_path=storage_path,
+    )
     db.add(new_doc)
     db.commit()
     db.refresh(new_doc)
