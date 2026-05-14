@@ -55,9 +55,11 @@ def ping_redis():
     except Exception as e:
         return "disconnected"
 
-def ping_ollama():
+def ping_llm_server():
+    """Ping the LLM server's health endpoint. llama-swap responds 200 to GET /
+    once at least one upstream llama-server has loaded."""
     try:
-        response = requests.get(f"{settings.OLLAMA_URL.strip().rstrip('/')}/", timeout=2)
+        response = requests.get(f"{settings.LLM_SERVER_URL.strip().rstrip('/')}/", timeout=2)
         if response.status_code == 200:
             return "connected"
         return "disconnected"
