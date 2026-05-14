@@ -112,6 +112,16 @@ class AddModelRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class UpdateModelRequest(BaseModel):
+    """Fields editable on an existing model. `id` and `repo:quant` are
+    identity — to change either, delete the entry and re-add it. Everything
+    here is optional; only the keys the client sends get applied."""
+    ngl: Optional[int] = None
+    ctx_size: Optional[int] = None
+    group: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
 async def _warmup_model(model_id: str) -> None:
     """Trigger llama-swap to download + load the model by sending a 1-token
     chat completion. Runs in a BackgroundTasks scope, so failures only log."""
@@ -206,6 +216,52 @@ async def add_model(req: AddModelRequest, background_tasks: BackgroundTasks) -> 
     _logger.info("admin.model_added id=%s repo=%s", req.id, repo_full)
     background_tasks.add_task(_warmup_model, req.id)
     return _parse_model_row(req.id, data["models"][req.id])
+
+
+@router.put("/models/{model_id}")
+async def update_model(model_id: str, req: UpdateModelRequest) -> dict:
+    if req.group is not None and req.group not in {"chat", "always-on"}:
+        raise HTTPException(status_code=400, detail="group must be 'chat' or 'always-on'")
+
+    async with _yaml_lock:
+        data = _read_yaml()
+        models_cfg = data.get("models") or {}
+        if model_id not in models_cfg:
+            raise HTTPException(status_code=404, detail=f"model not found: {model_id}")
+
+        existing = models_cfg[model_id]
+        # Re-extract identity (repo:quant) from the existing cmd; identity is
+        # not editable through this endpoint.
+        current = _parse_model_row(model_id, existing)
+        if not current["repo"] or not current["quant"]:
+            raise HTTPException(
+                status_code=500,
+                detail=f"existing model {model_id} has no parseable repo:quant in cmd; refusing to overwrite",
+            )
+
+        new_ngl = req.ngl if req.ngl is not None else (current["ngl"] or 99)
+        new_ctx = req.ctx_size if req.ctx_size is not None else (current["ctx_size"] or 8192)
+        new_group = req.group if req.group is not None else (current["group"] or "chat")
+        new_tags = req.tags if req.tags is not None else list(current["tags"])
+
+        existing["cmd"] = ruamel.yaml.scalarstring.PreservedScalarString(
+            _build_cmd_block(current["repo"], current["quant"], new_ngl, new_ctx, new_group),
+        )
+        existing["groups"] = [new_group]
+        existing["tags"] = list(new_tags)
+        _write_yaml(data)
+        try:
+            _reload_llama_swap()
+        except subprocess.CalledProcessError as e:
+            _logger.warning(
+                "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
+        llm_router.reload_router_from_yaml(_YAML_PATH)
+
+    _logger.info(
+        "admin.model_updated id=%s ngl=%d ctx_size=%d group=%s tags=%s",
+        model_id, new_ngl, new_ctx, new_group, new_tags,
+    )
+    return _parse_model_row(model_id, data["models"][model_id])
 
 
 @router.delete("/models/{model_id}")

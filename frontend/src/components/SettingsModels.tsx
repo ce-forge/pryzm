@@ -20,6 +20,7 @@ export default function ModelsSection() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [downloadId, setDownloadId] = useState<string | null>(null);
   const [downloadLog, setDownloadLog] = useState<string[]>([]);
@@ -57,6 +58,24 @@ export default function ModelsSection() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail || `HTTP ${res.status}`);
       }
+      refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleUpdate = async (id: string, patch: Partial<Model>) => {
+    try {
+      const res = await apiFetch(`/api/admin/models/${encodeURIComponent(id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `HTTP ${res.status}`);
+      }
+      setEditingId(null);
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -156,43 +175,64 @@ export default function ModelsSection() {
           <div className="text-xs text-gray-500">Loading…</div>
         )}
         {models.map(m => (
-          <div key={m.id} className="bg-[#131314] border border-[#333537] rounded-lg px-3 py-2 flex items-center justify-between gap-3">
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-sm text-[#e3e3e3] truncate">{m.id}</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider ${m.group === "always-on" ? "bg-purple-900/40 text-purple-300" : "bg-blue-900/40 text-blue-300"}`}>
-                  {m.group ?? "—"}
-                </span>
-                {m.tags.map(t => (
-                  <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-[#282a2c] text-gray-400">{t}</span>
-                ))}
+          editingId === m.id ? (
+            <EditModelRow
+              key={m.id}
+              model={m}
+              onSave={(patch) => handleUpdate(m.id, patch)}
+              onCancel={() => setEditingId(null)}
+            />
+          ) : (
+            <div key={m.id} className="bg-[#131314] border border-[#333537] rounded-lg px-3 py-2 flex items-center justify-between gap-3">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm text-[#e3e3e3] truncate">{m.id}</span>
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider ${m.group === "always-on" ? "bg-purple-900/40 text-purple-300" : "bg-blue-900/40 text-blue-300"}`}>
+                    {m.group ?? "—"}
+                  </span>
+                  {m.tags.map(t => (
+                    <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-[#282a2c] text-gray-400">{t}</span>
+                  ))}
+                </div>
+                {m.repo && (
+                  <div className="text-[11px] text-gray-500 truncate font-mono">
+                    {m.repo}{m.quant ? `:${m.quant}` : ""}
+                    {(m.ngl !== null || m.ctx_size !== null) && (
+                      <span className="text-gray-600"> · ngl={m.ngl ?? "—"} ctx={m.ctx_size ?? "—"}</span>
+                    )}
+                  </div>
+                )}
               </div>
-              {m.repo && (
-                <div className="text-[11px] text-gray-500 truncate font-mono">{m.repo}{m.quant ? `:${m.quant}` : ""}</div>
-              )}
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-xs ${m.loaded ? "text-emerald-400" : "text-gray-500"}`} title={m.loaded ? "Loaded in VRAM" : "Not loaded"}>
+                  {m.loaded ? "● loaded" : "○ idle"}
+                </span>
+                <button
+                  onClick={() => setEditingId(m.id)}
+                  className="px-2 py-1 rounded text-xs text-gray-500 hover:text-blue-400 transition-colors"
+                  title="Edit GPU layers, context size, group, tags"
+                >
+                  Edit
+                </button>
+                {!m.tags.includes("embedding") && (
+                  confirmDelete === m.id ? (
+                    <>
+                      <button onClick={() => handleDelete(m.id)} className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white">Confirm</button>
+                      <button onClick={() => setConfirmDelete(null)} className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white">Cancel</button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(m.id)}
+                      className="px-2 py-1 rounded text-xs text-gray-500 hover:text-red-400 transition-colors"
+                      title="Remove from llama-swap config (cached GGUF stays on disk)"
+                    >
+                      Delete
+                    </button>
+                  )
+                )}
+              </div>
             </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <span className={`text-xs ${m.loaded ? "text-emerald-400" : "text-gray-500"}`} title={m.loaded ? "Loaded in VRAM" : "Not loaded"}>
-                {m.loaded ? "● loaded" : "○ idle"}
-              </span>
-              {!m.tags.includes("embedding") && (
-                confirmDelete === m.id ? (
-                  <>
-                    <button onClick={() => handleDelete(m.id)} className="px-2 py-1 rounded text-xs bg-red-700 hover:bg-red-600 text-white">Confirm</button>
-                    <button onClick={() => setConfirmDelete(null)} className="px-2 py-1 rounded text-xs text-gray-400 hover:text-white">Cancel</button>
-                  </>
-                ) : (
-                  <button
-                    onClick={() => setConfirmDelete(m.id)}
-                    className="px-2 py-1 rounded text-xs text-gray-500 hover:text-red-400 transition-colors"
-                    title="Remove from llama-swap config (cached GGUF stays on disk)"
-                  >
-                    Delete
-                  </button>
-                )
-              )}
-            </div>
-          </div>
+          )
         ))}
       </div>
     </div>
@@ -349,5 +389,82 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {children}
       {hint && <span className="text-[10px] text-gray-600">{hint}</span>}
     </label>
+  );
+}
+
+function EditModelRow({
+  model, onSave, onCancel,
+}: {
+  model: Model;
+  onSave: (patch: { ngl?: number; ctx_size?: number; group?: string; tags?: string[] }) => void;
+  onCancel: () => void;
+}) {
+  // Identity fields (id, repo, quant) are shown read-only — to change those,
+  // the user deletes + re-adds.
+  const [ngl, setNgl] = useState(model.ngl ?? 99);
+  const [ctxSize, setCtxSize] = useState(model.ctx_size ?? 8192);
+  const [group, setGroup] = useState<"chat" | "always-on">(
+    (model.group === "always-on" ? "always-on" : "chat") as "chat" | "always-on",
+  );
+  const [tags, setTags] = useState<string[]>(model.tags);
+
+  const toggleTag = (t: string) => setTags(prev => prev.includes(t) ? prev.filter(x => x !== t) : [...prev, t]);
+
+  return (
+    <div className="bg-[#0e0e0f] border border-blue-900 rounded-lg p-3 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="font-mono text-sm text-[#e3e3e3]">{model.id}</span>
+        <span className="text-[11px] text-gray-500 font-mono truncate">
+          {model.repo}{model.quant ? `:${model.quant}` : ""}
+        </span>
+        <span className="text-[10px] text-gray-600">(repo:quant not editable — delete + re-add to change)</span>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <Field label="GPU layers (ngl)">
+          <input
+            type="number" value={ngl} onChange={e => setNgl(parseInt(e.target.value) || 0)}
+            className="w-full bg-[#0e0e0f] border border-[#333537] text-sm rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
+          />
+        </Field>
+        <Field label="Context size">
+          <input
+            type="number" value={ctxSize} onChange={e => setCtxSize(parseInt(e.target.value) || 0)}
+            className="w-full bg-[#0e0e0f] border border-[#333537] text-sm rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
+          />
+        </Field>
+        <Field label="Group">
+          <select
+            value={group} onChange={e => setGroup(e.target.value as "chat" | "always-on")}
+            className="w-full bg-[#0e0e0f] border border-[#333537] text-sm rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
+          >
+            <option value="chat">chat</option>
+            <option value="always-on">always-on</option>
+          </select>
+        </Field>
+        <Field label="Tags">
+          <div className="flex flex-wrap gap-1.5 pt-1">
+            {KNOWN_TAGS.map(t => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => toggleTag(t)}
+                className={`px-2 py-0.5 rounded text-xs border transition-colors ${tags.includes(t) ? "bg-blue-900/40 border-blue-700 text-blue-200" : "bg-[#0e0e0f] border-[#333537] text-gray-500 hover:text-gray-300"}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </Field>
+      </div>
+      <div className="flex justify-end gap-2">
+        <button onClick={onCancel} className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-white">Cancel</button>
+        <button
+          onClick={() => onSave({ ngl, ctx_size: ctxSize, group, tags })}
+          className="px-4 py-1.5 rounded-lg text-sm font-medium bg-blue-600 hover:bg-blue-500 text-white"
+        >
+          Save
+        </button>
+      </div>
+    </div>
   );
 }
