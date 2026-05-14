@@ -14,7 +14,7 @@ export function TokenGate({ onConfigured }: { onConfigured: () => void }) {
   };
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-[#131314] text-[#e3e3e3]">
+    <div className="flex h-dvh w-full items-center justify-center bg-[#131314] text-[#e3e3e3]">
       <div className="w-full max-w-md space-y-4 p-8">
         <h1 className="text-xl font-semibold">Configure API token</h1>
         <p className="text-sm text-slate-400">

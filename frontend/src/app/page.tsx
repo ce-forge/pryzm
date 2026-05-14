@@ -19,7 +19,7 @@ export default function Home() {
   }, []);
 
   if (!isMounted || hasToken === null) {
-    return <div className="h-screen w-full bg-[#131314]" />;
+    return <div className="h-dvh w-full bg-[#131314]" />;
   }
 
   if (!hasToken) {
@@ -28,7 +28,7 @@ export default function Home() {
 
   return (
     <AppProviders>
-      <div className="flex h-screen w-full bg-[#131314] text-[#e3e3e3] overflow-hidden font-sans">
+      <div className="flex h-dvh w-full bg-[#131314] text-[#e3e3e3] overflow-hidden font-sans">
         <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
         <ActiveSession isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
       </div>
