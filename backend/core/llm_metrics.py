@@ -88,6 +88,40 @@ def emit_chat_metric(
     )
 
 
+def emit_route(
+    *,
+    model: str,
+    tier: str,
+    reason: str,
+    prompt_len: int,
+) -> None:
+    """Logs a single 'llm.route' line for each user-facing chat request.
+    Emitted at the entry of stream_chat after the router picks a tier."""
+    _logger.info(
+        "llm.route model=%s tier=%s reason=%s prompt_len=%d "
+        "workspace_id=%s session_id=%s",
+        model, tier, reason, prompt_len,
+        _workspace_id.get(), _session_id.get(),
+    )
+
+
+def emit_escalate(
+    *,
+    from_model: str,
+    to_model: str,
+    reason: str,
+) -> None:
+    """Logs a single 'llm.escalate' line when a small-tier request fires the
+    one-shot escalation gate. The next LLM call (the large-model rerun) emits
+    its own llm.metric / llm.route as usual."""
+    _logger.info(
+        "llm.escalate from=%s to=%s reason=%s "
+        "workspace_id=%s session_id=%s",
+        from_model, to_model, reason,
+        _workspace_id.get(), _session_id.get(),
+    )
+
+
 def emit_embed_metric(
     *,
     model: str,

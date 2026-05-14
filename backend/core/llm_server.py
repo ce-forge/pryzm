@@ -12,8 +12,10 @@ keep their existing call shapes. Response payloads are adapted in here so
 callers continue to see the Ollama-shaped `{message, prompt_eval_count,
 eval_count, ...}` dict on chat/generate.
 
-Phase B1 hardcodes DEFAULT_CHAT_MODEL everywhere a model id is needed.
-Phase B2's router will replace those references with dynamic picks.
+`DEFAULT_CHAT_MODEL` / `DEFAULT_SMALL_CHAT_MODEL` are the catalog endpoints.
+Phase B2's router (`core/llm_router.py`) picks between them per request for
+user-facing chat; internal callers (`generate_title`, `condense_chat_memory`)
+import them directly.
 """
 from __future__ import annotations
 
@@ -27,9 +29,8 @@ from core.llm_metrics import emit_chat_metric, emit_embed_metric
 
 BASE_URL = settings.LLM_SERVER_URL.strip().rstrip("/")
 
-# Hardcoded defaults used while Phase B1 has no router. Phase B2 will read
-# from the Workspace/Router context instead of importing these constants.
 DEFAULT_CHAT_MODEL = "gemma-4-E4B-it"
+DEFAULT_SMALL_CHAT_MODEL = "gemma-4-E2B-it"
 DEFAULT_EMBED_MODEL = "nomic-embed-text-v1.5"
 
 
