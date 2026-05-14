@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { apiFetch, getToken, setToken, clearToken } from "@/utils/apiClient";
+import ModelsSection from "@/components/SettingsModels";
 
 export default function SettingsModal({ workspace, close }: { workspace: string, close: () => void }) {
   const [prompts, setPrompts] = useState<Record<string, string>>({});
@@ -127,6 +128,8 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
               </div>
             )}
           </div>
+
+          <ModelsSection />
 
           <div className="border-t border-[#333537] pt-6">
             <h3 className="text-sm font-semibold text-[#e3e3e3] mb-1">Micro-Prompts</h3>
