@@ -4,6 +4,7 @@ import { apiFetch } from "@/utils/apiClient";
 export function useMessageActions(
   workspace: string,
   activeSessionKey: string,
+  activeCacheKey: string,
   messages: any[],
   setMessageCache: any,
   sendMessage: any,
@@ -24,16 +25,16 @@ export function useMessageActions(
       await apiFetch(`/sessions/${activeSessionKey}/truncate/${msgId}?workspace=${workspace}`, { method: "DELETE" });
       const truncated = messages.slice(0, index + 1);
       truncated[index] = { ...truncated[index], content: newContent };
-      setMessageCache((prev: any) => ({ ...prev, [activeSessionKey]: truncated }));
-      
+      setMessageCache((prev: any) => ({ ...prev, [activeCacheKey]: truncated }));
+
       // Fire generation with skip_db_save = true
       sendMessage(newContent, activeSessionKey, selectedModel, [], true);
     } else {
       const updated = [...messages];
       updated[index] = { ...updated[index], content: newContent };
-      setMessageCache((prev: any) => ({ ...prev, [activeSessionKey]: updated }));
+      setMessageCache((prev: any) => ({ ...prev, [activeCacheKey]: updated }));
     }
-  }, [messages, activeSessionKey, setMessageCache, sendMessage, workspace, selectedModel]);
+  }, [messages, activeSessionKey, activeCacheKey, setMessageCache, sendMessage, workspace, selectedModel]);
 
   const deleteMessage = useCallback(async (msgId: string | undefined, index: number) => {
     if (!msgId || msgId.startsWith('temp-')) return;
@@ -41,10 +42,10 @@ export function useMessageActions(
     const newMessages = [...messages];
     const assistantId = isPair ? messages[index+1].id : null;
     newMessages.splice(index, isPair ? 2 : 1);
-    setMessageCache((prev: any) => ({ ...prev, [activeSessionKey]: newMessages }));
+    setMessageCache((prev: any) => ({ ...prev, [activeCacheKey]: newMessages }));
     await apiFetch(`/messages/${msgId}?workspace=${workspace}`, { method: "DELETE" });
     if (assistantId) await apiFetch(`/messages/${assistantId}?workspace=${workspace}`, { method: "DELETE" });
-  }, [messages, activeSessionKey, setMessageCache, workspace]);
+  }, [messages, activeCacheKey, setMessageCache, workspace]);
 
   const branchSession = useCallback(async (msgId: string) => {
     if (!msgId || msgId.startsWith('temp-')) return;
@@ -69,7 +70,7 @@ export function useMessageActions(
 
   const rerunAssistant = useCallback(async (index: number) => {
     if (index === 0 || messages[index].role !== 'assistant') return;
-    
+
     // Find the user message immediately preceding this AI response
     const userMsg = messages[index - 1];
     if (!userMsg || userMsg.role !== 'user') return;
@@ -78,12 +79,12 @@ export function useMessageActions(
     await apiFetch(`/sessions/${activeSessionKey}/truncate/${userMsg.id}?workspace=${workspace}`, { method: "DELETE" });
 
     // Truncate UI Cache to remove the old AI message and anything below it
-    const truncated = messages.slice(0, index); 
-    setMessageCache((prev: any) => ({ ...prev, [activeSessionKey]: truncated }));
+    const truncated = messages.slice(0, index);
+    setMessageCache((prev: any) => ({ ...prev, [activeCacheKey]: truncated }));
 
     // Trigger generation based on the existing userMsg content
     sendMessage(userMsg.content, activeSessionKey, selectedModel, [], true);
-  }, [messages, activeSessionKey, setMessageCache, sendMessage, workspace, selectedModel]);
+  }, [messages, activeSessionKey, activeCacheKey, setMessageCache, sendMessage, workspace, selectedModel]);
 
   return {
     deleteMessage, 
