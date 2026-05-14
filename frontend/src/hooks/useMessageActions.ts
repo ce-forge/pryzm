@@ -8,10 +8,9 @@ export function useMessageActions(
   activeSessionKey: string,
   messages: Message[],
   replaceMessages: (workspaceSlug: string, sessionId: string, messages: Message[]) => void,
-  sendMessage: (text: string, sessionId: string | null, model: string, attachments?: string[], skipUserAdd?: boolean) => Promise<string>,
+  sendMessage: (text: string, sessionId: string | null, attachments?: string[], skipUserAdd?: boolean) => Promise<string>,
   navigateToSession: (id: string) => void,
   notifySessionCreated: (oldId: string, newId: string) => void,
-  selectedModel: string,
 ) {
   const saveEdit = useCallback(async (msgId: string | undefined, index: number, newContent: string, rerun: boolean) => {
     if (!msgId || msgId.startsWith('temp-')) return;
@@ -48,11 +47,11 @@ export function useMessageActions(
         },
       );
 
-      if (rerun) sendMessage(newContent, activeSessionKey, selectedModel, [], true);
+      if (rerun) sendMessage(newContent, activeSessionKey, [], true);
     } catch (err) {
       console.error("Message edit failed", err);
     }
-  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace, selectedModel]);
+  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace]);
 
   const deleteMessage = useCallback(async (msgId: string | undefined, index: number) => {
     if (!msgId || msgId.startsWith('temp-')) return;
@@ -79,8 +78,6 @@ export function useMessageActions(
         const data = await res.json();
         if (data.new_session_id) {
           navigateToSession(data.new_session_id);
-          // Trigger sidebar + history refetch for the new branched session
-          // (replaces the old chatCreated window event).
           notifySessionCreated(activeSessionKey, data.new_session_id);
         }
       }
@@ -98,8 +95,8 @@ export function useMessageActions(
 
     const truncated = messages.slice(0, index);
     replaceMessages(workspace, activeSessionKey, truncated);
-    sendMessage(userMsg.content, activeSessionKey, selectedModel, [], true);
-  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace, selectedModel]);
+    sendMessage(userMsg.content, activeSessionKey, [], true);
+  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace]);
 
   return { deleteMessage, saveEdit, branchSession, rerunAssistant };
 }

@@ -139,11 +139,15 @@ async def stream_chat(
         has_attachment = "[Attached_File:" in last_query
         clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
         if has_attachment:
-            rag_query = clean_user_text if clean_user_text else "document overview"
+            # No user text alongside the attachment → caller wants an overview
+            # of the file, not a semantic search. Flag instead of magic-string.
+            overview_mode = not clean_user_text
+            rag_query = clean_user_text if clean_user_text else ""
             db = database.SessionLocal()
             try:
                 rag_data = await knowledge.retrieve_relevant_chunks(
                     client, db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
+                    overview_mode=overview_mode,
                 )
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]

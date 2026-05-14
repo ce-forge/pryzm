@@ -12,7 +12,6 @@ export interface InferenceApi {
   sendMessage: (
     text: string,
     activeSessionId: string | null,
-    model: string,
     attachments?: string[],
     skipUserAdd?: boolean,
   ) => Promise<string>;
@@ -49,7 +48,6 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
     async (
       text: string,
       activeSessionId: string | null,
-      model: string,
       attachments: string[] = [],
       skipUserAdd: boolean = false,
     ): Promise<string> => {

@@ -181,8 +181,13 @@ async def retrieve_relevant_chunks(
     workspace_id: str,
     session_id: str = None,
     top_k: int = 3,
+    overview_mode: bool = False,
 ):
-    if query == "document overview" and session_id:
+    """Vector-search for relevant chunks. With overview_mode=True (and a
+    session id), bypasses semantic search and returns up to top_k chunks of
+    the most recently uploaded document — used when the user attached a file
+    but didn't include any text query of their own."""
+    if overview_mode and session_id:
         # Most recent document for this session, sampled up to top_k chunks.
         recent_doc = (
             db.query(models.Document)

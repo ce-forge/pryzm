@@ -34,16 +34,11 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="flex h-screen bg-[#121212] text-slate-100 overflow-hidden">
-        
-        <Suspense fallback={<div className="w-64 bg-[#121212] border-r border-slate-800 p-4">Loading core...</div>}>
-        </Suspense>
-
         <main className="flex-1 flex flex-col h-screen overflow-hidden">
           <Suspense fallback={<div className="flex-1 flex items-center justify-center text-slate-500">Initializing Terminal...</div>}>
             {children}
           </Suspense>
         </main>
-        
       </body>
     </html>
   );
