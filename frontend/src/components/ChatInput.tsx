@@ -47,7 +47,7 @@ export default function ChatInput({
   }, [prompt, inputRef]);
 
   const processFiles = (files: File[]) => {
-    const validExts = [".txt", ".md", ".py", ".csv", ".json", ".log", ".yaml", ".yml", ".conf", ".ini", ".jpg", ".jpeg", ".png", ".webp"];
+    const validExts = [".txt", ".md", ".py", ".csv", ".json", ".log", ".yaml", ".yml", ".conf", ".ini", ".jpg", ".jpeg", ".png", ".webp", ".pdf"];
     
     const mappedUploads = files.map(file => {
       const isSupported = validExts.some(ext => file.name.toLowerCase().endsWith(ext)) || !file.name.includes(".");
@@ -135,7 +135,7 @@ export default function ChatInput({
                       multiple
                       className="hidden"
                       ref={fileInputRef}
-                      accept=".txt,.md,.py,.csv,.json,.log,.yaml,.yml,.conf,.ini"
+                      accept=".txt,.md,.py,.csv,.json,.log,.yaml,.yml,.conf,.ini,.pdf,application/pdf"
                       onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))}
                     />
 
