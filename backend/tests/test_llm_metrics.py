@@ -76,12 +76,35 @@ def test_emit_embed_metric(caplog):
 
 def test_context_defaults_when_unset(caplog):
     """If the request handler didn't call set_request_context, both fields are
-    empty strings (not None) so the log line is still well-formed."""
-    # Reset by setting to defaults
-    set_request_context(workspace_id="", session_id="")
-    response = {"prompt_eval_count": 0, "eval_count": 0}
-    with caplog.at_level(logging.INFO, logger="pryzm.llm"):
-        emit_chat_metric(model="m", response=response, fallback_duration_s=1.0)
+    empty strings (not None) so the log line is still well-formed.
+
+    Uses copy_context to isolate from earlier tests in the same process that
+    already called set_request_context."""
+    import contextvars
+    import threading
+
+    def _emit():
+        with caplog.at_level(logging.INFO, logger="pryzm.llm"):
+            emit_chat_metric(model="m", response={"prompt_eval_count": 0, "eval_count": 0}, fallback_duration_s=1.0)
+
+    # copy_context inherits current values, but .run inside an isolated copy
+    # means subsequent .set() in the helpers won't leak. To get the *unset*
+    # behavior we want, we need a context where the ContextVars were never
+    # set on this task. Easiest: spawn a thread, since each thread has its
+    # own context that starts at the ContextVar defaults.
+    err = []
+
+    def _thread_target():
+        try:
+            _emit()
+        except Exception as e:
+            err.append(e)
+
+    t = threading.Thread(target=_thread_target)
+    t.start()
+    t.join()
+    assert not err, err
+
     msg = _capture(caplog)[0].getMessage()
-    assert "workspace_id=" in msg
-    assert "session_id=" in msg
+    # The fields are present with empty values (no None, no missing key).
+    assert msg.rstrip().endswith("workspace_id= session_id=")

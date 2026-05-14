@@ -1,13 +1,21 @@
 """Per-request LLM performance metric emission.
 
-Helpers used by core/ollama.py to log timing/token counts for every chat,
-generate, and embed call. Workspace and session ids are threaded via
-contextvars so call sites don't need new positional parameters — the router
-sets the context at /analyze entry; the helpers pick it up here.
+Three small helpers + two contextvars. Helpers emit one structured log
+line per LLM call (chat / generate / embed). The line is key=value formatted
+on the `pryzm.llm` logger so it's grep-able from the backend log and
+machine-parseable by the perf-comparison harness.
 
-Output shape is a single key=value-formatted log line per LLM call. Grep-able
-from the backend log; also re-aggregated by tests/perf/bench_llm.py for the
-phase comparison.
+Workspace and session ids are threaded via contextvars so call sites at
+the HTTP layer don't need to plumb identifiers down through every LLM
+call. Set them once with `set_request_context(...)` at the request boundary;
+the emitters pick them up automatically.
+
+Emitted log line shape:
+    llm.metric model=<m> prompt_tokens=<n> completion_tokens=<n>
+        ttft_ms=<n> duration_ms=<n> tokens_per_sec=<n.nn>
+        workspace_id=<id> session_id=<id>
+    llm.embed_metric model=<m> char_count=<n> duration_ms=<n>
+        workspace_id=<id> session_id=<id>
 """
 from __future__ import annotations
 
