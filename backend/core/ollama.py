@@ -12,11 +12,13 @@ from `request.app.state.http_client`.
 from __future__ import annotations
 
 import json
+import time
 from typing import AsyncIterator
 
 import httpx
 
 from config import settings
+from core.llm_metrics import emit_chat_metric, emit_embed_metric
 
 
 BASE_URL = settings.OLLAMA_URL.strip().rstrip("/")
@@ -52,11 +54,15 @@ async def chat_stream(
 
 
 async def embed(client: httpx.AsyncClient, text: str, model: str) -> list[float]:
-    """POST /api/embeddings. Returns the embedding vector."""
+    """POST /api/embeddings. Returns the embedding vector. Emits an
+    'llm.embed_metric' line per call."""
     url = f"{BASE_URL}/api/embeddings"
     payload = {"model": model, "prompt": text}
+    t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=30.0)
     resp.raise_for_status()
+    duration_s = time.perf_counter() - t0
+    emit_embed_metric(model=model, char_count=len(text), duration_s=duration_s)
     return resp.json()["embedding"]
 
 
@@ -79,6 +85,8 @@ async def chat(
 
     Used by ai_engine.stream_chat — the engine receives the whole payload first,
     then fake-streams it word-by-word. If `tools` is None, the field is omitted.
+
+    Emits an 'llm.metric' log line on every successful call.
     """
     payload: dict = {
         "model": model,
@@ -92,9 +100,13 @@ async def chat(
         payload["options"].update(options)
 
     url = f"{BASE_URL}/api/chat"
+    t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=120.0)
     resp.raise_for_status()
-    return resp.json()
+    duration_s = time.perf_counter() - t0
+    data = resp.json()
+    emit_chat_metric(model=model, response=data, fallback_duration_s=duration_s)
+    return data
 
 
 async def generate(
@@ -106,12 +118,17 @@ async def generate(
     """POST /api/generate (non-streaming). Returns the response text.
 
     Used by ai_engine.condense_chat_memory and ai_engine.generate_title — short,
-    single-shot completions where streaming is overhead.
-    """
+    single-shot completions where streaming is overhead. Emits an 'llm.metric'
+    line per call (the chat-shape extractor works fine here — /api/generate's
+    response carries the same prompt_eval_count / eval_count / *_duration fields)."""
     url = f"{BASE_URL}/api/generate"
     payload: dict = {"model": model, "prompt": prompt, "stream": False}
     if options:
         payload["options"] = options
+    t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=60.0)
     resp.raise_for_status()
-    return resp.json()["response"]
+    duration_s = time.perf_counter() - t0
+    data = resp.json()
+    emit_chat_metric(model=model, response=data, fallback_duration_s=duration_s)
+    return data["response"]

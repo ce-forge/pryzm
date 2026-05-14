@@ -1,0 +1,7 @@
+# Per-run benchmark output. Ad-hoc runs are ignored; the .gitkeep + named
+# baseline snapshots (ollama-baseline-*.md, llama-swap-*.md) are committed
+# so phase comparisons have an authoritative on-repo reference.
+tests/perf/results/*
+!tests/perf/results/.gitkeep
+!tests/perf/results/ollama-baseline-*.md
+!tests/perf/results/llama-swap-*.md
