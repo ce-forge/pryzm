@@ -140,6 +140,20 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
               </code>
             );
           },
+          img({ src, alt }) {
+            // Bound rendered images so attached-file thumbnails (emitted
+            // as base64 data URLs by format_file_analyzed) don't blow up
+            // the chat width. Same renderer also handles any markdown
+            // image the user/LLM pastes into chat.
+            return (
+              <img
+                src={typeof src === "string" ? src : ""}
+                alt={alt || "attached image"}
+                loading="lazy"
+                className="my-2 max-w-[240px] max-h-[240px] rounded-lg border border-[#333537] object-contain"
+              />
+            );
+          },
           ul({ children }) { return <ul className="list-disc ml-6 mb-4 space-y-2">{children}</ul>; },
           ol({ children }) { return <ol className="list-decimal ml-6 mb-4 space-y-2">{children}</ol>; },
           li({ children }) { return <li className="mb-1">{highlightChildren(children, searchQuery || "")}</li>; },
