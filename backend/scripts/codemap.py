@@ -696,7 +696,7 @@ const cy = cytoscape({
       }
     },
     { selector: "node:selected",    style: { "border-color": "#fff", "border-width": 2.5 } },
-    { selector: "node.highlighted", style: { "border-color": "#fef08a", "border-width": 2.5 } },
+    { selector: "node.highlighted", style: { "opacity": 1, "border-color": "#fef08a", "border-width": 2.5 } },
     { selector: "edge.highlighted", style: { "opacity": 1, "width": 2.5 } },
     { selector: "node.dimmed",      style: { "opacity": 0.12 } },
     { selector: "edge.dimmed",      style: { "opacity": 0.05 } },
@@ -757,8 +757,10 @@ cy.on("tap", "node", evt => {
   panel.innerHTML = lines.join("<br>");
   panel.classList.remove("hidden");
 
-  // Dim all, then highlight neighbourhood.
-  cy.elements().addClass("dimmed").removeClass("highlighted");
+  // Dim all leaves + edges (NOT compound parents — they're the shaded zone/subgroup
+  // backgrounds and should stay at their normal look), then highlight neighbourhood.
+  const dimmable = cy.elements().filter(el => !el.isParent());
+  dimmable.addClass("dimmed").removeClass("highlighted");
   evt.target.removeClass("dimmed").addClass("highlighted");
   const hood = evt.target.connectedEdges();
   hood.removeClass("dimmed").addClass("highlighted");
