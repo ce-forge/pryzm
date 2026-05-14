@@ -1,6 +1,5 @@
 from tools.registry import tool
 from db.database import SessionLocal
-from services import knowledge
 from services.knowledge import search_chunks_sync, _label_chunk
 from utils.formatters import format_tool_results
 
@@ -39,7 +38,6 @@ def search_knowledge_base(queries, workspace_id: str, session_id: str = None) ->
     try:
         sections = []
         all_sources = set()
-        all_docs_with_storage = []
         for q in queries:
             # Stricter threshold than the auto-RAG path: the LLM picked this tool
             # deliberately, so we want precision over recall.
@@ -52,14 +50,8 @@ def search_knowledge_base(queries, workspace_id: str, session_id: str = None) ->
                 sections.append(f"Query: {q!r}\n" + "\n".join(blocks))
                 for chunk in results:
                     all_sources.add(chunk.document.filename)
-                    if getattr(chunk.document, "storage_path", None):
-                        all_docs_with_storage.append(chunk.document)
             else:
                 sections.append(f"Query: {q!r}\nNo relevant documentation found.")
-        # Publish any image-derived docs to the side-channel so ai_engine
-        # can re-attach the original bytes to the next LLM call in this loop.
-        if all_docs_with_storage:
-            knowledge._publish_pending_image_paths(all_docs_with_storage)
         return "\n---\n".join(sections)
     except Exception as e:
         return f"Knowledge base search failed with error: {str(e)}"

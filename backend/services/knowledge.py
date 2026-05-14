@@ -1,5 +1,3 @@
-import contextvars
-
 import httpx
 from db import models
 from sqlalchemy import or_
@@ -8,41 +6,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import settings
 from utils.formatters import format_rag_context
 from core import llm_server
-
-
-# Side-channel for tool-RAG re-attach (Milestone-3-followup).
-# `search_knowledge_base` runs from the sync tool path and returns a plain
-# text result; there's no way to thread image paths through that string
-# without confusing the LLM. We publish paths on this contextvar instead,
-# and `ai_engine` drains it right after each tool-call batch to inject
-# the original image bytes into the next LLM call.
-_PENDING_IMAGE_PATHS: contextvars.ContextVar[tuple[str, ...]] = contextvars.ContextVar(
-    "_PENDING_IMAGE_PATHS", default=()
-)
-
-
-def consume_pending_image_paths() -> list[str]:
-    """Atomic read-and-clear. Called by ai_engine after each tool-call
-    batch."""
-    paths = _PENDING_IMAGE_PATHS.get()
-    if paths:
-        _PENDING_IMAGE_PATHS.set(())
-    return list(paths)
-
-
-def _publish_pending_image_paths(documents) -> None:
-    """Append fresh paths to the contextvar queue (deduped, missing files
-    skipped). Called by the sync tool path after it picks chunks."""
-    fresh = _collect_reattach_paths(documents)
-    if not fresh:
-        return
-    existing = list(_PENDING_IMAGE_PATHS.get())
-    seen = set(existing)
-    for p in fresh:
-        if p not in seen:
-            existing.append(p)
-            seen.add(p)
-    _PENDING_IMAGE_PATHS.set(tuple(existing))
 
 
 async def get_embedding(client: httpx.AsyncClient, text: str) -> list[float]:
