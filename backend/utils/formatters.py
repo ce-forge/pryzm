@@ -34,10 +34,32 @@ def format_tool_execution(func_name: str, args: dict) -> str:
     parts = [f"`{k}={_fmt_value(v)}`" for k, v in args.items()]
     return f"\n\n> **Tool:** `{func_name}` → {', '.join(parts)}\n\n"
 
-def format_file_analyzed(sources: list) -> str:
-    """Formats the markdown output when RAG successfully reads a file."""
+def format_file_analyzed(sources: list, image_paths: list[str] | None = None) -> str:
+    """Formats the markdown output when RAG successfully reads a file.
+
+    When `image_paths` is non-empty, each path is read from disk and
+    embedded as a base64 data URL after the source line. The frontend's
+    markdown renderer turns the `![...](data:...)` lines into bounded
+    thumbnail `<img>` tags inside the same blockquote.
+
+    Why a data URL and not an auth-gated `/documents/<id>/image`
+    endpoint: `<img src>` in the browser can't attach a Bearer header,
+    so a separate endpoint would need cookie auth (deferred — see
+    [[project-image-pipeline]]). The data URL keeps the thumbnail
+    self-contained for v1.
+    """
     sources_str = ", ".join(sources)
-    return f"\n> **File Analyzed:** `{sources_str}`\n\n"
+    body = f"\n> **File Analyzed:** `{sources_str}`\n"
+    if image_paths:
+        # Import locally to avoid a top-level circular: formatters is
+        # imported by services.knowledge, which image_storage doesn't
+        # touch — but a top-level import would still tighten the graph.
+        from services.image_storage import read_as_data_url
+        for path in image_paths:
+            data_url = read_as_data_url(path)
+            if data_url:
+                body += f"> ![attached image]({data_url})\n"
+    return body + "\n"
 
 def format_knowledge_reference(sources: list) -> str:
     """Formats the markdown output when the AI references the knowledge base."""
