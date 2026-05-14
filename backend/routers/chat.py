@@ -228,6 +228,7 @@ async def analyze_data(
                 workspace_id=workspace_id,
                 session_id=session_id,
                 model_name=request.model,
+                is_disconnected=http_request.is_disconnected,
             ):
                 if await http_request.is_disconnected():
                     disconnected = True

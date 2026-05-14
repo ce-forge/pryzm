@@ -1,7 +1,8 @@
+import asyncio
 import json
 import inspect
-import time
 import re
+from typing import Awaitable, Callable, Optional
 
 import httpx
 
@@ -54,12 +55,37 @@ async def condense_chat_memory(
         print(f"Memory Condensation Failed: {e}")
         return old_memory
 
+async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
+    """Run one tool call from the agentic loop.
+
+    Sync tools go through asyncio.to_thread so they don't block the event
+    loop. Async tools (if any are added later) are awaited directly.
+    The caller wraps this in asyncio.wait_for for timeout enforcement.
+    """
+    name = tool_call["function"]["name"]
+    args = tool_call["function"].get("arguments", {})
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            args = {}
+
+    func = workspace_tools[name]
+    valid_params = inspect.signature(func).parameters.keys()
+    safe_args = {k: v for k, v in args.items() if k in valid_params}
+
+    if asyncio.iscoroutinefunction(func):
+        return await func(**safe_args)
+    return await asyncio.to_thread(func, **safe_args)
+
+
 async def stream_chat(
     client: httpx.AsyncClient,
     messages: list,
     workspace_id: str,
     session_id: str = None,
     model_name: str = "gemma4:e4b",
+    is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
 ):
     # Fetch the workspace once (needed for tool list, prompt, and model pin).
     db = database.SessionLocal()
@@ -138,6 +164,9 @@ async def stream_chat(
 
     try:
         while loop_count < max_loops:
+            if is_disconnected and await is_disconnected():
+                return
+
             loop_count += 1
             data = await ollama.chat(
                 client,
@@ -149,33 +178,55 @@ async def stream_chat(
 
             if message.get("tool_calls"):
                 full_messages.append(message)
-                for tool in message["tool_calls"]:
-                    func_name = tool["function"]["name"]
-                    args = tool["function"]["arguments"]
-                    if isinstance(args, str):
+                for tool_call in message["tool_calls"]:
+                    func_name = tool_call["function"]["name"]
+                    if func_name not in workspace_tools:
+                        continue
+
+                    # Inject implicit params before the tool runs.
+                    raw_args = tool_call["function"].get("arguments", {})
+                    if isinstance(raw_args, str):
                         try:
-                            args = json.loads(args)
+                            raw_args = json.loads(raw_args)
                         except Exception:
-                            args = {}
-                    if func_name in workspace_tools:
-                        func = workspace_tools[func_name]
-                        valid_params = inspect.signature(func).parameters.keys()
-                        safe_args = {k: v for k, v in args.items() if k in valid_params}
-                        if "workspace" in valid_params:
-                            safe_args["workspace"] = workspace_slug
-                        if "session_id" in valid_params:
-                            safe_args["session_id"] = session_id
-                        yield format_tool_execution(func_name, safe_args)
-                        try:
-                            result = func(**safe_args)
-                        except Exception as tool_err:
-                            result = f"Tool execution failed: {str(tool_err)}"
-                        yield format_code_block(result)
-                        full_messages.append({
-                            "role": "tool",
-                            "content": result,
-                            "name": func_name,
-                        })
+                            raw_args = {}
+                    func = workspace_tools[func_name]
+                    valid_params = inspect.signature(func).parameters.keys()
+                    if "workspace" in valid_params:
+                        raw_args["workspace"] = workspace_slug
+                    if "session_id" in valid_params:
+                        raw_args["session_id"] = session_id
+
+                    # Rebuild tool_call with enriched args so _execute_tool
+                    # picks them up (it re-reads arguments from the dict).
+                    enriched_call = {
+                        "function": {"name": func_name, "arguments": raw_args}
+                    }
+
+                    display_args = {k: v for k, v in raw_args.items()
+                                    if k in valid_params}
+                    yield format_tool_execution(func_name, display_args)
+
+                    try:
+                        result = await asyncio.wait_for(
+                            _execute_tool(enriched_call, workspace_tools),
+                            timeout=settings.TOOL_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        result = (
+                            f"Tool {func_name} timed out after "
+                            f"{settings.TOOL_TIMEOUT_SECONDS}s. "
+                            "Continue with what you have."
+                        )
+                    except Exception as tool_err:
+                        result = f"Tool execution failed: {str(tool_err)}"
+
+                    yield format_code_block(result)
+                    full_messages.append({
+                        "role": "tool",
+                        "content": str(result),
+                        "name": func_name,
+                    })
                 continue
 
             else:
@@ -206,8 +257,10 @@ async def stream_chat(
 
                 words = content.split(" ")
                 for i, word in enumerate(words):
+                    if is_disconnected and await is_disconnected():
+                        return
                     yield word + (" " if i < len(words) - 1 else "")
-                    time.sleep(0.01)
+                    await asyncio.sleep(0.01)
 
                 finished_cleanly = True
                 break
