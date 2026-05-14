@@ -77,7 +77,15 @@ def test_rapid_sends_distinct_ids_and_ordered(page: Page, api_token: str, screen
     page.wait_for_load_state("networkidle", timeout=10_000)
 
     base = int(time.time())
-    msgs = [f"phase5-rapid-{base}-a", f"phase5-rapid-{base}-b", f"phase5-rapid-{base}-c"]
+    # Verb-led prompts. Bare identifiers like "phase5-rapid-…-a" were
+    # occasionally interpreted by the LLM as a session-rename request,
+    # which made the test flaky on whichever model happened to be
+    # routed. Echo-style prompts give the model no reason to call a tool.
+    msgs = [
+        f"Reply with the word: phase5-rapid-{base}-a",
+        f"Reply with the word: phase5-rapid-{base}-b",
+        f"Reply with the word: phase5-rapid-{base}-c",
+    ]
 
     for i, m in enumerate(msgs):
         _send_chat_message(page, m)
@@ -144,7 +152,7 @@ def test_navigate_during_stream_no_orphan_bubble(page: Page, api_token: str, scr
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
 
-    unique = f"phase5-orphan-{int(time.time())}"
+    unique = f"Reply with the word: phase5-orphan-{int(time.time())}"
     _send_chat_message(page, unique)
     page.wait_for_function(_ASSISTANT_HAS_CONTENT, timeout=60_000)
     page.wait_for_url(lambda u: "session=" in u, timeout=15_000)
@@ -260,7 +268,7 @@ def test_chatbubble_render_bounded_during_stream(page: Page, api_token: str, scr
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
 
-    _send_chat_message(page, f"phase5-render-seed-{int(time.time())}")
+    _send_chat_message(page, f"Reply with the word: phase5-render-seed-{int(time.time())}")
     page.wait_for_function(_ASSISTANT_HAS_CONTENT, timeout=60_000)
     page.wait_for_timeout(2_000)
 
@@ -283,7 +291,7 @@ def test_chatbubble_render_bounded_during_stream(page: Page, api_token: str, scr
         }
     """)
 
-    _send_chat_message(page, f"phase5-render-second-{int(time.time())}")
+    _send_chat_message(page, f"Reply with the word: phase5-render-second-{int(time.time())}")
     page.wait_for_function(_ASSISTANT_HAS_CONTENT, timeout=60_000)
     page.wait_for_timeout(2_500)
 
