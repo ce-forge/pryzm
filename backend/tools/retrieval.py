@@ -1,6 +1,6 @@
 from tools.registry import tool
 from db.database import SessionLocal
-from services.knowledge import search_chunks, _label_chunk
+from services.knowledge import search_chunks_sync, _label_chunk
 from utils.formatters import format_tool_results
 
 
@@ -28,7 +28,7 @@ def search_knowledge_base(query: str, workspace: str, session_id: str = None) ->
             return f"Knowledge base search failed: workspace not found ({workspace})"
         # Stricter threshold than the auto-RAG path: the LLM picked this tool
         # deliberately, so we want precision over recall.
-        results = search_chunks(db, query, workspace_id=ws.id, session_id=session_id, threshold=0.45, top_k=3)
+        results = search_chunks_sync(db, query, workspace_id=ws.id, session_id=session_id, threshold=0.45, top_k=3)
         if not results:
             return "No relevant documentation found in the knowledge base."
 

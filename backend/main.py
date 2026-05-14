@@ -3,6 +3,7 @@ import time
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import httpx
 from config import settings
 from db import database
 from routers import health, chat, workspaces
@@ -56,10 +57,22 @@ async def lifespan(app: FastAPI):
     database.init_db()
     gc_task = asyncio.create_task(garbage_collection_task())
 
-    yield
+    # Shared httpx client — one connection pool for the process lifetime.
+    app.state.http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=settings.OLLAMA_CONNECT_TIMEOUT_SECONDS,
+            read=settings.LLM_TIMEOUT_SECONDS,
+            write=10.0,
+            pool=5.0,
+        ),
+    )
 
-    # Shutdown
-    gc_task.cancel()
+    try:
+        yield
+    finally:
+        await app.state.http_client.aclose()
+        # Shutdown
+        gc_task.cancel()
 
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)

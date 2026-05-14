@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Optional, List
+import asyncio
 import json
 
 from db import database, models
@@ -16,8 +17,28 @@ from sqlalchemy import tuple_, func as sqlfunc
 from sqlalchemy.exc import IntegrityError
 from config import settings
 from utils.formatters import format_error
-import requests
+import httpx
+from core import ollama
+from core.deps import get_http_client
+from services import condense
 
+
+def _error_envelope(exc: Exception) -> dict:
+    """Map an exception to a {error, code} envelope for the SSE stream.
+
+    Codes:
+      ollama_unreachable — connection refused, DNS fail, etc.
+      ollama_timeout     — read timeout (LLM hung)
+      tool_timeout       — a tool exceeded TOOL_TIMEOUT_SECONDS
+      engine_error       — anything else (generic catch-all)
+    """
+    if isinstance(exc, httpx.ConnectError):
+        return {"error": "Ollama is not reachable.", "code": "ollama_unreachable"}
+    if isinstance(exc, (httpx.ReadTimeout, httpx.PoolTimeout)):
+        return {"error": "Ollama took too long to respond.", "code": "ollama_timeout"}
+    if isinstance(exc, asyncio.TimeoutError):
+        return {"error": "Tool execution timed out.", "code": "tool_timeout"}
+    return {"error": str(exc) or "Engine error.", "code": "engine_error"}
 
 
 router = APIRouter(tags=["AI Chat"])
@@ -150,9 +171,11 @@ def delete_session(session_id: str, db: Session = Depends(database.get_db)):
     return {"status": "deleted"}
 
 @router.post("/analyze")
-def analyze_data(
+async def analyze_data(
     http_request: Request,
     request: InferenceRequest,
+    background_tasks: BackgroundTasks,
+    http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     # We manage the upfront DB session manually instead of using
     # Depends(get_db) so the connection is returned to the pool BEFORE the
@@ -169,7 +192,7 @@ def analyze_data(
             chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
 
         if not chat_session:
-            generated_title = ai_engine.generate_title(request.prompt, request.model)
+            generated_title = await ai_engine.generate_title(http_client, request.prompt, request.model)
             chat_session = models.Session(
                 title=generated_title,
                 workspace_id=workspace.id,
@@ -178,7 +201,7 @@ def analyze_data(
             db.commit()
             db.refresh(chat_session)
         elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
-            chat_session.title = ai_engine.generate_title(request.prompt, request.model)
+            chat_session.title = await ai_engine.generate_title(http_client, request.prompt, request.model)
             db.commit()
             db.refresh(chat_session)
 
@@ -219,11 +242,13 @@ def analyze_data(
         disconnected = False
 
         try:
-            for chunk in ai_engine.stream_chat(
+            async for chunk in ai_engine.stream_chat(
+                http_client,
                 safe_messages,
                 workspace_id=workspace_id,
                 session_id=session_id,
                 model_name=request.model,
+                is_disconnected=http_request.is_disconnected,
             ):
                 if await http_request.is_disconnected():
                     disconnected = True
@@ -235,15 +260,13 @@ def analyze_data(
                 yield json.dumps({"done": True}) + "\n"
                 completed = True
 
+        except asyncio.CancelledError:
+            # Client disconnected. Re-raise so the framework cleans up cleanly.
+            raise
         except Exception as e:
-            error_msg = format_error(str(e), "Fatal Stream Error")
-            full_response += error_msg
-            try:
-                yield json.dumps({"chunk": error_msg}) + "\n"
-            except Exception:
-                # If the client is already gone, we can't yield; still want the
-                # finally block to persist what we have.
-                pass
+            yield json.dumps(_error_envelope(e)) + "\n"
+            # Don't re-raise; the response ends here gracefully.
+            return
 
         finally:
             if completed:
@@ -265,79 +288,37 @@ def analyze_data(
                     )
                     background_db.add(ai_msg)
                     background_db.commit()
-
-                    # Memory condenser only summarises clean (status=complete)
-                    # user/assistant exchanges — aborted or failed turns are
-                    # noise we don't want to bake into long-term memory.
-                    all_msgs = background_db.query(models.Message).filter(
-                        models.Message.session_id == session_id
-                    ).order_by(models.Message.created_at).all()
-
-                    memory_msg = next((m for m in all_msgs if m.role == "memory"), None)
-
-                    last_id = None
-                    old_summary = ""
-                    if memory_msg:
-                        try:
-                            mem_data = json.loads(memory_msg.content)
-                            last_id = mem_data.get("last_summarized_id")
-                            old_summary = mem_data.get("summary", "")
-                        except Exception:
-                            old_summary = memory_msg.content
-
-                    active_msgs = [
-                        m for m in all_msgs
-                        if m.role in ["user", "assistant"] and m.status == "complete"
-                    ]
-
-                    start_idx = 0
-                    if last_id:
-                        for i, m in enumerate(active_msgs):
-                            if m.id == last_id:
-                                start_idx = i + 1
-                                break
-
-                    unsummarized = active_msgs[start_idx:]
-
-                    if len(unsummarized) > settings.MEMORY_CONDENSE_THRESHOLD:
-                        retain_count = settings.MEMORY_CONDENSE_RETAIN
-                        to_summarize = unsummarized[:-retain_count]
-                        new_last_id = to_summarize[-1].id
-
-                        msg_dicts = [{"role": m.role, "content": m.content} for m in to_summarize]
-                        new_summary_text = ai_engine.condense_chat_memory(old_summary, msg_dicts, request.model)
-
-                        new_mem_data = {
-                            "last_summarized_id": new_last_id,
-                            "summary": new_summary_text,
-                        }
-
-                        if memory_msg:
-                            memory_msg.content = json.dumps(new_mem_data)
-                        else:
-                            background_db.add(models.Message(
-                                session_id=session_id,
-                                role="memory",
-                                content=json.dumps(new_mem_data),
-                            ))
-
-                        background_db.commit()
-
                 except Exception as e:
                     background_db.rollback()
-                    print(f"Failed to process background memory: {e}")
+                    print(f"Failed to save assistant message: {e}")
                 finally:
                     background_db.close()
 
-    return StreamingResponse(generate(), media_type="application/x-ndjson")
+    # Schedule condensation to run after the response is fully sent.
+    # The advisory lock in condense_for_session ensures only one condenser
+    # runs per session at a time — concurrent requests skip silently.
+    background_tasks.add_task(
+        condense.condense_for_session,
+        http_client,
+        session_id,
+        request.model,
+    )
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        background=background_tasks,
+    )
 
 @router.post("/upload")
 async def upload_document(
+    request: Request,
     file: UploadFile = File(...),
     workspace: str = Form("it_copilot"),
     session_id: Optional[str] = Form(None),
     is_global: bool = Form(False),
-    db: Session = Depends(database.get_db)
+    db: Session = Depends(database.get_db),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     ws = get_or_default(db, workspace)
     # Stream the upload in 8KB chunks and bail as soon as we cross the
@@ -367,7 +348,8 @@ async def upload_document(
         if existing_session:
             active_session_id = session_id
 
-    result = knowledge.ingest_document(
+    result = await knowledge.ingest_document(
+        http_client,
         db=db,
         filename=file.filename,
         content=text_content,
@@ -428,14 +410,13 @@ def get_tools_metadata():
     ]
 
 @router.get("/api/models")
-def get_ollama_models():
+async def get_ollama_models(http_client: httpx.AsyncClient = Depends(get_http_client)):
     try:
-        r = requests.get(f"{settings.OLLAMA_URL.strip().rstrip('/')}/api/tags", timeout=3)
-        r.raise_for_status()
-        models = [m["name"] for m in r.json().get("models", []) if "embed" not in m["name"].lower()]
-        return models if models else["gemma4:e4b"]
-    except Exception as e:
-        return["gemma4:e4b"]
+        all_models = await ollama.list_models(http_client)
+        chat_models = [m for m in all_models if "embed" not in m.lower()]
+        return chat_models if chat_models else ["gemma4:e4b"]
+    except Exception:
+        return ["gemma4:e4b"]
 
 @router.get("/api/prompts")
 def get_prompts():

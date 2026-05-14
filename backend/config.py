@@ -41,6 +41,13 @@ class Settings(BaseSettings):
 
     MAXIMUM_TOOL_LOOPS: int = 8  # Max iterations of tool use before giving up and returning a fallback response
 
+    # Async HTTP timeouts for the Ollama client (see core/ollama.py).
+    # LLM_TIMEOUT_SECONDS replaces the hardcoded timeout=120 that bit us in Phase 2
+    # when cold-loading 35B models took >120s. Bumping to 180 gives headroom.
+    OLLAMA_CONNECT_TIMEOUT_SECONDS: float = 5.0
+    LLM_TIMEOUT_SECONDS: float = 180.0
+    TOOL_TIMEOUT_SECONDS: float = 30.0
+
     MEMORY_CONTEXT_WINDOW: int = 5  # Max messages sent to Ollama per active chat
     MEMORY_CONDENSE_THRESHOLD: int = 15  # When to trigger the background condenser
     MEMORY_CONDENSE_RETAIN: int = 5  # How many recent messages to exclude from the summary

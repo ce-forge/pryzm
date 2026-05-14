@@ -1,9 +1,10 @@
-import os
-import requests
+import asyncio
 import json
 import inspect
-import time
 import re
+from typing import Awaitable, Callable, Optional
+
+import httpx
 
 from db import database, models
 from services import knowledge
@@ -11,15 +12,14 @@ from services.workspaces import resolve_tools_for_workspace, resolve_model_for_r
 from config import settings
 import tools  # triggers @tool registration as a side effect
 from core.prompt_manager import MICRO_PROMPTS
+from core import ollama
 from utils.formatters import (
-    format_tool_execution, 
-    format_file_analyzed, 
+    format_tool_execution,
+    format_file_analyzed,
     format_code_block,
-    format_knowledge_reference, 
+    format_knowledge_reference,
     format_error
 )
-
-BASE_OLLAMA_URL = settings.OLLAMA_URL.strip().rstrip('/')
 
 # Reasoning models (Qwen 3.x, DeepSeek-R1, etc.) wrap their inner monologue
 # in <think>/<thinking> blocks that should never reach the user. We strip
@@ -33,36 +33,60 @@ _THINK_BLOCK_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
-def condense_chat_memory(old_memory: str, messages: list, model_name: str) -> str:
+async def condense_chat_memory(
+    client: httpx.AsyncClient,
+    old_memory: str,
+    messages: list,
+    model_name: str,
+) -> str:
     """Runs asynchronously to summarize older messages and prevent context window overflow."""
-    url = f"{BASE_OLLAMA_URL}/api/generate"
-    
     chat_text = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in messages if m['role'] in ['user', 'assistant']])
-    
+
     prompt = f"{MICRO_PROMPTS['memory_condenser_system']}\n\n"
-    
+
     if old_memory:
         prompt += f"--- PREVIOUS MEMORY ---\n{old_memory}\n\n"
     prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
 
-    payload = {
-        "model": model_name,
-        "prompt": prompt,
-        "stream": False,
-        "options": {"num_ctx": 8192}
-    }
-    
     try:
-        resp = requests.post(url, json=payload, timeout=60)
-        resp.raise_for_status()
-        return resp.json().get("response", "").strip()
+        response = await ollama.generate(client, prompt=prompt, model=model_name, options={"num_ctx": 8192})
+        return response.strip()
     except Exception as e:
         print(f"Memory Condensation Failed: {e}")
         return old_memory
 
-def stream_chat(messages: list, workspace_id: str, session_id: str = None, model_name: str = "gemma4:e4b"):
-    url = f"{BASE_OLLAMA_URL}/api/chat"
+async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
+    """Run one tool call from the agentic loop.
 
+    Sync tools go through asyncio.to_thread so they don't block the event
+    loop. Async tools (if any are added later) are awaited directly.
+    The caller wraps this in asyncio.wait_for for timeout enforcement.
+    """
+    name = tool_call["function"]["name"]
+    args = tool_call["function"].get("arguments", {})
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            args = {}
+
+    func = workspace_tools[name]
+    valid_params = inspect.signature(func).parameters.keys()
+    safe_args = {k: v for k, v in args.items() if k in valid_params}
+
+    if asyncio.iscoroutinefunction(func):
+        return await func(**safe_args)
+    return await asyncio.to_thread(func, **safe_args)
+
+
+async def stream_chat(
+    client: httpx.AsyncClient,
+    messages: list,
+    workspace_id: str,
+    session_id: str = None,
+    model_name: str = "gemma4:e4b",
+    is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
+):
     # Fetch the workspace once (needed for tool list, prompt, and model pin).
     db = database.SessionLocal()
     try:
@@ -118,8 +142,8 @@ def stream_chat(messages: list, workspace_id: str, session_id: str = None, model
             rag_query = clean_user_text if clean_user_text else "document overview"
             db = database.SessionLocal()
             try:
-                rag_data = knowledge.retrieve_relevant_chunks(
-                    db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
+                rag_data = await knowledge.retrieve_relevant_chunks(
+                    client, db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
                 )
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]
@@ -140,50 +164,69 @@ def stream_chat(messages: list, workspace_id: str, session_id: str = None, model
 
     try:
         while loop_count < max_loops:
-            loop_count += 1
-            payload = {
-                "model": effective_model,
-                "messages": full_messages,
-                "stream": False,
-                "options": {"num_ctx": 8192},
-            }
-            if tools_payload:
-                payload["tools"] = tools_payload
+            if is_disconnected and await is_disconnected():
+                return
 
-            resp = requests.post(url, json=payload, timeout=120)
-            resp.raise_for_status()
-            data = resp.json()
+            loop_count += 1
+            data = await ollama.chat(
+                client,
+                messages=full_messages,
+                tools=tools_payload,
+                model=effective_model,
+            )
             message = data.get("message", {})
 
             if message.get("tool_calls"):
                 full_messages.append(message)
-                for tool in message["tool_calls"]:
-                    func_name = tool["function"]["name"]
-                    args = tool["function"]["arguments"]
-                    if isinstance(args, str):
+                for tool_call in message["tool_calls"]:
+                    func_name = tool_call["function"]["name"]
+                    if func_name not in workspace_tools:
+                        continue
+
+                    # Inject implicit params before the tool runs.
+                    raw_args = tool_call["function"].get("arguments", {})
+                    if isinstance(raw_args, str):
                         try:
-                            args = json.loads(args)
+                            raw_args = json.loads(raw_args)
                         except Exception:
-                            args = {}
-                    if func_name in workspace_tools:
-                        func = workspace_tools[func_name]
-                        valid_params = inspect.signature(func).parameters.keys()
-                        safe_args = {k: v for k, v in args.items() if k in valid_params}
-                        if "workspace" in valid_params:
-                            safe_args["workspace"] = workspace_slug
-                        if "session_id" in valid_params:
-                            safe_args["session_id"] = session_id
-                        yield format_tool_execution(func_name, safe_args)
-                        try:
-                            result = func(**safe_args)
-                        except Exception as tool_err:
-                            result = f"Tool execution failed: {str(tool_err)}"
-                        yield format_code_block(result)
-                        full_messages.append({
-                            "role": "tool",
-                            "content": result,
-                            "name": func_name,
-                        })
+                            raw_args = {}
+                    func = workspace_tools[func_name]
+                    valid_params = inspect.signature(func).parameters.keys()
+                    if "workspace" in valid_params:
+                        raw_args["workspace"] = workspace_slug
+                    if "session_id" in valid_params:
+                        raw_args["session_id"] = session_id
+
+                    # Rebuild tool_call with enriched args so _execute_tool
+                    # picks them up (it re-reads arguments from the dict).
+                    enriched_call = {
+                        "function": {"name": func_name, "arguments": raw_args}
+                    }
+
+                    display_args = {k: v for k, v in raw_args.items()
+                                    if k in valid_params}
+                    yield format_tool_execution(func_name, display_args)
+
+                    try:
+                        result = await asyncio.wait_for(
+                            _execute_tool(enriched_call, workspace_tools),
+                            timeout=settings.TOOL_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        result = (
+                            f"Tool {func_name} timed out after "
+                            f"{settings.TOOL_TIMEOUT_SECONDS}s. "
+                            "Continue with what you have."
+                        )
+                    except Exception as tool_err:
+                        result = f"Tool execution failed: {str(tool_err)}"
+
+                    yield format_code_block(result)
+                    full_messages.append({
+                        "role": "tool",
+                        "content": str(result),
+                        "name": func_name,
+                    })
                 continue
 
             else:
@@ -214,8 +257,10 @@ def stream_chat(messages: list, workspace_id: str, session_id: str = None, model
 
                 words = content.split(" ")
                 for i, word in enumerate(words):
+                    if is_disconnected and await is_disconnected():
+                        return
                     yield word + (" " if i < len(words) - 1 else "")
-                    time.sleep(0.01)
+                    await asyncio.sleep(0.01)
 
                 finished_cleanly = True
                 break
@@ -226,26 +271,20 @@ def stream_chat(messages: list, workspace_id: str, session_id: str = None, model
     except Exception as e:
         yield f"\n[Engine Error: {str(e)}]"
 
-def generate_title(prompt: str, model_name: str = "gemma4:e4b") -> str:
-    url = f"{BASE_OLLAMA_URL}/api/generate"
-    
+async def generate_title(
+    client: httpx.AsyncClient,
+    prompt: str,
+    model_name: str = "gemma4:e4b",
+) -> str:
     clean_prompt = re.sub(r'\[Attached_File:.*?\]', '', prompt).strip()
     if not clean_prompt:
         return MICRO_PROMPTS["title_document_default"]
 
     system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
-    payload = {
-        "model": model_name, 
-        "prompt": system_prompt, 
-        "stream": False,
-        "options": {"num_ctx": 4096}
-        }    
-    
     try:
-        response = requests.post(url, json=payload, timeout=5)
-        response.raise_for_status()
-        text = response.json().get("response", "").strip(' \n"\'*.')
+        text = await ollama.generate(client, prompt=system_prompt, model=model_name, options={"num_ctx": 4096})
+        text = text.strip(' \n"\'*.')
         if not text:
             return MICRO_PROMPTS["title_default"]
         # Cap rather than discard — a 6-word title from the model is usually
