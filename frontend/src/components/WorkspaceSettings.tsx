@@ -35,14 +35,12 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
 
   const [name, setName] = useState(workspace?.display_name ?? "");
   const [prompt, setPrompt] = useState(workspace?.system_prompt ?? "");
-  const [preferredModel, setPreferredModel] = useState<string | null>(workspace?.model_name ?? null);
   const [enabledTools, setEnabledTools] = useState<string[]>(workspace?.enabled_tools ?? []);
   const [color, setColor] = useState<WorkspaceColor>(
     (workspace?.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR
   );
 
   const [availableTools, setAvailableTools] = useState<{ name: string; description: string }[]>([]);
-  const [installedModels, setInstalledModels] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -59,10 +57,6 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
     apiFetch("/api/tools").then(r => r.ok ? r.json() : []).then((data) => {
       if (Array.isArray(data)) setAvailableTools(data);
     }).catch(() => {});
-
-    apiFetch("/api/models").then(r => r.json()).then((data) => {
-      if (Array.isArray(data)) setInstalledModels(data);
-    }).catch(() => {});
   }, []);
 
   // "Start from" change handler — pre-fills fields if the user hasn't dirtied them.
@@ -72,7 +66,6 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
     if (!slug) {
       setName("");
       setPrompt("");
-      setPreferredModel(null);
       setEnabledTools([]);
       setColor(DEFAULT_WORKSPACE_COLOR);
     } else {
@@ -80,7 +73,6 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       if (source) {
         setName(source.display_name);
         setPrompt(source.system_prompt);
-        setPreferredModel(source.model_name);
         setEnabledTools([...source.enabled_tools]);
         setColor((source.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
       }
@@ -96,7 +88,6 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       display_name: workspace.display_name,
       system_prompt: workspace.system_prompt,
       enabled_tools: workspace.enabled_tools,
-      model_name: workspace.model_name,
       color: workspace.color,
     };
     try {
@@ -106,7 +97,6 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
           if ("display_name" in patch) setName(snapshot.display_name);
           if ("system_prompt" in patch) setPrompt(snapshot.system_prompt);
           if ("enabled_tools" in patch) setEnabledTools(snapshot.enabled_tools);
-          if ("model_name" in patch) setPreferredModel(snapshot.model_name ?? null);
           if ("color" in patch) setColor((snapshot.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
         },
         async () => {
@@ -281,26 +271,6 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
               className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 font-mono resize-y custom-scrollbar"
             />
             <p className="text-xs text-gray-500 mt-1">Use <code>{"{tool_names}"}</code> to substitute the enabled tool list.</p>
-          </div>
-
-          {/* Preferred model */}
-          <div>
-            <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Preferred model</label>
-            <select
-              value={preferredModel ?? ""}
-              onChange={(e) => {
-                const v = e.target.value || null;
-                setPreferredModel(v);
-                dirtyRef.current = true;
-                if (mode === "edit") save({ model_name: v });
-              }}
-              className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500"
-            >
-              <option value="">Use default model (current global picker)</option>
-              {installedModels.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
           </div>
 
           {/* Enabled tools */}
