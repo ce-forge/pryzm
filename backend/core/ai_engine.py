@@ -202,7 +202,7 @@ async def stream_chat(
                         recent_messages[-1]["content"] = blocks
                     else:
                         recent_messages[-1]["content"] = rebuilt_text
-                    yield format_file_analyzed(sources_list, image_paths=reattach_paths)
+                    yield format_file_analyzed(sources_list)
             except Exception as rag_err:
                 yield format_error(str(rag_err), "File Read Error")
             finally:
