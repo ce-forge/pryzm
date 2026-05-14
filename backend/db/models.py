@@ -87,6 +87,11 @@ class Document(Base):
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
     is_global = Column(Boolean, default=False, server_default=sa.text("false"), nullable=False)
+    # Filesystem path to the original uploaded bytes. Populated for image
+    # uploads (Milestone 2 of the VLM spec); NULL for text uploads, which
+    # are reconstructable from chunks. The file at this path is cleaned up
+    # by the after_delete listener at the bottom of this module.
+    storage_path = Column(String(512), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     session = relationship("Session", back_populates="documents")
     workspace = relationship("Workspace", back_populates="documents")
@@ -105,3 +110,25 @@ class DocumentChunk(Base):
     content = Column(Text, nullable=False)
     embedding = Column(Vector(768))
     document = relationship("Document", back_populates="chunks")
+
+
+# ---------------------------------------------------------------------------
+# Document.storage_path lifecycle: clean up the on-disk file when the row
+# goes away. SQLAlchemy's `after_delete` event fires once the DELETE has
+# been flushed; if the transaction later rolls back the file is gone, but
+# the row is also still there — we treat that as acceptable since the
+# inverse (orphan file) is the real risk.
+# ---------------------------------------------------------------------------
+import os as _os  # noqa: E402  — local import keeps the lifecycle hook self-contained
+from sqlalchemy import event as _event  # noqa: E402
+
+
+@_event.listens_for(Document, "after_delete")
+def _delete_storage_file(_mapper, _connection, target):
+    path = getattr(target, "storage_path", None)
+    if not path:
+        return
+    try:
+        _os.remove(path)
+    except FileNotFoundError:
+        pass

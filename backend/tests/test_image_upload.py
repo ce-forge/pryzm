@@ -12,9 +12,11 @@ from __future__ import annotations
 import httpx
 import pytest
 
+import os
+
 from core import llm_server
 from db import models
-from services import image_describe, knowledge
+from services import image_describe, image_storage, knowledge
 
 
 _FAKE_CAPTION = (
@@ -78,6 +80,75 @@ async def test_caption_text_becomes_searchable_chunk(db_session, monkeypatch):
     )
     assert chunks
     assert any("LAPTOP-042" in c.content for c in chunks)
+
+
+def test_save_image_writes_bytes_and_returns_path(tmp_path, monkeypatch):
+    """image_storage.save_image lays the bytes at data/uploads/<uuid>.<ext>
+    and returns an absolute path that exists."""
+    monkeypatch.setattr(image_storage, "_UPLOADS_DIR", str(tmp_path / "uploads"))
+    path = image_storage.save_image(b"img-bytes", mime="image/png")
+    assert os.path.isabs(path)
+    assert path.endswith(".png")
+    assert os.path.exists(path)
+    with open(path, "rb") as f:
+        assert f.read() == b"img-bytes"
+
+
+def test_save_image_rejects_unsupported_mime(tmp_path, monkeypatch):
+    monkeypatch.setattr(image_storage, "_UPLOADS_DIR", str(tmp_path / "uploads"))
+    import pytest
+    with pytest.raises(ValueError):
+        image_storage.save_image(b"x", mime="image/tiff")
+
+
+@pytest.mark.asyncio
+async def test_document_delete_cleans_up_storage_file(db_session, monkeypatch, tmp_path):
+    """SQLAlchemy after_delete listener removes the on-disk file when a
+    Document with storage_path is deleted."""
+    monkeypatch.setattr(image_storage, "_UPLOADS_DIR", str(tmp_path / "uploads"))
+    ws = _seed_workspace(db_session, slug="img-delete-test")
+    path = image_storage.save_image(b"keepalive-bytes", mime="image/png")
+    assert os.path.exists(path)
+
+    doc = models.Document(
+        filename="x.png",
+        workspace_id=ws.id,
+        is_global=True,
+        storage_path=path,
+    )
+    db_session.add(doc)
+    db_session.commit()
+
+    db_session.delete(doc)
+    db_session.commit()
+    assert not os.path.exists(path), "storage file should be cleaned up on Document delete"
+
+
+@pytest.mark.asyncio
+async def test_ingest_document_persists_storage_path(db_session, monkeypatch):
+    """ingest_document writes the storage_path kwarg onto the Document row."""
+    ws = _seed_workspace(db_session, slug="img-persist-path")
+
+    async def fake_embed(client, text, model):
+        return [0.1] * 768
+
+    monkeypatch.setattr(llm_server, "embed", fake_embed)
+
+    async with httpx.AsyncClient() as client:
+        result = await knowledge.ingest_document(
+            client=client,
+            db=db_session,
+            filename="example.png",
+            content="A captioned image.",
+            workspace_id=ws.id,
+            storage_path="/tmp/fake/example.png",
+        )
+    doc = (
+        db_session.query(models.Document)
+        .filter_by(id=result["document_id"])
+        .one()
+    )
+    assert doc.storage_path == "/tmp/fake/example.png"
 
 
 def test_upload_endpoint_rejects_unsupported_image_type(db_session, monkeypatch):
