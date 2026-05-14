@@ -211,6 +211,77 @@ def test_add_model_accepts_split_repo_quant(client, tmp_yaml):
 
 
 # ---------------------------------------------------------------------------
+# PUT /api/admin/models/{id} — edits non-identity fields
+# ---------------------------------------------------------------------------
+
+def test_update_model_404_unknown(client):
+    res = client.put("/api/admin/models/does-not-exist", json={"ngl": 50})
+    assert res.status_code == 404
+
+
+def test_update_model_rejects_bad_group(client):
+    res = client.put("/api/admin/models/gemma-4-E2B-it", json={"group": "weird"})
+    assert res.status_code == 400
+
+
+def test_update_model_partial_update_preserves_identity(client, tmp_yaml):
+    res = client.put("/api/admin/models/gemma-4-E2B-it", json={"ngl": 50, "ctx_size": 4096})
+    assert res.status_code == 200, res.text
+    row = res.json()
+    # Identity preserved
+    assert row["id"] == "gemma-4-E2B-it"
+    assert row["repo"] == "bartowski/google_gemma-4-E2B-it-GGUF"
+    assert row["quant"] == "Q4_K_M"
+    # Edited fields applied
+    assert row["ngl"] == 50
+    assert row["ctx_size"] == 4096
+    # Fields not in the PUT body stay as-is
+    assert row["group"] == "chat"
+    assert row["tags"] == []
+
+    # Disk state: cmd block reflects new values
+    text = tmp_yaml.read_text()
+    assert "-ngl 50" in text
+    assert "--ctx-size 4096" in text
+    # Original repo:quant still in YAML
+    assert "bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M" in text
+
+
+def test_update_model_tags_replace_not_merge(client, tmp_yaml):
+    # Start: nomic has tags=["embedding"]. Replacing with ["embedding","vision"]
+    # should yield exactly those two, not append-only behavior on a future call.
+    res = client.put(
+        "/api/admin/models/nomic-embed-text-v1.5",
+        json={"tags": ["embedding", "vision"]},
+    )
+    assert res.status_code == 200
+    assert set(res.json()["tags"]) == {"embedding", "vision"}
+    # Replace with a single tag — full replacement, not merge.
+    res2 = client.put(
+        "/api/admin/models/nomic-embed-text-v1.5",
+        json={"tags": ["embedding"]},
+    )
+    assert res2.json()["tags"] == ["embedding"]
+
+
+def test_update_model_group_toggle_chat_to_always_on(client, tmp_yaml):
+    res = client.put("/api/admin/models/gemma-4-E2B-it", json={"group": "always-on"})
+    assert res.status_code == 200
+    assert res.json()["group"] == "always-on"
+    # YAML's groups list updated
+    text = tmp_yaml.read_text()
+    # Find E2B's block and verify groups contains always-on. The naive substring
+    # search is fine here since 'always-on' only appears in groups lines.
+    assert "always-on" in text
+
+
+def test_update_model_requires_token(client):
+    client.headers.pop("Authorization", None)
+    res = client.put("/api/admin/models/gemma-4-E2B-it", json={"ngl": 50})
+    assert res.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # DELETE /api/admin/models/{id}
 # ---------------------------------------------------------------------------
 
