@@ -72,8 +72,16 @@ export function useSession() {
         const historyRes = await apiFetch(`/sessions/${currentSession}`, { cache: 'no-store' });
         if (historyRes.ok) {
           const historyData = await historyRes.json();
-          // CRITICAL: This overwrites "temp-" IDs with real DB UUIDs
-          setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: historyData }));
+          // CRITICAL: This overwrites "temp-" IDs with real DB UUIDs.
+          //
+          // We MUST NOT overwrite while a new send for this same session has
+          // started — its optimistic bubbles live only in the cache, not in
+          // the DB yet, and clobbering them loses the user's just-typed
+          // message. Re-check the streaming ref RIGHT BEFORE we commit, since
+          // the fetch was async and state may have changed during it.
+          if (!streamingSessionIdsRef.current.has(currentSession)) {
+            setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: historyData }));
+          }
         }
       } catch (error) {
         console.error("History sync failed:", error);

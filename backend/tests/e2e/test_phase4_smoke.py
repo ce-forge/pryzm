@@ -23,7 +23,13 @@ _ASSISTANT_HAS_CONTENT = """
     if (!chatEl) return false;
     const paragraphs = chatEl.querySelectorAll('p');
     for (const p of paragraphs) {
-        if ((p.textContent || '').trim().length > 5) return true;
+        // Any non-empty <p> in the chat scroll area means the assistant has
+        // rendered a response. (The threshold was once > 5 chars as a guard
+        // against transient empty placeholders, but with the llama.cpp swap
+        // Gemma 4 actually complies with "say one word" and produces a
+        // single short token like "Hi" or "Habit" — 5-char threshold
+        // silently rejected those valid replies forever.)
+        if ((p.textContent || '').trim().length > 0) return true;
     }
     return false;
 }
@@ -43,11 +49,18 @@ def _open_app_with_token(page: Page, token: str) -> None:
 
 
 def _send_chat_message(page: Page, text: str) -> None:
-    """Fill the chat textarea and press Enter to submit."""
+    """Fill the chat textarea, press Enter, and wait for the user bubble to
+    render. The DOM-confirmation step protects against the silent-drop case
+    where handleInference bails early because currentIsProcessing is still
+    true from a prior turn — the textarea is visible but Enter is a no-op."""
     textarea = page.locator('textarea[placeholder="Ask Pryzm anything..."]')
     textarea.wait_for(state="visible", timeout=5_000)
     textarea.fill(text)
     textarea.press("Enter")
+    page.wait_for_function(
+        f"() => (document.body.textContent || '').includes({text!r})",
+        timeout=10_000,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +157,11 @@ def test_chat_works_in_each_builtin(page: Page, api_token: str, screenshot):
     for ws_slug in ("personal", "it_copilot"):
         page.goto(f"{FRONTEND_URL}/?workspace={ws_slug}")
         page.wait_for_load_state("networkidle", timeout=10_000)
-        # Brief pause so the sidebar/tool-list fetches complete before we type.
-        page.wait_for_timeout(1_000)
+        # Pause so the sidebar/tool-list fetches complete AND React fully
+        # wires up the chat form after the cross-workspace navigation.
+        # 1s was occasionally too tight when the browser process is warm from
+        # many prior tests in the same session.
+        page.wait_for_timeout(2_000)
         _send_chat_message(page, f"Say one word. (smoke: {ws_slug})")
         # 90 s generous timeout: cold model load on the second workspace can be slow.
         page.wait_for_function(_ASSISTANT_HAS_CONTENT, timeout=90_000)
