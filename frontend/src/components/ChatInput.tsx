@@ -42,6 +42,31 @@ export default function ChatInput({
     }
   }, [prompt, inputRef]);
 
+  // Block send while any attached file is still uploading. Otherwise the
+  // prompt goes out with an [Attached_File:foo.jpg] marker but the bytes
+  // aren't on the server yet, the auto-RAG path misses the chunk, and the
+  // user gets a worse answer than if they'd waited. Covers both 'pending'
+  // (queued, not started) and 'uploading' (in flight) states.
+  const uploadsInProgress = uploads.some(
+    (u) => u.status === "pending" || u.status === "uploading",
+  );
+
+  const guardedSubmit = (e?: React.FormEvent) => {
+    if (uploadsInProgress) {
+      e?.preventDefault();
+      return;
+    }
+    handleInference(e);
+  };
+
+  const guardedKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (uploadsInProgress && e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
+    handleKeyDown(e);
+  };
+
   const processFiles = (files: File[]) => {
     const validExts = [".txt", ".md", ".py", ".csv", ".json", ".log", ".yaml", ".yml", ".conf", ".ini", ".jpg", ".jpeg", ".png", ".webp", ".pdf"];
     
@@ -128,12 +153,12 @@ export default function ChatInput({
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
       >
-        <form onSubmit={handleInference} className="flex flex-col p-2">
-            <textarea 
+        <form onSubmit={guardedSubmit} className="flex flex-col p-2">
+            <textarea
               ref={inputRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={handleKeyDown}
+              onKeyDown={guardedKeyDown}
               disabled={isAutoTesting}
               className="w-full bg-transparent px-4 pt-3 pb-2 text-[15px] text-[#e3e3e3] resize-none focus:outline-none custom-scrollbar min-h-[52px] max-h-[200px] leading-relaxed"
               placeholder="Ask Pryzm anything..."
@@ -187,7 +212,7 @@ export default function ChatInput({
                           <StopIcon className="w-5 h-5 fill-white" />
                       </button>
                   ) : (
-                      <button type="submit" disabled={!prompt.trim() || isAutoTesting} 
+                      <button type="submit" disabled={!prompt.trim() || isAutoTesting || uploadsInProgress}
                         className="p-2.5 bg-[#e3e3e3] hover:bg-white disabled:bg-[#333537] disabled:text-gray-600 rounded-full text-black transition-all active:scale-95 shadow-lg">
                           <SendIcon className="w-5 h-5 ml-0.5" />
                       </button>
