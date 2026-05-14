@@ -33,5 +33,5 @@ Thumbs.db
 backend/data/*
 !backend/data/.gitkeep
 
-# Codemap script output.
-backend/scripts/_out/
+# Codemap dev tool output.
+backend/tests/codemap/_out/
