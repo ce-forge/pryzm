@@ -10,6 +10,23 @@ from core.llm_metrics import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _propagate_pryzm_llm_to_caplog():
+    """main.py attaches its own handler to the `pryzm.llm` logger and sets
+    `propagate = False` so metric lines don't double-emit in production.
+    `caplog` relies on records propagating up to the root logger, so when
+    main is imported earlier in a combined test run, our records here get
+    swallowed before caplog sees them. Flip propagate on for the duration
+    of each test; restore on teardown."""
+    logger = logging.getLogger("pryzm.llm")
+    original = logger.propagate
+    logger.propagate = True
+    try:
+        yield
+    finally:
+        logger.propagate = original
+
+
 def _capture(caplog):
     return [r for r in caplog.records if r.name == "pryzm.llm"]
 
