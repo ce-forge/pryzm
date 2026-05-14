@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { v4 as uuid } from "uuid";
-import { useChatContext } from "@/context/ChatContext";
+import { useSessionContext } from "@/context/SessionContext";
 import { apiFetch } from "@/utils/apiClient";
 import SessionItem from "./SessionItem";
 import ConfirmModal from "./ConfirmModal";
 import InlineCreateForm from "./InlineCreateForm";
+import { withRollback } from "@/utils/withRollback";
 
 interface SessionInfo {
   id: string;
@@ -22,7 +23,7 @@ interface FolderInfo {
 }
 
 export default function SessionDirectory() {
-  const { session } = useChatContext();
+  const session = useSessionContext();
 
   const workspace = session.workspace;
   const currentSessionId = session.currentSession;
@@ -112,9 +113,10 @@ export default function SessionDirectory() {
   useEffect(() => {
     fetchSessions();
     fetchFolders();
-    window.addEventListener("chatCreated", fetchSessions);
-    return () => window.removeEventListener("chatCreated", fetchSessions);
-  }, [fetchSessions, fetchFolders]);
+    // Subscribe to "session created" via the SessionContext bus instead of
+    // a window-level event. Returns the unsubscribe function.
+    return session.subscribeSessionCreated(fetchSessions);
+  }, [fetchSessions, fetchFolders, session]);
 
   const handleDragOverSafe = (e: React.DragEvent, target: string | null) => {
     if (e.dataTransfer.types.includes("application/x-pryzm-session")) {
@@ -127,28 +129,45 @@ export default function SessionDirectory() {
     e.preventDefault();
     const sessionId = e.dataTransfer.getData("application/x-pryzm-session");
     if (!sessionId) return;
-    
-    setSessions((prev) => prev.map(s => s.id === sessionId ? { ...s, folder_id: folderId } : s));
-    
+
+    const previous = sessions.find((s) => s.id === sessionId);
+    const previousFolderId = previous?.folder_id ?? null;
+    if (previousFolderId === folderId) return;
+
     try {
-      await apiFetch(`/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ folder_id: folderId })
-      });
-    } catch (err) {}
+      await withRollback(
+        () => setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, folder_id: folderId } : s)),
+        () => setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, folder_id: previousFolderId } : s)),
+        async () => {
+          const r = await apiFetch(`/sessions/${sessionId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ folder_id: folderId }),
+          });
+          if (!r.ok) throw new Error("move failed");
+        },
+      );
+    } catch (err) {
+      console.error("Session move failed", err);
+    }
   };
 
   const createFolderImpl = async (name: string) => {
     const newFolder = { id: uuid(), name, workspace };
-    setFolders([{ ...newFolder, isOpen: true }, ...folders]);
     setIsCreatingFolder(false);
     try {
-      await apiFetch("/folders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(newFolder),
-      });
+      await withRollback(
+        () => setFolders((prev) => [{ ...newFolder, isOpen: true }, ...prev]),
+        () => setFolders((prev) => prev.filter((f) => f.id !== newFolder.id)),
+        async () => {
+          const r = await apiFetch("/folders", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(newFolder),
+          });
+          if (!r.ok) throw new Error("create failed");
+        },
+      );
     } catch (err) {
       console.error("Folder create failed", err);
     }
@@ -158,15 +177,25 @@ export default function SessionDirectory() {
     e.preventDefault();
     const cleaned = editFolderTitle.trim();
     if (!cleaned) return setEditingFolderId(null);
-    setFolders(prev => prev.map(f => f.id === id ? { ...f, name: cleaned } : f));
+    const previous = folders.find((f) => f.id === id);
+    if (!previous) return setEditingFolderId(null);
     setEditingFolderId(null);
     try {
-      await apiFetch(`/folders/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: cleaned }),
-      });
-    } catch (err) {}
+      await withRollback(
+        () => setFolders((prev) => prev.map((f) => f.id === id ? { ...f, name: cleaned } : f)),
+        () => setFolders((prev) => prev.map((f) => f.id === id ? { ...f, name: previous.name } : f)),
+        async () => {
+          const r = await apiFetch(`/folders/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: cleaned }),
+          });
+          if (!r.ok) throw new Error("rename failed");
+        },
+      );
+    } catch (err) {
+      console.error("Folder rename failed", err);
+    }
   };
 
   const requestDeleteFolder = (e: React.MouseEvent, folder: FolderInfo) => {
@@ -178,13 +207,22 @@ export default function SessionDirectory() {
 
   const confirmDeleteFolder = async () => {
     if (!folderPendingDelete) return;
-    const folderId = folderPendingDelete.id;
+    const snapshot = folderPendingDelete;
+    const folderId = snapshot.id;
     setFolderPendingDelete(null);
-    setFolders(prev => prev.filter(f => f.id !== folderId));
     try {
-      await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
+      await withRollback(
+        () => setFolders((prev) => prev.filter((f) => f.id !== folderId)),
+        () => setFolders((prev) => [snapshot, ...prev.filter((f) => f.id !== folderId)]),
+        async () => {
+          const r = await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
+          if (!r.ok) throw new Error("delete failed");
+        },
+      );
       fetchSessions();
-    } catch (err) {}
+    } catch (err) {
+      console.error("Folder delete failed", err);
+    }
   };
 
   const toggleFolder = (folderId: string) => {

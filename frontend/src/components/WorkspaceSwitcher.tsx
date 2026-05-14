@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useChatContext } from "@/context/ChatContext";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import WorkspaceSettings from "./WorkspaceSettings";
 import { Workspace } from "@/hooks/useWorkspaces";
@@ -15,7 +15,7 @@ type SettingsTarget =
   | null;
 
 export default function WorkspaceSwitcher() {
-  const { workspacesApi, activeWorkspace } = useChatContext();
+  const { workspacesApi, activeWorkspace } = useWorkspaceContext();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>(null);

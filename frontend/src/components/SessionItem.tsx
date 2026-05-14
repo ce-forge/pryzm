@@ -5,7 +5,7 @@ import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { apiFetch } from "@/utils/apiClient";
 import { LoadingIcon } from "./Icons";
 import ConfirmModal from "./ConfirmModal"; // NEW IMPORT
-import { useChatContext } from "@/context/ChatContext";
+import { useSessionContext } from "@/context/SessionContext";
 import { isSidebarScrolling } from "@/hooks/useSidebarPrefetchGuard";
 
 interface SessionItemProps {
@@ -20,7 +20,7 @@ export default function SessionItem({
   s, workspace, currentSessionId, isStreaming, setSessions
 }: SessionItemProps) {
   const router = useRouter();
-  const { session } = useChatContext();
+  const session = useSessionContext();
   const [isEditing, setIsEditing] = useState(false);
   const [editTitle, setEditTitle] = useState(s.title);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);

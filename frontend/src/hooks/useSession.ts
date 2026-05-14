@@ -94,15 +94,11 @@ export function useSession() {
     } catch (e) {}
   }, [currentSession, workspace, setMessageCache]);
 
-  // Initial Load & Event Listener for Sync
+  // Initial load. Sync after a stream completes is now triggered via the
+  // SessionContext API (notifySessionCreated → loadSessionData(true)), not via
+  // a window-level event bus.
   useEffect(() => {
     loadSessionData();
-
-    // The 'chatCreated' event is dispatched by useInference.ts when a stream ends.
-    const handleSync = () => loadSessionData(true);
-    window.addEventListener("chatCreated", handleSync);
-    
-    return () => window.removeEventListener("chatCreated", handleSync);
   }, [currentSession, workspace, loadSessionData]);
 
   /**
@@ -133,8 +129,6 @@ export function useSession() {
     isNavigatingRef.current = true;
     setCurrentSession(id);
     router.replace(`/?workspace=${workspace}&session=${id}`, { scroll: false });
-    // Trigger a refresh of the sidebar list
-    window.dispatchEvent(new Event("chatCreated"));
   }, [workspace, router]);
 
   return {
@@ -142,6 +136,7 @@ export function useSession() {
     messages, messageCache, setMessageCache, workspace,
     activeCacheKey,
     isNavigatingRef, streamingSessionIdsRef, isInitialLoading,
-    navigateToSession, prefetchSession, router, urlSessionId
+    navigateToSession, prefetchSession, router, urlSessionId,
+    loadSessionData,
   };
 }

@@ -38,7 +38,7 @@ export interface RemoveResult {
 
 /**
  * Owns the list of workspaces + CRUD helpers. Reads once on mount; callers
- * trigger refetch after mutations. Components consume this via ChatContext.
+ * trigger refetch after mutations. Components consume this via WorkspaceContext.
  */
 export function useWorkspaces() {
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);

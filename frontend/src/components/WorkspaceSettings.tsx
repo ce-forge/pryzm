@@ -2,9 +2,10 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useChatContext } from "@/context/ChatContext";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { apiFetch } from "@/utils/apiClient";
 import { Workspace } from "@/hooks/useWorkspaces";
+import { withRollback } from "@/utils/withRollback";
 import ConfirmModal from "./ConfirmModal";
 import {
   WORKSPACE_COLOR_NAMES,
@@ -29,7 +30,7 @@ interface CreateProps {
 type Props = EditProps | CreateProps;
 
 export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
-  const { workspacesApi } = useChatContext();
+  const { workspacesApi } = useWorkspaceContext();
   const router = useRouter();
 
   const [name, setName] = useState(workspace?.display_name ?? "");
@@ -86,9 +87,37 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
     }
   };
 
-  // Edit-mode helpers.
-  const save = (patch: Record<string, unknown>) => {
-    if (mode === "edit") workspacesApi.update(workspace.slug, patch);
+  // Edit-mode helpers. Local state has already been optimistically updated by
+  // the field's onChange handler; if the backend PATCH fails, restore from the
+  // pre-mutation snapshot of the workspace prop.
+  const save = async (patch: Record<string, unknown>) => {
+    if (mode !== "edit") return;
+    const snapshot = {
+      display_name: workspace.display_name,
+      system_prompt: workspace.system_prompt,
+      enabled_tools: workspace.enabled_tools,
+      model_name: workspace.model_name,
+      color: workspace.color,
+    };
+    try {
+      await withRollback(
+        () => { /* local state already applied via the field's setter */ },
+        () => {
+          if ("display_name" in patch) setName(snapshot.display_name);
+          if ("system_prompt" in patch) setPrompt(snapshot.system_prompt);
+          if ("enabled_tools" in patch) setEnabledTools(snapshot.enabled_tools);
+          if ("model_name" in patch) setPreferredModel(snapshot.model_name ?? null);
+          if ("color" in patch) setColor((snapshot.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
+        },
+        async () => {
+          const ws = await workspacesApi.update(workspace.slug, patch);
+          if (!ws) throw new Error("update failed");
+          return ws;
+        },
+      );
+    } catch (err) {
+      console.error("Workspace update failed", err);
+    }
   };
 
   const toggleTool = (tool: string) => {

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import ActiveSession from "@/components/ActiveSession";
-import { ChatProvider } from "@/context/ChatContext";
+import { AppProviders } from "@/context/AppProviders";
 import { TokenGate } from "@/components/TokenGate";
 import { getToken } from "@/utils/apiClient";
 
@@ -27,11 +27,11 @@ export default function Home() {
   }
 
   return (
-    <ChatProvider>
+    <AppProviders>
       <div className="flex h-screen w-full bg-[#131314] text-[#e3e3e3] overflow-hidden font-sans">
         <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
         <ActiveSession isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
       </div>
-    </ChatProvider>
+    </AppProviders>
   );
 }
