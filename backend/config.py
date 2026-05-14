@@ -28,12 +28,27 @@ class Settings(BaseSettings):
 
     # Explicit allowlist. Combining "*" with allow_credentials=True (set in
     # main.py) is rejected by browsers, so wildcarding is off. Defaults to
-    # localhost only; for LAN/tunnel access set CORS_ORIGINS in .env as a
-    # comma-separated list (e.g. "http://localhost:3000,http://192.168.1.50:3000").
+    # localhost only; tunnel / public-internet origins go here as a
+    # comma-separated list in .env (e.g.
+    # "http://localhost:3000,https://your-tunnel.trycloudflare.com").
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
+
+    # Regex for private-network origins (RFC1918 + loopback). Pair with
+    # main.py's allow_origin_regex so mobile/LAN access works without the
+    # user having to enumerate each device's IP. The boundary stays inside
+    # the local network — public origins still need to be added explicitly.
+    CORS_PRIVATE_NETWORK_REGEX: str = (
+        r"^https?://("
+        r"127\.0\.0\.1|"
+        r"localhost|"
+        r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
+        r"192\.168\.\d{1,3}\.\d{1,3}|"
+        r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+        r")(:\d+)?$"
+    )
 
     model_config = SettingsConfigDict(env_file="../.env", extra="ignore")
 
