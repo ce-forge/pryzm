@@ -103,7 +103,17 @@ def _markdown_table(label: str, by_class: dict[str, dict]) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", default="http://127.0.0.1:8000")
-    parser.add_argument("--workspace", default="personal")
+    parser.add_argument(
+        "--workspace",
+        default="it_copilot",
+        help=(
+            "Builtin workspace whose tool set the prompts are designed for. "
+            "Default it_copilot exposes check_port + search_knowledge_base, which "
+            "the tool_use and rag_inline prompt classes need to fire actual tool "
+            "calls. Sending them to a workspace without those tools collapses "
+            "those classes into plain text generation (misleadingly fast)."
+        ),
+    )
     parser.add_argument("--token", required=True, help="PRYZM_API_TOKEN value")
     parser.add_argument("--repeats", type=int, default=3, help="N repeats per prompt")
     parser.add_argument("--label", required=True, help="Label for the results file (e.g. 'ollama-baseline')")
