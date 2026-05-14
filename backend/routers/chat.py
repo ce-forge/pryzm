@@ -9,7 +9,7 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from core.engine_config import engine_config_for
-from services import knowledge
+from services import knowledge, ocr
 from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
@@ -413,10 +413,24 @@ async def upload_document(
                 detail=f"File exceeds upload limit of {max_bytes} bytes.",
             )
     content = bytes(buf)
-    try:
-        text_content = content.decode("utf-8")
-    except UnicodeDecodeError:
-        raise HTTPException(status_code=400, detail="Only UTF-8 text files are currently supported.")
+    content_type = (file.content_type or "").lower()
+    if content_type.startswith("image/"):
+        if content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported image type: {file.content_type}. Supported: jpeg, png, webp.",
+            )
+        try:
+            text_content = await asyncio.to_thread(ocr.extract_text, content)
+        except ocr.InvalidImage:
+            raise HTTPException(status_code=400, detail="Image bytes could not be decoded as a valid image.")
+        if not text_content.strip():
+            raise HTTPException(status_code=422, detail="No text could be extracted from this image.")
+    else:
+        try:
+            text_content = content.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="Only UTF-8 text files are currently supported.")
 
     active_session_id = None
     if session_id and session_id not in ["null", "undefined", "temp_new_chat", ""]:

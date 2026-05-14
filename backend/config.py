@@ -52,8 +52,9 @@ class Settings(BaseSettings):
 
     # Upload bytes ceiling. /upload streams the request body and bails with
     # HTTP 413 once cumulative bytes exceed this. Bumped here, not in the
-    # endpoint — keep tunables in one place.
-    UPLOAD_MAX_BYTES: int = 100 * 1024  # 100 KiB
+    # endpoint — keep tunables in one place. Sized for image uploads (JPG/PNG/WebP)
+    # which dominate above the text-doc baseline; text uploads share this knob.
+    UPLOAD_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MiB
 
     # When False (default), the network diagnostic tools refuse to operate on
     # RFC1918, loopback, link-local, multicast, CGNAT, and reserved IPs — and
