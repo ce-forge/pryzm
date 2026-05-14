@@ -162,6 +162,11 @@ async def stream_chat(
     if recent_messages and recent_messages[-1].get("role") == "user":
         last_query = recent_messages[-1].get("content", "")
         has_attachment = "[Attached_File:" in last_query
+        # Pull every attached filename out of the marker so the retrieval
+        # step can scope to those documents specifically. Without this the
+        # auto-RAG path runs a workspace-wide semantic search and surfaces
+        # unrelated docs alongside the one the user actually attached.
+        attached_filenames = re.findall(r'\[Attached_File:\s*([^\]]+?)\s*\]', last_query)
         clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
         if has_attachment:
             # No user text alongside the attachment → caller wants an overview
@@ -173,6 +178,7 @@ async def stream_chat(
                 rag_data = await knowledge.retrieve_relevant_chunks(
                     client, db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
                     overview_mode=overview_mode,
+                    restrict_to_filenames=attached_filenames or None,
                 )
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]
