@@ -1,7 +1,9 @@
 """Async-path tests for /analyze: disconnect propagation, per-tool timeout."""
 import asyncio
+import json
 from unittest.mock import patch
 
+import httpx
 import pytest
 
 
@@ -57,3 +59,139 @@ async def test_execute_tool_runs_async_directly():
 
     result = await ai_engine._execute_tool(tool_call, fake_workspace_tools)
     assert result == "async:y"
+
+
+# ---------------------------------------------------------------------------
+# _error_envelope unit tests
+# ---------------------------------------------------------------------------
+
+def test_error_envelope_connect_error():
+    """httpx.ConnectError maps to ollama_unreachable."""
+    from routers.chat import _error_envelope
+    env = _error_envelope(httpx.ConnectError("connection refused"))
+    assert env["code"] == "ollama_unreachable"
+    assert "error" in env
+
+
+def test_error_envelope_read_timeout():
+    """httpx.ReadTimeout maps to ollama_timeout."""
+    from routers.chat import _error_envelope
+    env = _error_envelope(httpx.ReadTimeout("timed out"))
+    assert env["code"] == "ollama_timeout"
+
+
+def test_error_envelope_asyncio_timeout():
+    """asyncio.TimeoutError maps to tool_timeout."""
+    from routers.chat import _error_envelope
+    env = _error_envelope(asyncio.TimeoutError())
+    assert env["code"] == "tool_timeout"
+
+
+def test_error_envelope_generic():
+    """Unknown exceptions map to engine_error and include the message."""
+    from routers.chat import _error_envelope
+    env = _error_envelope(RuntimeError("ollama exploded"))
+    assert env["code"] == "engine_error"
+    assert "ollama exploded" in env["error"]
+
+
+def test_error_envelope_is_valid_json():
+    """Every envelope round-trips through JSON without error."""
+    from routers.chat import _error_envelope
+    for exc in [
+        httpx.ConnectError("x"),
+        httpx.ReadTimeout("x"),
+        asyncio.TimeoutError(),
+        RuntimeError("boom"),
+    ]:
+        env = _error_envelope(exc)
+        serialised = json.dumps(env)
+        parsed = json.loads(serialised)
+        assert "error" in parsed
+        assert "code" in parsed
+
+
+# ---------------------------------------------------------------------------
+# Integration: stream_chat exception → {error, code} SSE line (no chunk shape)
+# ---------------------------------------------------------------------------
+
+def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
+    """An exception in ai_engine.stream_chat surfaces as {error, code} line,
+    not as a {chunk: '[Engine Error: ...]'} line."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
+
+    from config import settings
+    from db import database, models
+    from core import ai_engine
+    from core.deps import get_http_client
+    from main import app
+
+    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "smoke-test-token")
+    monkeypatch.setattr(database, "init_db", lambda: None)
+
+    # Route get_db through the test engine and seed the default workspace.
+    test_engine = db_at_head
+    TestSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+
+    def _test_get_db():
+        db = TestSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[database.get_db] = _test_get_db
+
+    # Seed the default 'personal' workspace so the route doesn't 500 on lookup.
+    with TestSessionLocal() as seed_db:
+        if not seed_db.query(models.Workspace).filter_by(slug="personal").first():
+            seed_db.add(models.Workspace(slug="personal", display_name="Personal"))
+            seed_db.commit()
+
+    # Override http_client — stream_chat is mocked so we won't call Ollama.
+    app.dependency_overrides[get_http_client] = lambda: None
+
+    # Patch generate_title so it doesn't try to hit Ollama.
+    async def _fake_title(*a, **kw):
+        return "Test Session"
+
+    monkeypatch.setattr(ai_engine, "generate_title", _fake_title)
+
+    # Patch stream_chat to raise a RuntimeError immediately.
+    async def _boom(*args, **kwargs):
+        raise RuntimeError("ollama exploded")
+        yield  # make it an async generator
+
+    monkeypatch.setattr(ai_engine, "stream_chat", _boom)
+
+    # Patch condense so the background task doesn't hit the DB/Ollama.
+    from services import condense
+    monkeypatch.setattr(condense, "condense_for_session", lambda *a, **kw: None)
+
+    client = TestClient(app)
+    resp = client.post(
+        "/analyze",
+        json={"prompt": "hello", "mode": "personal", "model": "gemma4:e4b",
+              "attachments": [], "skip_db_save": True},
+        headers={"Authorization": "Bearer smoke-test-token"},
+    )
+
+    assert resp.status_code == 200
+
+    lines = [l for l in resp.text.splitlines() if l.strip()]
+    parsed_lines = [json.loads(l) for l in lines]
+
+    error_lines = [p for p in parsed_lines if "error" in p]
+    chunk_lines = [p for p in parsed_lines if "chunk" in p]
+
+    # Must have exactly one error envelope.
+    assert len(error_lines) >= 1, f"Expected error envelope; got lines: {parsed_lines}"
+    assert error_lines[0]["code"] == "engine_error"
+    assert "ollama exploded" in error_lines[0]["error"]
+
+    # No chunk should carry legacy "Engine Error:" text.
+    for c in chunk_lines:
+        assert "Engine Error" not in str(c.get("chunk", ""))
+
+    app.dependency_overrides.clear()

@@ -2,6 +2,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, U
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Optional, List
+import asyncio
 import json
 
 from db import database, models
@@ -21,6 +22,23 @@ from core import ollama
 from core.deps import get_http_client
 from services import condense
 
+
+def _error_envelope(exc: Exception) -> dict:
+    """Map an exception to a {error, code} envelope for the SSE stream.
+
+    Codes:
+      ollama_unreachable — connection refused, DNS fail, etc.
+      ollama_timeout     — read timeout (LLM hung)
+      tool_timeout       — a tool exceeded TOOL_TIMEOUT_SECONDS
+      engine_error       — anything else (generic catch-all)
+    """
+    if isinstance(exc, httpx.ConnectError):
+        return {"error": "Ollama is not reachable.", "code": "ollama_unreachable"}
+    if isinstance(exc, (httpx.ReadTimeout, httpx.PoolTimeout)):
+        return {"error": "Ollama took too long to respond.", "code": "ollama_timeout"}
+    if isinstance(exc, asyncio.TimeoutError):
+        return {"error": "Tool execution timed out.", "code": "tool_timeout"}
+    return {"error": str(exc) or "Engine error.", "code": "engine_error"}
 
 
 router = APIRouter(tags=["AI Chat"])
@@ -242,15 +260,13 @@ async def analyze_data(
                 yield json.dumps({"done": True}) + "\n"
                 completed = True
 
+        except asyncio.CancelledError:
+            # Client disconnected. Re-raise so the framework cleans up cleanly.
+            raise
         except Exception as e:
-            error_msg = format_error(str(e), "Fatal Stream Error")
-            full_response += error_msg
-            try:
-                yield json.dumps({"chunk": error_msg}) + "\n"
-            except Exception:
-                # If the client is already gone, we can't yield; still want the
-                # finally block to persist what we have.
-                pass
+            yield json.dumps(_error_envelope(e)) + "\n"
+            # Don't re-raise; the response ends here gracefully.
+            return
 
         finally:
             if completed:

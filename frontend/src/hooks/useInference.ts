@@ -62,7 +62,7 @@ export function useInference(
       let lineBuffer = "";
 
       if (reader) {
-        while (true) {
+        streamLoop: while (true) {
           const { done, value } = await reader.read();
           if (done) break;
           lineBuffer += decoder.decode(value, { stream: true });
@@ -72,7 +72,19 @@ export function useInference(
             if (!line.trim()) continue;
             try {
               const parsed = JSON.parse(line);
-              
+
+              if (parsed.error) {
+                // Error envelope from backend. Replace the streaming bubble with
+                // the error message and stop processing further chunks.
+                fullAssistantMessage = `⚠ ${parsed.error}`;
+                setStreamingContent(prev => {
+                  const next = { ...prev, [optimisticId]: fullAssistantMessage };
+                  if (realDbId !== null) next[realDbId] = fullAssistantMessage;
+                  return next;
+                });
+                break streamLoop;
+              }
+
               // THE HANDOFF
               if (parsed.status === "started" && parsed.session_id && !activeSessionId) {
                 const newDbId = parsed.session_id;
