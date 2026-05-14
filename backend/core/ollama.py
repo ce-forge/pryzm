@@ -18,7 +18,7 @@ from typing import AsyncIterator
 import httpx
 
 from config import settings
-from core.llm_metrics import emit_chat_metric
+from core.llm_metrics import emit_chat_metric, emit_embed_metric
 
 
 BASE_URL = settings.OLLAMA_URL.strip().rstrip("/")
@@ -54,11 +54,15 @@ async def chat_stream(
 
 
 async def embed(client: httpx.AsyncClient, text: str, model: str) -> list[float]:
-    """POST /api/embeddings. Returns the embedding vector."""
+    """POST /api/embeddings. Returns the embedding vector. Emits an
+    'llm.embed_metric' line per call."""
     url = f"{BASE_URL}/api/embeddings"
     payload = {"model": model, "prompt": text}
+    t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=30.0)
     resp.raise_for_status()
+    duration_s = time.perf_counter() - t0
+    emit_embed_metric(model=model, char_count=len(text), duration_s=duration_s)
     return resp.json()["embedding"]
 
 
