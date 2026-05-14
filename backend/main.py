@@ -1,4 +1,6 @@
 import asyncio
+import logging
+import pathlib
 import time
 from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI
@@ -8,7 +10,24 @@ from config import settings
 from db import database
 from routers import health, chat, workspaces
 from core.auth import require_token
+from core import llm_router
 from services.tasks import garbage_collection_task
+
+# llama-swap config lives at the repo root (one level above backend/).
+_LLAMA_SWAP_CONFIG_PATH = pathlib.Path(__file__).resolve().parent.parent / "infra" / "llama-swap-config.yaml"
+
+# Surface llm.metric / llm.route / llm.escalate INFO lines to stdout. The
+# pryzm.llm logger had no handler attached, so Phase A's metric emissions
+# (and now B2's routing lines) were dropped silently. Phase C's perf-
+# comparison harness greps these lines from the backend log; this makes them
+# actually appear there.
+_pryzm_llm_logger = logging.getLogger("pryzm.llm")
+if not _pryzm_llm_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    _pryzm_llm_logger.addHandler(_handler)
+    _pryzm_llm_logger.setLevel(logging.INFO)
+    _pryzm_llm_logger.propagate = False
 
 
 class RequestLogger:
@@ -66,6 +85,9 @@ async def lifespan(app: FastAPI):
             pool=5.0,
         ),
     )
+
+    catalog = llm_router.build_catalog_from_yaml(_LLAMA_SWAP_CONFIG_PATH)
+    llm_router.init_router(catalog)
 
     try:
         yield

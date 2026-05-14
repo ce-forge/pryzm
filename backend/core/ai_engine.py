@@ -13,6 +13,8 @@ import tools  # triggers @tool registration as a side effect
 from core.prompt_manager import MICRO_PROMPTS
 from core import llm_server
 from core.engine_config import EngineConfig
+from core.llm_router import Tier, get_router
+from core.llm_metrics import emit_route, emit_escalate
 from tools.registry import ResolvedToolSet
 from utils.formatters import (
     format_tool_execution,
@@ -90,6 +92,8 @@ async def stream_chat(
     tool_set: ResolvedToolSet,
     session_id: str = None,
     is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
+    tier: Optional[Tier] = None,
+    escalated: bool = False,
 ):
     workspace_tools = tool_set.callables
 
@@ -130,6 +134,28 @@ async def stream_chat(
     recent_limit = settings.MEMORY_CONTEXT_WINDOW
     recent_messages = active_messages[-recent_limit:] if len(active_messages) > recent_limit else active_messages
 
+    # Route BEFORE the RAG/clean-text step below mutates recent_messages[-1] —
+    # the heuristic needs the original user text (incl. the [Attached_File:]
+    # marker) to detect attachments. If `tier` was passed in, we're inside an
+    # escalation re-entry and skip the router.
+    router = get_router()
+    if tier is None:
+        last_user = recent_messages[-1] if recent_messages and recent_messages[-1].get("role") == "user" else None
+        prompt_for_routing = (last_user or {}).get("content", "") or ""
+        attachments_for_routing = ["file"] if "[Attached_File:" in prompt_for_routing else []
+        history_for_routing = recent_messages[:-1] if last_user else recent_messages
+        routed_model, tier, route_reason = router.pick(
+            prompt_for_routing, history_for_routing, attachments_for_routing,
+        )
+        emit_route(
+            model=routed_model,
+            tier=tier.value,
+            reason=route_reason,
+            prompt_len=len(prompt_for_routing),
+        )
+    else:
+        routed_model = router.small if tier is Tier.SMALL else router.large
+
     if memory_content:
         system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
 
@@ -164,6 +190,7 @@ async def stream_chat(
     max_loops = settings.MAXIMUM_TOOL_LOOPS
     loop_count = 0
     finished_cleanly = False
+    had_tool_error = False
 
     try:
         while loop_count < max_loops:
@@ -175,7 +202,7 @@ async def stream_chat(
                 client,
                 messages=full_messages,
                 tools=tools_payload,
-                model=llm_server.DEFAULT_CHAT_MODEL,
+                model=routed_model,
             )
             message = data.get("message", {})
 
@@ -221,8 +248,10 @@ async def stream_chat(
                             f"{settings.TOOL_TIMEOUT_SECONDS}s. "
                             "Continue with what you have."
                         )
+                        had_tool_error = True
                     except Exception as tool_err:
                         result = f"Tool execution failed: {str(tool_err)}"
+                        had_tool_error = True
 
                     yield format_code_block(result)
                     full_messages.append({
@@ -268,6 +297,36 @@ async def stream_chat(
                 finished_cleanly = True
                 break
 
+        # Escalation gate. Two triggers per [[project-router-escalation-triggers]]:
+        # max-iterations (loop exhausted without a clean answer) or tool-error
+        # (any tool raised during the loop). Single-step: an already-escalated
+        # request cannot re-escalate.
+        escalation_reason = None
+        if not finished_cleanly:
+            escalation_reason = "max_iterations"
+        elif had_tool_error:
+            escalation_reason = "tool_error"
+
+        if tier is Tier.SMALL and not escalated and escalation_reason:
+            emit_escalate(
+                from_model=routed_model,
+                to_model=router.large,
+                reason=escalation_reason,
+            )
+            async for chunk in stream_chat(
+                client,
+                messages,
+                workspace_id=workspace_id,
+                engine_config=engine_config,
+                tool_set=tool_set,
+                session_id=session_id,
+                is_disconnected=is_disconnected,
+                tier=Tier.LARGE,
+                escalated=True,
+            ):
+                yield chunk
+            return
+
         if not finished_cleanly:
             yield MICRO_PROMPTS["warning_max_loops"]
 
@@ -287,7 +346,7 @@ async def generate_title(
     system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
     try:
-        text = await llm_server.generate(client, prompt=system_prompt, model=llm_server.DEFAULT_CHAT_MODEL, options={"num_ctx": 4096})
+        text = await llm_server.generate(client, prompt=system_prompt, model=llm_server.DEFAULT_SMALL_CHAT_MODEL, options={"num_ctx": 4096})
         text = text.strip(' \n"\'*.')
         if not text:
             return MICRO_PROMPTS["title_default"]
