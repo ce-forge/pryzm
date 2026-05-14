@@ -20,7 +20,12 @@ services:
     restart: always
 
   llama-swap:
-    image: ghcr.io/mostlygeek/llama-swap:cuda
+    # Pinned by digest so SIGHUP semantics, /api/events shape, and /running
+    # endpoint stay deterministic across `docker compose pull` cycles. To
+    # update: pull the floating `:cuda` tag, capture its new digest with
+    # `docker inspect ghcr.io/mostlygeek/llama-swap:cuda --format '{{index .RepoDigests 0}}'`,
+    # and replace the digest below.
+    image: ghcr.io/mostlygeek/llama-swap@sha256:1ac0ae06dc0eff1c742c80488533fa12442a47a3688f4bccbe6bbfb6d6adca58
     container_name: pryzm_llama_swap
     ports:
       - "127.0.0.1:8080:8080"

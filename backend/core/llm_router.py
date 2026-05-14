@@ -111,10 +111,17 @@ _router_singleton: Optional[HeuristicRouter] = None
 
 def init_router(catalog: dict[str, set[str]]) -> HeuristicRouter:
     """Called once from the FastAPI lifespan. Subsequent calls re-initialise
-    (useful for tests)."""
+    (useful for tests AND for the admin router after a YAML mutation)."""
     global _router_singleton
     _router_singleton = HeuristicRouter(catalog)
     return _router_singleton
+
+
+def reload_router_from_yaml(yaml_path: str | pathlib.Path) -> HeuristicRouter:
+    """Re-read the catalog from disk and rebuild the singleton. Called by the
+    admin router after a model is added/removed so subsequent stream_chat
+    calls see the updated catalog without restarting the worker."""
+    return init_router(build_catalog_from_yaml(yaml_path))
 
 
 def get_router() -> HeuristicRouter:
