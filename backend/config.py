@@ -56,6 +56,13 @@ class Settings(BaseSettings):
     # which dominate above the text-doc baseline; text uploads share this knob.
     UPLOAD_MAX_BYTES: int = 10 * 1024 * 1024  # 10 MiB
 
+    # Image-captioning knobs (services/image_describe.py). Captioning runs the
+    # uploaded image through a vision-capable chat model at ingest time; the
+    # returned paragraph is what gets chunked and embedded into the RAG store.
+    IMAGE_CAPTION_MODEL: str = "gemma-4-E4B-it"
+    IMAGE_CAPTION_MAX_TOKENS: int = 600
+    IMAGE_CAPTION_TEMPERATURE: float = 0.2
+
     # When False (default), the network diagnostic tools refuse to operate on
     # RFC1918, loopback, link-local, multicast, CGNAT, and reserved IPs — and
     # also refuse any hostname that resolves to one of those ranges, defeating
