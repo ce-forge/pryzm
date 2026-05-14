@@ -114,12 +114,17 @@ async def generate(
     """POST /api/generate (non-streaming). Returns the response text.
 
     Used by ai_engine.condense_chat_memory and ai_engine.generate_title — short,
-    single-shot completions where streaming is overhead.
-    """
+    single-shot completions where streaming is overhead. Emits an 'llm.metric'
+    line per call (the chat-shape extractor works fine here — /api/generate's
+    response carries the same prompt_eval_count / eval_count / *_duration fields)."""
     url = f"{BASE_URL}/api/generate"
     payload: dict = {"model": model, "prompt": prompt, "stream": False}
     if options:
         payload["options"] = options
+    t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=60.0)
     resp.raise_for_status()
-    return resp.json()["response"]
+    duration_s = time.perf_counter() - t0
+    data = resp.json()
+    emit_chat_metric(model=model, response=data, fallback_duration_s=duration_s)
+    return data["response"]
