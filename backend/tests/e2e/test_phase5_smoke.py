@@ -91,27 +91,18 @@ def test_rapid_sends_distinct_ids_and_ordered(page: Page, api_token: str, screen
         # URL bound to a real session id (first turn) — confirms migrate ran.
         if i == 0:
             page.wait_for_url(lambda u: "session=" in u, timeout=10_000)
-        # Wait until the assistant text length is stable for ~3 s (stream
-        # actually finished, not just first-chunk). Then handleInference's
-        # currentIsProcessing guard won't drop the next send.
-        page.evaluate("() => { window.__lastAssistantLen = -1; window.__assistantStableCount = 0; }")
-        page.wait_for_function(
-            """() => {
-                const els = Array.from(document.querySelectorAll('.custom-scrollbar'));
-                const chatEl = els.find(el => el.className.includes('overflow-x-hidden'));
-                if (!chatEl) return false;
-                const ps = Array.from(chatEl.querySelectorAll('p'));
-                const lastLen = (ps[ps.length - 1]?.textContent || '').length;
-                if (lastLen === window.__lastAssistantLen && lastLen > 0) {
-                    window.__assistantStableCount++;
-                } else {
-                    window.__assistantStableCount = 0;
-                    window.__lastAssistantLen = lastLen;
-                }
-                return window.__assistantStableCount >= 6;
-            }""",
-            timeout=120_000,
-            polling=500,
+        # Wait for `isProcessing` to flip back to false. ChatInput swaps the
+        # submit button for a Stop button while a stream is in flight; the
+        # submit button reappearing is the reliable "stream truly done" signal.
+        # The prior heuristic — wait for the last <p>'s text length to stop
+        # changing — was unsound because (a) assistant messages render as bare
+        # markdown without a per-turn bubble container, so the "last <p>" is
+        # the last paragraph of the last assistant turn that completed, and
+        # (b) when a send is silently dropped, no new <p> is added, the
+        # length stays stable from the previous turn, and stability is
+        # detected on stale state, causing phantom out-of-order failures.
+        page.wait_for_selector(
+            'button[type="submit"]', state='visible', timeout=120_000,
         )
 
     body_text = page.evaluate("() => document.body.textContent || ''")
