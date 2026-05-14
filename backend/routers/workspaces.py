@@ -14,13 +14,11 @@ from schemas import (
     WorkspaceUpdate,
     WorkspaceDeleteResponse,
 )
+from services.builtins import get_builtin
 from services.workspaces import (
     get_by_slug,
     slugify_unique,
     read_default_prompt,
-    DEFAULT_COLORS,
-    DEFAULT_ENABLED_TOOLS,
-    DEFAULT_DISPLAY_NAMES,
 )
 from tools.registry import AVAILABLE_TOOLS
 
@@ -200,6 +198,12 @@ def delete_workspace(slug: str, db: Session = Depends(database.get_db)):
 def reset_workspace(slug: str, db: Session = Depends(database.get_db)):
     ws = get_by_slug(db, slug)
     _validate_resettable(ws)
+    builtin = get_builtin(slug)
+    if builtin is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Builtin registry entry missing for: {slug}",
+        )
     try:
         ws.system_prompt = read_default_prompt(slug)
     except FileNotFoundError:
@@ -207,11 +211,10 @@ def reset_workspace(slug: str, db: Session = Depends(database.get_db)):
             status_code=500,
             detail=f"Default prompt file missing for builtin: core/prompts/{slug}.txt",
         )
-    ws.enabled_tools = DEFAULT_ENABLED_TOOLS.get(slug, [])
+    ws.enabled_tools = list(builtin.enabled_tools)
     ws.preferred_model = None
-    # Display name and color reset to their canonical forms too.
-    ws.display_name = DEFAULT_DISPLAY_NAMES.get(slug, ws.display_name)
-    ws.color = DEFAULT_COLORS.get(slug, ws.color)
+    ws.display_name = builtin.display_name
+    ws.color = builtin.color
     db.commit()
     db.refresh(ws)
     return ws

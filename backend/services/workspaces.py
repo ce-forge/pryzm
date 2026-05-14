@@ -122,32 +122,3 @@ def read_default_prompt(slug: str) -> str:
     path = os.path.join(PROMPTS_DIR, f"{slug}.txt")
     with open(path, "r") as f:
         return f.read().strip()
-
-
-# Default tool sets — same as the seed values in
-# backend/alembic/versions/58c8b7524030_add_workspaces_table.py
-# (IT_COPILOT_TOOLS / PERSONAL_TOOLS). Keep in sync when adding built-in
-# tools. Kept here so /reset doesn't have to re-import migration code.
-DEFAULT_ENABLED_TOOLS: dict[str, list[str]] = {
-    "it_copilot": [
-        "check_port", "dns_lookup", "execute_ping", "get_public_ip",
-        "rename_chat_session", "search_knowledge_base", "ssl_inspect", "traceroute",
-    ],
-    "personal": ["rename_chat_session", "search_knowledge_base"],
-}
-
-
-# Display names for the built-in workspaces. Used by /reset to restore the
-# canonical name if a user renamed a built-in. Same drift caveat as
-# DEFAULT_ENABLED_TOOLS — keep in sync with the migration's seed values.
-DEFAULT_DISPLAY_NAMES: dict[str, str] = {
-    "it_copilot": "IT Copilot",
-    "personal": "Personal",
-}
-
-
-# Default colors for built-in workspaces. Used by /reset and the migration seed.
-DEFAULT_COLORS: dict[str, str] = {
-    "personal": "orange",
-    "it_copilot": "blue",
-}
