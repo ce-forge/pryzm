@@ -4,9 +4,7 @@ from datetime import datetime
 
 class InferenceRequest(BaseModel):
     session_id: Optional[str] = None
-    prompt: str = Field(..., max_length=100000) 
-    mode: str = "itCopilot"  
-    model: str = "gemma4:e4b"
+    prompt: str = Field(..., max_length=100000)
     attachments: Optional[List[str]] = None
     skip_db_save: Optional[bool] = False
 

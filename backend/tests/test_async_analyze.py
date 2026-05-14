@@ -142,6 +142,10 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
             db.close()
 
     app.dependency_overrides[database.get_db] = _test_get_db
+    # Also patch SessionLocal so route code that opens DB connections directly
+    # (e.g. the manual db = database.SessionLocal() inside /analyze) hits the
+    # same test DB, not the dev DB.
+    monkeypatch.setattr(database, "SessionLocal", TestSessionLocal)
 
     # Seed the default 'personal' workspace so the route doesn't 500 on lookup.
     with TestSessionLocal() as seed_db:
@@ -171,9 +175,8 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
 
     client = TestClient(app)
     resp = client.post(
-        "/analyze",
-        json={"prompt": "hello", "mode": "personal", "model": "gemma4:e4b",
-              "attachments": [], "skip_db_save": True},
+        "/analyze?workspace=personal",
+        json={"prompt": "hello", "attachments": [], "skip_db_save": True},
         headers={"Authorization": "Bearer smoke-test-token"},
     )
 

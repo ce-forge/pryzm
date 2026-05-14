@@ -45,13 +45,13 @@ export function useInference(
     streamingSessionIdsRef.current.add(optimisticId);
 
     try {
-      const res = await apiFetch("/analyze", {
+      const res = await apiFetch(`/analyze?workspace=${encodeURIComponent(workspace)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: text,
           session_id: (activeSessionId === "temp_new_chat" || !activeSessionId) ? null : activeSessionId,
-          mode: workspace, model, attachments,
+          attachments,
           skip_db_save: skipUserAdd
         }),
         signal: controller.signal
