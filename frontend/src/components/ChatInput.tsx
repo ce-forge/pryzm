@@ -42,7 +42,7 @@ export default function ChatInput({
   }, [prompt, inputRef]);
 
   const processFiles = (files: File[]) => {
-    const validExts = [".txt", ".md", ".py", ".csv", ".json", ".log", ".yaml", ".yml", ".conf", ".ini"];
+    const validExts = [".txt", ".md", ".py", ".csv", ".json", ".log", ".yaml", ".yml", ".conf", ".ini", ".jpg", ".jpeg", ".png", ".webp"];
     
     const mappedUploads = files.map(file => {
       const isSupported = validExts.some(ext => file.name.toLowerCase().endsWith(ext)) || !file.name.includes(".");
