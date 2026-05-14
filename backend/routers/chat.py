@@ -19,7 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from config import settings
 from utils.formatters import format_error
 import httpx
-from core import ollama
+from core import llm_server
 from core.deps import get_http_client
 from core.llm_metrics import get_last_chat_snapshot as _last_chat_metric_snapshot
 from services import condense
@@ -30,15 +30,15 @@ def _error_envelope(exc: Exception) -> dict:
     """Map an exception to a {error, code} envelope for the SSE stream.
 
     Codes:
-      ollama_unreachable — connection refused, DNS fail, etc.
-      ollama_timeout     — read timeout (LLM hung)
-      tool_timeout       — a tool exceeded TOOL_TIMEOUT_SECONDS
-      engine_error       — anything else (generic catch-all)
+      llm_unreachable — connection refused, DNS fail, etc.
+      llm_timeout     — read timeout (model hung)
+      tool_timeout    — a tool exceeded TOOL_TIMEOUT_SECONDS
+      engine_error    — anything else (generic catch-all)
     """
     if isinstance(exc, httpx.ConnectError):
-        return {"error": "Ollama is not reachable.", "code": "ollama_unreachable"}
+        return {"error": "LLM server is not reachable.", "code": "llm_unreachable"}
     if isinstance(exc, (httpx.ReadTimeout, httpx.PoolTimeout)):
-        return {"error": "Ollama took too long to respond.", "code": "ollama_timeout"}
+        return {"error": "LLM server took too long to respond.", "code": "llm_timeout"}
     if isinstance(exc, asyncio.TimeoutError):
         return {"error": "Tool execution timed out.", "code": "tool_timeout"}
     return {"error": str(exc) or "Engine error.", "code": "engine_error"}
@@ -445,13 +445,15 @@ def get_tools_metadata():
     ]
 
 @router.get("/api/models")
-async def get_ollama_models(http_client: httpx.AsyncClient = Depends(get_http_client)):
+async def get_chat_models(http_client: httpx.AsyncClient = Depends(get_http_client)):
+    """List the chat-capable models llama-swap has configured. The list is
+    derived from infra/llama-swap-config.yaml at server start; embedding-tagged
+    models are filtered out."""
     try:
-        all_models = await ollama.list_models(http_client)
-        chat_models = [m for m in all_models if "embed" not in m.lower()]
-        return chat_models if chat_models else ["gemma4:e4b"]
+        all_models = await llm_server.list_models(http_client)
+        return [m for m in all_models if "embed" not in m.lower()]
     except Exception:
-        return ["gemma4:e4b"]
+        return [llm_server.DEFAULT_CHAT_MODEL]
 
 @router.get("/api/prompts")
 def get_prompts():

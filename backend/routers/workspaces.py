@@ -1,12 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
-
-import httpx
-
-from config import settings
-from core import ollama
-from core.deps import get_http_client
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -51,40 +45,14 @@ def _validate_enabled_tools(names: List[str]) -> None:
         )
 
 
-async def _validate_model(client: httpx.AsyncClient, model: str) -> None:
-    """Confirm the model exists in the Ollama /api/tags response AND is a
-    chat-capable model (embedding-only models like nomic-embed-text are
-    filtered out, matching chat.py:get_ollama_models). Done at PATCH time
-    so we fail loudly on misconfiguration; chat-time resolution in
-    services/workspaces.py tolerates a stale value with a warning."""
-    if model is None:
-        return
-    try:
-        all_models = await ollama.list_models(client)
-        # Filter out embedding-only models; they're not usable as chat models.
-        names = [m for m in all_models if "embed" not in m.lower()]
-    except Exception as e:
-        raise HTTPException(
-            status_code=503,
-            detail=f"Could not reach Ollama to validate model: {e}",
-        )
-    if model not in names:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model not installed (or is embedding-only) in Ollama: {model}. Available: {names}",
-        )
-
-
 def _to_response(workspace) -> WorkspaceResponse:
-    """Build a WorkspaceResponse, lifting engine_config.model into model_name."""
-    engine_cfg = workspace.engine_config or {}
+    """Build a WorkspaceResponse from a Workspace row."""
     return WorkspaceResponse(
         id=workspace.id,
         slug=workspace.slug,
         display_name=workspace.display_name,
         system_prompt=workspace.system_prompt,
         enabled_tools=workspace.enabled_tools or [],
-        model_name=engine_cfg.get("model"),
         is_builtin=workspace.is_builtin,
         color=workspace.color,
         created_at=workspace.created_at,
@@ -114,7 +82,7 @@ def create_workspace(
     # Defaults for a fresh blank workspace.
     system_prompt = "You are a helpful assistant. Answer the user's questions thoughtfully."
     enabled_tools: list[str] = []
-    engine_config = {"backend": "ollama", "model": "gemma4:e4b"}
+    engine_config = {"backend": "llama_cpp"}
 
     if payload.clone_from:
         source = get_by_slug(db, payload.clone_from)
@@ -138,11 +106,10 @@ def create_workspace(
 
 
 @router.patch("/workspaces/{slug}", response_model=WorkspaceResponse)
-async def update_workspace(
+def update_workspace(
     slug: str,
     payload: WorkspaceUpdate,
     db: Session = Depends(database.get_db),
-    http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     ws = get_by_slug(db, slug)
 
@@ -163,17 +130,6 @@ async def update_workspace(
     if "enabled_tools" in data:
         _validate_enabled_tools(data["enabled_tools"])
         ws.enabled_tools = data["enabled_tools"]
-
-    if "model_name" in data:
-        new_model = data["model_name"]
-        if new_model:
-            await _validate_model(http_client, new_model)
-        else:
-            # null → reset to default for this workspace
-            builtin = get_builtin(ws.slug)
-            new_model = builtin.engine_config["model"] if builtin else "gemma4:e4b"
-        # JSONB partial update: copy + mutate + reassign so SQLAlchemy detects the change.
-        ws.engine_config = {**(ws.engine_config or {}), "model": new_model, "backend": "ollama"}
 
     if "color" in data:
         ws.color = data["color"]
