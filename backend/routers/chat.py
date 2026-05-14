@@ -21,6 +21,7 @@ from utils.formatters import format_error
 import httpx
 from core import ollama
 from core.deps import get_http_client
+from core.llm_metrics import get_last_chat_snapshot as _last_chat_metric_snapshot
 from services import condense
 from tools.registry import build_tool_set
 
@@ -284,7 +285,14 @@ async def analyze_data(
                 yield json.dumps({"chunk": chunk}) + "\n"
 
             if not disconnected:
-                yield json.dumps({"done": True}) + "\n"
+                # The terminating chunk now carries an aggregate `usage` block so
+                # bench_llm.py can read it directly without scraping logs. Token counts
+                # come from the LAST chat call's snapshot (the call that produced the
+                # user-visible answer). Earlier tool-loop iterations are intentionally
+                # not summed — bench_llm asks "how fast was the FINAL answer", not
+                # "how many tokens did the agentic loop burn in total."
+                usage = _last_chat_metric_snapshot()
+                yield json.dumps({"done": True, "usage": usage}) + "\n"
                 completed = True
 
         except asyncio.CancelledError:

@@ -108,3 +108,27 @@ def test_context_defaults_when_unset(caplog):
     msg = _capture(caplog)[0].getMessage()
     # The fields are present with empty values (no None, no missing key).
     assert msg.rstrip().endswith("workspace_id= session_id=")
+
+
+def test_snapshot_records_last_chat_metric(caplog):
+    """get_last_chat_snapshot returns the most recent emit_chat_metric values
+    for the current asyncio task (used by /analyze's final SSE chunk)."""
+    from core.llm_metrics import get_last_chat_snapshot
+
+    set_request_context(workspace_id="w", session_id="s")
+    response = {
+        "prompt_eval_count": 50,
+        "eval_count": 100,
+        "prompt_eval_duration": 200_000_000,
+        "eval_duration": 1_000_000_000,
+        "total_duration": 1_200_000_000,
+    }
+    emit_chat_metric(model="m", response=response, fallback_duration_s=1.2)
+
+    snap = get_last_chat_snapshot()
+    assert snap["model"] == "m"
+    assert snap["prompt_tokens"] == 50
+    assert snap["completion_tokens"] == 100
+    assert snap["ttft_ms"] == 200
+    assert snap["duration_ms"] == 1200
+    assert snap["tokens_per_sec"] == 100.0

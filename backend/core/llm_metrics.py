@@ -68,6 +68,16 @@ def emit_chat_metric(
         else 0.0
     )
 
+    snapshot = {
+        "model": model,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "ttft_ms": ttft_ms,
+        "duration_ms": duration_ms,
+        "tokens_per_sec": round(tokens_per_sec, 2),
+    }
+    _record_chat_snapshot(snapshot)
+
     _logger.info(
         "llm.metric model=%s prompt_tokens=%d completion_tokens=%d "
         "ttft_ms=%d duration_ms=%d tokens_per_sec=%.2f "
@@ -92,3 +102,18 @@ def emit_embed_metric(
         model, char_count, int(duration_s * 1000),
         _workspace_id.get(), _session_id.get(),
     )
+
+
+_last_chat_snapshot: contextvars.ContextVar[dict] = contextvars.ContextVar(
+    "pryzm_last_chat_snapshot", default={}
+)
+
+
+def _record_chat_snapshot(snapshot: dict) -> None:
+    _last_chat_snapshot.set(snapshot)
+
+
+def get_last_chat_snapshot() -> dict:
+    """Returns the most recent chat metric for this request task. Empty dict if
+    no chat call has been made yet on this task."""
+    return _last_chat_snapshot.get()
