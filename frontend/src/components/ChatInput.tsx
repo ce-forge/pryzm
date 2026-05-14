@@ -1,9 +1,21 @@
 import React, { useRef, useState, useEffect } from "react";
-import { FileUpload } from "@/types/chat"; 
+import { FileUpload } from "@/types/chat";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { APP_CONFIG } from "@/utils/constants";
 import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon } from "./Icons";
 import { CircularProgress } from "./CircularProgress";
+
+/** Squash long auto-generated camera filenames (Samsung gives photos
+ *  32-char hex names) down to 8 chars of base + ext. Short, human-typed
+ *  names pass through. The original full name is kept on file.name for
+ *  the upload itself; this is purely display. */
+function shortDisplayName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  const base = dot === -1 ? name : name.slice(0, dot);
+  const ext = dot === -1 ? "" : name.slice(dot);
+  if (base.length <= 12) return name;
+  return `${base.slice(0, 8)}…${ext}`;
+}
 
 interface ChatInputProps {
   prompt: string;
@@ -136,7 +148,7 @@ export default function ChatInput({
                     </span>
                   )}
                 </div>
-                <span className="truncate max-w-[120px]">{u.file.name}</span>
+                <span className="truncate max-w-[120px]">{shortDisplayName(u.file.name)}</span>
                 {u.errorMessage && <span className="opacity-60 text-[9px] uppercase font-bold ml-1">({u.errorMessage})</span>}
                 <button onClick={() => removeUpload(u.id)} className="ml-1 hover:text-white transition-colors">
                   <CancelIcon className="w-3.5 h-3.5" />
