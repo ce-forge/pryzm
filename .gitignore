@@ -35,3 +35,8 @@ backend/data/*
 
 # Codemap dev tool output.
 backend/tests/codemap/_out/
+
+# Internal / brainstorm / sensitive docs that stay on the dev box, not on
+# GitHub. Everything in docs/specs/ and docs/plans/ is fair game to commit;
+# anything in docs/internal/ is local-only.
+docs/internal/
