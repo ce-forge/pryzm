@@ -38,9 +38,16 @@ class HeuristicRouter:
     # Verbs that consistently mean "this is a non-trivial reasoning task."
     # Substring match in lowercased prompt — past tense ("compared") matches
     # too, which is fine; over-promotion is cheaper than under-promotion.
+    # British spellings are listed alongside American — Phase C surfaced that
+    # "Summarise" prompts (common in IT-copilot use) were silently staying on
+    # the small model because they didn't match "summarize".
     COMPLEX_VERBS = {
-        "compare", "analyze", "plan", "design", "evaluate",
-        "synthesize", "summarize", "write a", "implement", "debug",
+        "compare", "analyze", "analyse", "plan", "design",
+        "evaluate", "synthesize", "synthesise",
+        "summarize", "summarise",
+        "organize", "organise", "recognize", "recognise",
+        "optimize", "optimise",
+        "write a", "implement", "debug",
     }
 
     def __init__(self, catalog: dict[str, set[str]]):

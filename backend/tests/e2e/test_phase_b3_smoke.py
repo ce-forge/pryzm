@@ -37,10 +37,15 @@ def test_list_models_against_live_backend(api_token: str):
 
     # Shape checks
     e2b = by_id["gemma-4-E2B-it"]
-    assert e2b["group"] == "chat"
+    # E2B was moved to always-on in Phase C tuning; the e4b chat model
+    # is the canonical "chat group" entry now.
+    assert e2b["group"] in {"chat", "always-on"}
     assert e2b["repo"] == "bartowski/google_gemma-4-E2B-it-GGUF"
     assert e2b["quant"] == "Q4_K_M"
     assert isinstance(e2b["loaded"], bool)
+
+    e4b = by_id["gemma-4-E4B-it"]
+    assert e4b["group"] == "chat"
 
     nomic = by_id["nomic-embed-text-v1.5"]
     assert nomic["group"] == "always-on"

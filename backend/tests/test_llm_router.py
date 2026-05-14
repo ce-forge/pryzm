@@ -106,7 +106,14 @@ def test_pick_tier_code_fence_forces_large(router):
     assert reason == "code_fence"
 
 
-@pytest.mark.parametrize("verb", ["compare", "analyze", "plan", "design", "summarize"])
+@pytest.mark.parametrize(
+    "verb",
+    [
+        "compare", "analyze", "plan", "design",
+        # American + British spellings should both promote.
+        "summarize", "summarise", "analyse", "organise", "optimise",
+    ],
+)
 def test_pick_tier_complex_verb_forces_large(router, verb):
     tier, reason = router._pick_tier(f"please {verb} these", [], [])
     assert tier is Tier.LARGE
