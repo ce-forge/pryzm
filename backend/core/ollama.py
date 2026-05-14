@@ -12,11 +12,13 @@ from `request.app.state.http_client`.
 from __future__ import annotations
 
 import json
+import time
 from typing import AsyncIterator
 
 import httpx
 
 from config import settings
+from core.llm_metrics import emit_chat_metric
 
 
 BASE_URL = settings.OLLAMA_URL.strip().rstrip("/")
@@ -79,6 +81,8 @@ async def chat(
 
     Used by ai_engine.stream_chat — the engine receives the whole payload first,
     then fake-streams it word-by-word. If `tools` is None, the field is omitted.
+
+    Emits an 'llm.metric' log line on every successful call.
     """
     payload: dict = {
         "model": model,
@@ -92,9 +96,13 @@ async def chat(
         payload["options"].update(options)
 
     url = f"{BASE_URL}/api/chat"
+    t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=120.0)
     resp.raise_for_status()
-    return resp.json()
+    duration_s = time.perf_counter() - t0
+    data = resp.json()
+    emit_chat_metric(model=model, response=data, fallback_duration_s=duration_s)
+    return data
 
 
 async def generate(
