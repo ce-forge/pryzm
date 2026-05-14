@@ -6,8 +6,8 @@ Frontend / Backend / Tests zones as horizontal bands with shaded regions.
 
 Usage:
     cd backend
-    ./venv/bin/python scripts/codemap.py
-    # Output: backend/scripts/_out/codemap.html
+    ./venv/bin/python tests/codemap/codemap.py
+    # Output: backend/tests/codemap/_out/codemap.html
 """
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ import math
 import re
 from pathlib import Path
 
-# Project paths — script lives at backend/scripts/codemap.py.
-PROJECT_ROOT = Path(__file__).parent.parent.parent
+# Project paths — script lives at backend/tests/codemap/codemap.py.
+PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
 BACKEND_ROOT = PROJECT_ROOT / "backend"
 FRONTEND_ROOT = PROJECT_ROOT / "frontend" / "src"
 OUT_DIR = Path(__file__).parent / "_out"
