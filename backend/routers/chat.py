@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import Dict, Optional, List
@@ -19,6 +19,7 @@ from utils.formatters import format_error
 import httpx
 from core import ollama
 from core.deps import get_http_client
+from services import condense
 
 
 
@@ -155,6 +156,7 @@ def delete_session(session_id: str, db: Session = Depends(database.get_db)):
 async def analyze_data(
     http_request: Request,
     request: InferenceRequest,
+    background_tasks: BackgroundTasks,
     http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     # We manage the upfront DB session manually instead of using
@@ -270,71 +272,27 @@ async def analyze_data(
                     )
                     background_db.add(ai_msg)
                     background_db.commit()
-
-                    # Memory condenser only summarises clean (status=complete)
-                    # user/assistant exchanges — aborted or failed turns are
-                    # noise we don't want to bake into long-term memory.
-                    all_msgs = background_db.query(models.Message).filter(
-                        models.Message.session_id == session_id
-                    ).order_by(models.Message.created_at).all()
-
-                    memory_msg = next((m for m in all_msgs if m.role == "memory"), None)
-
-                    last_id = None
-                    old_summary = ""
-                    if memory_msg:
-                        try:
-                            mem_data = json.loads(memory_msg.content)
-                            last_id = mem_data.get("last_summarized_id")
-                            old_summary = mem_data.get("summary", "")
-                        except Exception:
-                            old_summary = memory_msg.content
-
-                    active_msgs = [
-                        m for m in all_msgs
-                        if m.role in ["user", "assistant"] and m.status == "complete"
-                    ]
-
-                    start_idx = 0
-                    if last_id:
-                        for i, m in enumerate(active_msgs):
-                            if m.id == last_id:
-                                start_idx = i + 1
-                                break
-
-                    unsummarized = active_msgs[start_idx:]
-
-                    if len(unsummarized) > settings.MEMORY_CONDENSE_THRESHOLD:
-                        retain_count = settings.MEMORY_CONDENSE_RETAIN
-                        to_summarize = unsummarized[:-retain_count]
-                        new_last_id = to_summarize[-1].id
-
-                        msg_dicts = [{"role": m.role, "content": m.content} for m in to_summarize]
-                        new_summary_text = await ai_engine.condense_chat_memory(http_client, old_summary, msg_dicts, request.model)
-
-                        new_mem_data = {
-                            "last_summarized_id": new_last_id,
-                            "summary": new_summary_text,
-                        }
-
-                        if memory_msg:
-                            memory_msg.content = json.dumps(new_mem_data)
-                        else:
-                            background_db.add(models.Message(
-                                session_id=session_id,
-                                role="memory",
-                                content=json.dumps(new_mem_data),
-                            ))
-
-                        background_db.commit()
-
                 except Exception as e:
                     background_db.rollback()
-                    print(f"Failed to process background memory: {e}")
+                    print(f"Failed to save assistant message: {e}")
                 finally:
                     background_db.close()
 
-    return StreamingResponse(generate(), media_type="application/x-ndjson")
+    # Schedule condensation to run after the response is fully sent.
+    # The advisory lock in condense_for_session ensures only one condenser
+    # runs per session at a time — concurrent requests skip silently.
+    background_tasks.add_task(
+        condense.condense_for_session,
+        http_client,
+        session_id,
+        request.model,
+    )
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        background=background_tasks,
+    )
 
 @router.post("/upload")
 async def upload_document(
