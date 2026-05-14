@@ -7,7 +7,7 @@ from typing import Awaitable, Callable, Optional
 import httpx
 
 from db import database, models
-from services import knowledge
+from services import knowledge, image_storage
 from config import settings
 import tools  # triggers @tool registration as a side effect
 from core.prompt_manager import MICRO_PROMPTS
@@ -177,7 +177,25 @@ async def stream_chat(
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]
                     sources_list = rag_data["sources"]
-                    recent_messages[-1]["content"] = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n{MICRO_PROMPTS['rag_file_upload_instruction']}"
+                    rebuilt_text = f"I have attached a file. Relevant context:\n{rag_context}\n\nMy message: {clean_user_text}\n\n{MICRO_PROMPTS['rag_file_upload_instruction']}"
+                    reattach_paths = rag_data.get("reattach_images") or []
+                    if reattach_paths and router.vision_capable(routed_model):
+                        # Convert the user message's string content into a
+                        # content-block list so we can attach images
+                        # alongside the text. The chat completions API
+                        # accepts either shape; we only use the list form
+                        # when there are actual images to attach.
+                        blocks = [{"type": "text", "text": rebuilt_text}]
+                        for path in reattach_paths:
+                            data_url = image_storage.read_as_data_url(path)
+                            if data_url:
+                                blocks.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": data_url},
+                                })
+                        recent_messages[-1]["content"] = blocks
+                    else:
+                        recent_messages[-1]["content"] = rebuilt_text
                     yield format_file_analyzed(sources_list)
             except Exception as rag_err:
                 yield format_error(str(rag_err), "File Read Error")

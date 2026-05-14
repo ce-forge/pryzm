@@ -15,6 +15,7 @@ Path scheme: backend/data/uploads/<uuid>.<ext>.
 """
 from __future__ import annotations
 
+import base64
 import os
 import uuid
 
@@ -50,3 +51,29 @@ def save_image(image_bytes: bytes, mime: str) -> str:
     with open(path, "wb") as f:
         f.write(image_bytes)
     return path
+
+
+# Inverse of _MIME_TO_EXT used by the re-attach path (Milestone 3): the
+# Document only carries a path; the MIME has to be re-derived from the
+# extension on disk. Keep the two tables next to each other so they
+# can't drift.
+_EXT_TO_MIME = {ext: mime for mime, ext in _MIME_TO_EXT.items()}
+
+
+def read_as_data_url(path: str) -> str | None:
+    """Read an image file from disk and return a base64 data URL of the
+    form `data:image/png;base64,…`. Returns None if the file is missing
+    or has an unsupported extension — caller decides what to do.
+
+    Used by ai_engine to re-attach the original bytes to the LLM call
+    when RAG selects an image-derived chunk.
+    """
+    if not path or not os.path.exists(path):
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    mime = _EXT_TO_MIME.get(ext)
+    if not mime:
+        return None
+    with open(path, "rb") as f:
+        encoded = base64.b64encode(f.read()).decode("ascii")
+    return f"data:{mime};base64,{encoded}"
