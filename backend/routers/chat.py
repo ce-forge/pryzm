@@ -243,10 +243,13 @@ async def analyze_data(
             )
             db.commit()
 
+        user_message_id: Optional[str] = None
         if not request.skip_db_save:
             user_msg = models.Message(session_id=chat_session.id, role="user", content=request.prompt)
             db.add(user_msg)
             db.commit()
+            db.refresh(user_msg)
+            user_message_id = user_msg.id
 
         history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
         safe_messages = [{"role": msg.role, "content": msg.content} for msg in history]
@@ -262,11 +265,20 @@ async def analyze_data(
         from core.llm_metrics import set_request_context
         set_request_context(workspace_id=workspace_id, session_id=session_id)
 
-        yield json.dumps({"status": "started", "session_id": session_id}) + "\n"
+        # `user_message_id` is sent here so the client can swap its optimistic
+        # temp-u id for the real DB UUID at the moment of stream start — no
+        # post-stream /sessions/{id} refetch needed (and therefore no race
+        # against the next send).
+        yield json.dumps({
+            "status": "started",
+            "session_id": session_id,
+            "user_message_id": user_message_id,
+        }) + "\n"
 
         full_response = ""
         completed = False
         disconnected = False
+        assistant_message_id: Optional[str] = None
 
         try:
             async for chunk in ai_engine.stream_chat(
@@ -285,6 +297,29 @@ async def analyze_data(
                 yield json.dumps({"chunk": chunk}) + "\n"
 
             if not disconnected:
+                # Save the assistant message NOW so the `done` event can carry
+                # its real DB id. Previously we saved in the finally block and
+                # the client had to refetch the session history to learn the
+                # id — that refetch was the source of the rapid-sends race.
+                if full_response.strip():
+                    save_db = database.SessionLocal()
+                    try:
+                        ai_msg = models.Message(
+                            session_id=session_id,
+                            role="assistant",
+                            content=full_response,
+                            status="complete",
+                        )
+                        save_db.add(ai_msg)
+                        save_db.commit()
+                        save_db.refresh(ai_msg)
+                        assistant_message_id = ai_msg.id
+                    except Exception as e:
+                        save_db.rollback()
+                        print(f"Failed to save assistant message: {e}")
+                    finally:
+                        save_db.close()
+
                 # The terminating chunk now carries an aggregate `usage` block so
                 # bench_llm.py can read it directly without scraping logs. Token counts
                 # come from the LAST chat call's snapshot (the call that produced the
@@ -292,7 +327,11 @@ async def analyze_data(
                 # not summed — bench_llm asks "how fast was the FINAL answer", not
                 # "how many tokens did the agentic loop burn in total."
                 usage = _last_chat_metric_snapshot()
-                yield json.dumps({"done": True, "usage": usage}) + "\n"
+                yield json.dumps({
+                    "done": True,
+                    "usage": usage,
+                    "assistant_message_id": assistant_message_id,
+                }) + "\n"
                 completed = True
 
         except asyncio.CancelledError:
@@ -304,30 +343,32 @@ async def analyze_data(
             return
 
         finally:
-            if completed:
-                status = "complete"
-            elif disconnected:
-                status = "aborted"
-                full_response += "\n\n*[Response aborted by user.]*"
-            else:
-                status = "failed"
+            # Save aborted/failed responses here. The clean-completion path
+            # already saved before yielding `done`; this branch only fires
+            # when the stream ended without `completed=True`.
+            if not completed:
+                if disconnected:
+                    status = "aborted"
+                    full_response += "\n\n*[Response aborted by user.]*"
+                else:
+                    status = "failed"
 
-            if full_response.strip():
-                background_db = database.SessionLocal()
-                try:
-                    ai_msg = models.Message(
-                        session_id=session_id,
-                        role="assistant",
-                        content=full_response,
-                        status=status,
-                    )
-                    background_db.add(ai_msg)
-                    background_db.commit()
-                except Exception as e:
-                    background_db.rollback()
-                    print(f"Failed to save assistant message: {e}")
-                finally:
-                    background_db.close()
+                if full_response.strip():
+                    background_db = database.SessionLocal()
+                    try:
+                        ai_msg = models.Message(
+                            session_id=session_id,
+                            role="assistant",
+                            content=full_response,
+                            status=status,
+                        )
+                        background_db.add(ai_msg)
+                        background_db.commit()
+                    except Exception as e:
+                        background_db.rollback()
+                        print(f"Failed to save assistant message: {e}")
+                    finally:
+                        background_db.close()
 
     # Schedule condensation to run after the response is fully sent.
     # The advisory lock in condense_for_session ensures only one condenser

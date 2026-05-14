@@ -67,6 +67,8 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       setStreamingContent((prev) => ({ ...prev, [optimisticId]: "" }));
 
       let fullAssistantMessage = "";
+      let pendingUserMessageId: string | null = null;
+      let pendingAssistantMessageId: string | null = null;
 
       const startingItems: Message[] = [];
       if (!skipUserAdd) {
@@ -145,6 +147,16 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                   break streamLoop;
                 }
 
+                // Backend now sends user_message_id alongside the started event
+                // when skip_db_save=false. Stash it; we apply the swap in
+                // `finally` so it lands once the bucket id is final.
+                if (parsed.status === "started" && parsed.user_message_id) {
+                  pendingUserMessageId = parsed.user_message_id;
+                }
+                if (parsed.done && parsed.assistant_message_id) {
+                  pendingAssistantMessageId = parsed.assistant_message_id;
+                }
+
                 // THE HANDOFF — atomic single migrate from optimistic → real id.
                 if (
                   parsed.status === "started" &&
@@ -203,6 +215,15 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
         const finalKeySid = realDbId ?? optimisticId;
         sessionApi.finalizeAssistantMessage(ws, finalKeySid, fullAssistantMessage);
+        // Swap optimistic temp ids for the real DB UUIDs that came back in the
+        // stream. No post-stream /sessions/{id} refetch = no race against the
+        // next send.
+        sessionApi.swapMessageIds(
+          ws,
+          finalKeySid,
+          pendingUserMessageId,
+          pendingAssistantMessageId,
+        );
 
         setStreamingContent((prev) => {
           const next = { ...prev };

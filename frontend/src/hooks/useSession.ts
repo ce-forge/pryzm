@@ -55,40 +55,17 @@ export function useSession() {
   const prefetchingRef = useRef<Set<string>>(new Set());
 
   /**
-   * Loads session history and title.
-   * @param force - If true, ignores the cache and fetches fresh data from DB.
+   * Title-only refresh. Used by SessionContext.notifySessionCreated after a
+   * stream completes, replacing the old `loadSessionData(true)` which also
+   * refetched the message list — that refetch was the source of the
+   * rapid-sends cache-clobber race. Real message IDs now arrive in the SSE
+   * stream itself, so there's no longer any need to re-read history from DB.
    */
-  const loadSessionData = useCallback(async (force = false) => {
+  const refreshSessionMeta = useCallback(async () => {
     if (!currentSession || currentSession.startsWith("optimistic-")) {
       setSessionTitle("");
       return;
     }
-
-    const cacheLen = messageCacheRef.current[cacheKey(workspace, currentSession)]?.length || 0;
-
-    // We fetch if the cache is empty OR if we are forcing a sync (after AI finishes)
-    if (force || cacheLen === 0) {
-      try {
-        const historyRes = await apiFetch(`/sessions/${currentSession}`, { cache: 'no-store' });
-        if (historyRes.ok) {
-          const historyData = await historyRes.json();
-          // CRITICAL: This overwrites "temp-" IDs with real DB UUIDs.
-          //
-          // We MUST NOT overwrite while a new send for this same session has
-          // started — its optimistic bubbles live only in the cache, not in
-          // the DB yet, and clobbering them loses the user's just-typed
-          // message. Re-check the streaming ref RIGHT BEFORE we commit, since
-          // the fetch was async and state may have changed during it.
-          if (!streamingSessionIdsRef.current.has(currentSession)) {
-            setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: historyData }));
-          }
-        }
-      } catch (error) {
-        console.error("History sync failed:", error);
-      }
-    }
-
-    // Always refresh the title
     try {
       const listRes = await apiFetch(`/sessions?workspace=${workspace}`, { cache: 'no-store' });
       if (listRes.ok) {
@@ -99,8 +76,42 @@ export function useSession() {
           setSessionTitle(unwanted.includes(activeSesh.title) ? "" : activeSesh.title);
         }
       }
-    } catch (e) {}
-  }, [currentSession, workspace, setMessageCache]);
+    } catch {}
+  }, [currentSession, workspace]);
+
+  /**
+   * Loads session history for the currently-active session if not cached.
+   * Called on session navigation (the initial load). The `force` parameter
+   * exists for legacy callers but no longer triggers post-stream refetches —
+   * those now happen inline via the SSE-driven id-swap pathway.
+   */
+  const loadSessionData = useCallback(async (force = false) => {
+    if (!currentSession || currentSession.startsWith("optimistic-")) {
+      setSessionTitle("");
+      return;
+    }
+
+    const cacheLen = messageCacheRef.current[cacheKey(workspace, currentSession)]?.length || 0;
+    if (force || cacheLen === 0) {
+      try {
+        const historyRes = await apiFetch(`/sessions/${currentSession}`, { cache: 'no-store' });
+        if (historyRes.ok) {
+          const historyData = await historyRes.json();
+          // Skip the overwrite if this session is mid-stream — the SSE-driven
+          // path is now responsible for the optimistic→real id swap and the
+          // DB snapshot would be stale relative to the in-flight optimistic
+          // bubble.
+          if (!streamingSessionIdsRef.current.has(currentSession)) {
+            setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: historyData }));
+          }
+        }
+      } catch (error) {
+        console.error("History sync failed:", error);
+      }
+    }
+
+    await refreshSessionMeta();
+  }, [currentSession, workspace, setMessageCache, refreshSessionMeta]);
 
   // Initial load. Sync after a stream completes is now triggered via the
   // SessionContext API (notifySessionCreated → loadSessionData(true)), not via
@@ -145,6 +156,6 @@ export function useSession() {
     activeCacheKey,
     isNavigatingRef, streamingSessionIdsRef, isInitialLoading,
     navigateToSession, prefetchSession, router, urlSessionId,
-    loadSessionData,
+    loadSessionData, refreshSessionMeta,
   };
 }
