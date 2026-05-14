@@ -2,6 +2,12 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
+## Coding discipline
+
+Before writing, reviewing, or refactoring code in this repo, invoke `andrej-karpathy-skills:karpathy-guidelines` via the Skill tool. The four principles (think before coding, simplicity first, surgical changes, goal-driven execution) apply to every code change, large or small. This is a project-wide requirement, not a per-task choice.
+
+The codebase also has a number of project memories that capture local conventions and prior decisions — read those at session start.
+
 ## Stack Overview
 
 Pryzm is a locally hosted AI copilot for IT management. Two services:
