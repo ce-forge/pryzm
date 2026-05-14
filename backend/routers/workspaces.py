@@ -51,7 +51,7 @@ def _validate_enabled_tools(names: List[str]) -> None:
         )
 
 
-async def _validate_preferred_model(client: httpx.AsyncClient, model: str) -> None:
+async def _validate_model(client: httpx.AsyncClient, model: str) -> None:
     """Confirm the model exists in the Ollama /api/tags response AND is a
     chat-capable model (embedding-only models like nomic-embed-text are
     filtered out, matching chat.py:get_ollama_models). Done at PATCH time
@@ -75,14 +75,30 @@ async def _validate_preferred_model(client: httpx.AsyncClient, model: str) -> No
         )
 
 
+def _to_response(workspace) -> WorkspaceResponse:
+    """Build a WorkspaceResponse, lifting engine_config.model into model_name."""
+    engine_cfg = workspace.engine_config or {}
+    return WorkspaceResponse(
+        id=workspace.id,
+        slug=workspace.slug,
+        display_name=workspace.display_name,
+        system_prompt=workspace.system_prompt,
+        enabled_tools=workspace.enabled_tools or [],
+        model_name=engine_cfg.get("model"),
+        is_builtin=workspace.is_builtin,
+        color=workspace.color,
+        created_at=workspace.created_at,
+    )
+
+
 @router.get("/workspaces", response_model=List[WorkspaceResponse])
 def list_workspaces(db: Session = Depends(database.get_db)):
-    return db.query(models.Workspace).order_by(models.Workspace.created_at.asc()).all()
+    return [_to_response(ws) for ws in db.query(models.Workspace).order_by(models.Workspace.created_at.asc()).all()]
 
 
 @router.get("/workspaces/{slug}", response_model=WorkspaceResponse)
 def get_workspace(slug: str, db: Session = Depends(database.get_db)):
-    return get_by_slug(db, slug)
+    return _to_response(get_by_slug(db, slug))
 
 
 @router.post("/workspaces", response_model=WorkspaceResponse)
@@ -98,27 +114,27 @@ def create_workspace(
     # Defaults for a fresh blank workspace.
     system_prompt = "You are a helpful assistant. Answer the user's questions thoughtfully."
     enabled_tools: list[str] = []
-    preferred_model = None
+    engine_config = {"backend": "ollama", "model": "gemma4:e4b"}
 
     if payload.clone_from:
         source = get_by_slug(db, payload.clone_from)
         system_prompt = source.system_prompt
         enabled_tools = list(source.enabled_tools or [])
-        preferred_model = source.preferred_model
+        engine_config = dict(source.engine_config or engine_config)
 
     ws = models.Workspace(
         slug=slug,
         display_name=payload.display_name.strip(),
         system_prompt=system_prompt,
         enabled_tools=enabled_tools,
-        preferred_model=preferred_model,
+        engine_config=engine_config,
         color=payload.color,
         is_builtin=False,
     )
     db.add(ws)
     db.commit()
     db.refresh(ws)
-    return ws
+    return _to_response(ws)
 
 
 @router.patch("/workspaces/{slug}", response_model=WorkspaceResponse)
@@ -148,18 +164,23 @@ async def update_workspace(
         _validate_enabled_tools(data["enabled_tools"])
         ws.enabled_tools = data["enabled_tools"]
 
-    if "preferred_model" in data:
-        # Explicit null clears the pin; non-null is validated against Ollama.
-        if data["preferred_model"] is not None:
-            await _validate_preferred_model(http_client, data["preferred_model"])
-        ws.preferred_model = data["preferred_model"]
+    if "model_name" in data:
+        new_model = data["model_name"]
+        if new_model:
+            await _validate_model(http_client, new_model)
+        else:
+            # null → reset to default for this workspace
+            builtin = get_builtin(ws.slug)
+            new_model = builtin.engine_config["model"] if builtin else "gemma4:e4b"
+        # JSONB partial update: copy + mutate + reassign so SQLAlchemy detects the change.
+        ws.engine_config = {**(ws.engine_config or {}), "model": new_model, "backend": "ollama"}
 
     if "color" in data:
         ws.color = data["color"]
 
     db.commit()
     db.refresh(ws)
-    return ws
+    return _to_response(ws)
 
 
 @router.delete("/workspaces/{slug}", response_model=WorkspaceDeleteResponse)
@@ -212,9 +233,9 @@ def reset_workspace(slug: str, db: Session = Depends(database.get_db)):
             detail=f"Default prompt file missing for builtin: core/prompts/{slug}.txt",
         )
     ws.enabled_tools = list(builtin.enabled_tools)
-    ws.preferred_model = None
+    ws.engine_config = dict(builtin.engine_config)
     ws.display_name = builtin.display_name
     ws.color = builtin.color
     db.commit()
     db.refresh(ws)
-    return ws
+    return _to_response(ws)

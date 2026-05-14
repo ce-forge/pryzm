@@ -60,14 +60,14 @@ class HealthResponse(BaseModel):
 
 
 class WorkspaceResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     id: str
     slug: str
     display_name: str
     system_prompt: str
     enabled_tools: List[str]
-    preferred_model: Optional[str] = None
+    model_name: Optional[str] = None  # extracted from engine_config.model for the wire
     is_builtin: bool
     color: Optional[str] = None
     created_at: datetime
@@ -86,7 +86,7 @@ class WorkspaceUpdate(BaseModel):
     display_name: Optional[str] = Field(None, min_length=1, max_length=80)
     system_prompt: Optional[str] = Field(None, max_length=50_000)
     enabled_tools: Optional[List[str]] = None
-    preferred_model: Optional[str] = None  # explicit null = clear the pin
+    model_name: Optional[str] = None  # writes to engine_config.model; null = use default
     color: Optional[WORKSPACE_COLOR] = None
 
 
