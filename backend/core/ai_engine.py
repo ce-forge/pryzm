@@ -288,27 +288,6 @@ async def stream_chat(
                         "content": str(result),
                         "name": func_name,
                     })
-
-                # Re-attach any image-derived docs that the tool calls in this
-                # batch surfaced (today: search_knowledge_base hitting an
-                # image's Document). Tool messages can only carry text, so we
-                # inject a synthetic user turn with the image bytes — the next
-                # iteration's LLM call sees both the tool text and the pixels.
-                pending = knowledge.consume_pending_image_paths()
-                if pending and router.vision_capable(routed_model):
-                    blocks = [{
-                        "type": "text",
-                        "text": "Reference images from the knowledge-base search above:",
-                    }]
-                    for path in pending:
-                        data_url = image_storage.read_as_data_url(path)
-                        if data_url:
-                            blocks.append({
-                                "type": "image_url",
-                                "image_url": {"url": data_url},
-                            })
-                    if len(blocks) > 1:
-                        full_messages.append({"role": "user", "content": blocks})
                 continue
 
             else:
