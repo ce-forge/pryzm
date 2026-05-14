@@ -2,7 +2,8 @@ import React, { useRef, useState, useEffect } from "react";
 import { FileUpload } from "@/types/chat"; 
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { APP_CONFIG } from "@/utils/constants";
-import { PlusIcon, SendIcon, StopIcon, TerminalIcon, LoadingIcon, CancelIcon, DatabaseIcon } from "./Icons";
+import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon } from "./Icons";
+import { CircularProgress } from "./CircularProgress";
 
 interface ChatInputProps {
   prompt: string;
@@ -46,11 +47,15 @@ export default function ChatInput({
     
     const mappedUploads = files.map(file => {
       const isSupported = validExts.some(ext => file.name.toLowerCase().endsWith(ext)) || !file.name.includes(".");
+      // Mint a blob URL for image MIMEs so the pill can render a real
+      // thumbnail. Revoked on remove / clear / unmount in useUploader.
+      const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
       return {
         id: Math.random().toString(36).substring(7),
         file,
         status: (isSupported ? "pending" : "error") as any,
         progress: isSupported ? 0 : 100,
+        previewUrl,
         errorMessage: isSupported ? undefined : "Unsupported format"
       };
     });
@@ -66,7 +71,11 @@ export default function ChatInput({
     if (e.dataTransfer.files) processFiles(Array.from(e.dataTransfer.files));
   };
 
-  const removeUpload = (id: string) => setUploads(prev => prev.filter(up => up.id !== id));
+  const removeUpload = (id: string) => setUploads(prev => {
+    const removed = prev.find(up => up.id === id);
+    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    return prev.filter(up => up.id !== id);
+  });
 
   return (
     <div className="w-full max-w-3xl relative">
@@ -81,7 +90,27 @@ export default function ChatInput({
                   'bg-[#1e1f20] border-[#333537] text-gray-400'
                 }`}
               >
-                {u.status === "uploading" ? <LoadingIcon className="w-3.5 h-3.5" /> : <DatabaseIcon className="w-3.5 h-3.5" />}
+                <div className="relative w-7 h-7 shrink-0">
+                  {u.previewUrl ? (
+                    <img
+                      src={u.previewUrl}
+                      alt=""
+                      className="w-7 h-7 object-cover rounded"
+                    />
+                  ) : (
+                    <DatabaseIcon className="w-7 h-7 p-1" />
+                  )}
+                  {u.status === "uploading" && (
+                    <span className="absolute inset-0 bg-black/40 rounded flex items-center justify-center">
+                      <CircularProgress value={u.progress} className="w-6 h-6" />
+                    </span>
+                  )}
+                  {u.status === "error" && (
+                    <span className="absolute inset-0 bg-black/40 rounded flex items-center justify-center">
+                      <AlertIcon className="w-4 h-4" />
+                    </span>
+                  )}
+                </div>
                 <span className="truncate max-w-[120px]">{u.file.name}</span>
                 {u.errorMessage && <span className="opacity-60 text-[9px] uppercase font-bold ml-1">({u.errorMessage})</span>}
                 <button onClick={() => removeUpload(u.id)} className="ml-1 hover:text-white transition-colors">
