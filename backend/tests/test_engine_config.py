@@ -6,25 +6,23 @@ from core.engine_config import EngineConfig, engine_config_for
 
 
 def test_parse_valid_config():
-    cfg = EngineConfig.model_validate({"backend": "ollama", "model": "gemma4:e4b"})
-    assert cfg.backend == "ollama"
-    assert cfg.model == "gemma4:e4b"
+    cfg = EngineConfig.model_validate({"backend": "llama_cpp"})
+    assert cfg.backend == "llama_cpp"
 
 
 def test_missing_backend_raises():
     with pytest.raises(ValidationError):
-        EngineConfig.model_validate({"model": "x"})
+        EngineConfig.model_validate({})
 
 
-def test_missing_model_raises():
-    with pytest.raises(ValidationError):
-        EngineConfig.model_validate({"backend": "ollama"})
+# test_missing_model_raises removed — Phase B1 dropped the `model` field;
+# a config without 'model' is now valid by design.
 
 
 def test_unsupported_backend_raises():
-    """Phase 4 ships with Ollama only; llama.cpp lands in a later spec."""
+    """Only llama_cpp is accepted; any other string must fail validation."""
     with pytest.raises(ValidationError):
-        EngineConfig.model_validate({"backend": "openai", "model": "gpt-4"})
+        EngineConfig.model_validate({"backend": "openai"})
 
 
 def test_engine_config_for_workspace_row(db_session):
@@ -37,11 +35,10 @@ def test_engine_config_for_workspace_row(db_session):
         system_prompt="",
         enabled_tools=[],
         is_builtin=False,
-        engine_config={"backend": "ollama", "model": "qwen3.6:27b"},
+        engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws)
     db_session.commit()
 
     cfg = engine_config_for(ws)
-    assert cfg.backend == "ollama"
-    assert cfg.model == "qwen3.6:27b"
+    assert cfg.backend == "llama_cpp"

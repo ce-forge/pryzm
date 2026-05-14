@@ -51,7 +51,7 @@ def test_engine_config_server_default_on_insert(db_at_head):
         cfg = conn.execute(text(
             "SELECT engine_config FROM workspaces WHERE id = 'test1'"
         )).scalar()
-    assert cfg == {"backend": "ollama", "model": "gemma4:e4b"}
+    assert cfg == {"backend": "llama_cpp"}
 
 
 def test_engine_config_rejects_null(db_at_head):
