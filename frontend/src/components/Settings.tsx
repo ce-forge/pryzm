@@ -2,13 +2,8 @@ import React, { useEffect, useState } from "react";
 import { apiFetch, getToken, setToken, clearToken } from "@/utils/apiClient";
 
 export default function SettingsModal({ workspace, close }: { workspace: string, close: () => void }) {
-  const [models, setModels] = useState<string[]>([]);
-
-  const[selectedModel, setSelectedModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
-  const[initialModel, setInitialModel] = useState(() => typeof window !== 'undefined' ? localStorage.getItem("pryzm_model") || "gemma4:e4b" : "gemma4:e4b");
-
   const [prompts, setPrompts] = useState<Record<string, string>>({});
-  const[initialPrompts, setInitialPrompts] = useState<Record<string, string>>({});
+  const [initialPrompts, setInitialPrompts] = useState<Record<string, string>>({});
 
   const [isSaving, setIsSaving] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
@@ -19,11 +14,6 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
   const [newToken, setNewToken] = useState("");
 
   useEffect(() => {
-    apiFetch("/api/models")
-      .then(r => r.json())
-      .then(setModels)
-      .catch(() => {});
-
     apiFetch("/api/prompts")
       .then(r => r.json())
       .then(data => {
@@ -31,14 +21,13 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
         setInitialPrompts(data);
       })
       .catch(() => {});
-  },[]);
+  }, []);
 
   const isLoaded = Object.keys(initialPrompts).length > 0;
-  const hasChanges = selectedModel !== initialModel || (isLoaded && JSON.stringify(prompts) !== JSON.stringify(initialPrompts));
+  const hasChanges = isLoaded && JSON.stringify(prompts) !== JSON.stringify(initialPrompts);
 
   const handleSave = async () => {
     setIsSaving(true);
-    localStorage.setItem("pryzm_model", selectedModel);
     try {
       await apiFetch("/api/prompts", {
         method: "PATCH",
@@ -46,7 +35,6 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
         body: JSON.stringify(prompts)
       });
 
-      setInitialModel(selectedModel);
       setInitialPrompts(prompts);
 
       setShowSuccess(true);
@@ -138,15 +126,6 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
                 )}
               </div>
             )}
-          </div>
-
-          <div className="border-t border-[#333537] pt-6">
-            <label className="block text-sm font-semibold text-[#e3e3e3] mb-2">Default AI Model</label>
-            <p className="text-xs text-gray-500 mb-3">Used when a workspace doesn&apos;t pin its own model. Workspaces with a pinned model override this.</p>
-            <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors appearance-none">
-              {models.length === 0 && <option value={selectedModel}>{selectedModel} (Loading...)</option>}
-              {models.map(m => <option key={m} value={m}>{m}</option>)}
-            </select>
           </div>
 
           <div className="border-t border-[#333537] pt-6">

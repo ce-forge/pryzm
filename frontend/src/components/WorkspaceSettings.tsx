@@ -341,12 +341,14 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
                   Reset to default
                 </button>
               )}
-              <button
-                onClick={() => setConfirmDelete(true)}
-                className="w-full bg-red-900/30 hover:bg-red-900/50 border border-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-medium"
-              >
-                Delete workspace
-              </button>
+              {!workspace.is_builtin && (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  className="w-full bg-red-900/30 hover:bg-red-900/50 border border-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-medium"
+                >
+                  Delete workspace
+                </button>
+              )}
             </div>
           )}
 

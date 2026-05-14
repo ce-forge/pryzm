@@ -9,7 +9,6 @@ import { useMessageActions } from "@/hooks/useMessageActions";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useSearch } from "@/hooks/useSearch";
 import { usePrompt } from "@/hooks/usePrompt";
-import { APP_CONFIG } from "@/utils/constants";
 import ChatInput from "./ChatInput";
 import ChatHeader from "./ChatHeader";
 import QuickActions from "./QuickActions";
@@ -24,13 +23,6 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
   const ai = useInferenceContext();
   const uploader = useUploaderContext();
   const tester = useTestSuiteContext();
-
-  const [selectedModel] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("pryzm_model") || APP_CONFIG.DEFAULT_MODEL;
-    }
-    return APP_CONFIG.DEFAULT_MODEL;
-  });
 
   const messages = session.messages;
   const activeSessionKey = session.currentSession || "temp_new_chat";
@@ -83,9 +75,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
 
       const textToSend = attachedPrefix + rawPrompt;
       uploader.clearQueue();
-      await ai.sendMessage(textToSend, activeIdToUse, selectedModel, documentIds);
+      await ai.sendMessage(textToSend, activeIdToUse, documentIds);
     },
-    [currentIsProcessing, session.currentSession, uploader, ai, selectedModel],
+    [currentIsProcessing, session.currentSession, uploader, ai],
   );
 
   const stopAllInference = useCallback(() => {
@@ -101,7 +93,6 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
     ai.sendMessage,
     session.navigateToSession,
     session.notifySessionCreated,
-    selectedModel,
   );
 
   const onSubmit = useCallback(
