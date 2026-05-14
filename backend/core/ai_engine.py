@@ -233,8 +233,13 @@ async def stream_chat(
                         "function": {"name": func_name, "arguments": raw_args}
                     }
 
+                    # Hide auto-injected context params from the user-visible
+                    # System Action line — they're plumbing, not signal. The
+                    # user cares about `query` / `hostname` / `port` etc., not
+                    # workspace_id or session_id which are always the same.
+                    _hidden = {"workspace_id", "session_id"}
                     display_args = {k: v for k, v in raw_args.items()
-                                    if k in valid_params}
+                                    if k in valid_params and k not in _hidden}
                     yield format_tool_execution(func_name, display_args)
 
                     try:
@@ -283,16 +288,23 @@ async def stream_chat(
 
                 if not content.strip():
                     if loop_count > 1:
-                        content = MICRO_PROMPTS["fallback_tool_failure"]
+                        # Only claim failure if a tool actually errored.
+                        # If tools succeeded and the model just had nothing
+                        # to add (e.g., after a `rename_chat_session` that
+                        # returned "Success! ..."), say nothing — the tool
+                        # result block already shows what happened.
+                        if had_tool_error:
+                            content = MICRO_PROMPTS["fallback_tool_failure"]
                     else:
                         content = MICRO_PROMPTS["fallback_generic"]
 
-                words = content.split(" ")
-                for i, word in enumerate(words):
-                    if is_disconnected and await is_disconnected():
-                        return
-                    yield word + (" " if i < len(words) - 1 else "")
-                    await asyncio.sleep(0.01)
+                if content.strip():
+                    words = content.split(" ")
+                    for i, word in enumerate(words):
+                        if is_disconnected and await is_disconnected():
+                            return
+                        yield word + (" " if i < len(words) - 1 else "")
+                        await asyncio.sleep(0.01)
 
                 finished_cleanly = True
                 break

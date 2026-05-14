@@ -124,7 +124,21 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
             return <pre className="max-w-full overflow-x-auto">{children}</pre>;
           },
           code({ children }) {
-            return <code className="bg-[#1e1f20] text-emerald-300 px-1.5 py-0.5 rounded text-[13px] border border-[#333537] whitespace-pre-wrap break-all">{children}</code>;
+            // whitespace-nowrap keeps inline tokens (tool names, paths, etc.)
+            // as a single visual pill. The old `break-all` let the browser
+            // split mid-token (e.g. `search_knowledge_` + `base` on separate
+            // lines), which looked broken. With nowrap the paragraph wraps
+            // BEFORE the code element instead of through it.
+            //
+            // inline-block + max-w-full + overflow-x-auto bounds the pill to
+            // the chat width — for very long content (tool-arg dicts, UUIDs,
+            // long paths) the pill becomes horizontally scrollable instead of
+            // bleeding past the right edge.
+            return (
+              <code className="bg-[#1e1f20] text-emerald-300 px-1.5 py-0.5 rounded text-[13px] border border-[#333537] whitespace-nowrap inline-block max-w-full overflow-x-auto align-middle">
+                {children}
+              </code>
+            );
           },
           ul({ children }) { return <ul className="list-disc ml-6 mb-4 space-y-2">{children}</ul>; },
           ol({ children }) { return <ol className="list-decimal ml-6 mb-4 space-y-2">{children}</ol>; },
