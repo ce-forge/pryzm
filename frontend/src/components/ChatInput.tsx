@@ -28,11 +28,19 @@ export default function ChatInput({
   
   const [isDragging, setIsDragging] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const dragCounter = useRef(0);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Three discrete file inputs so the mobile OS picker shows the right
+  // native flow per source instead of a generic "Files" chooser. On
+  // desktop they all open the standard file dialog filtered by `accept`.
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
   const menuWrapperRef = useRef<HTMLDivElement>(null);
+  const attachMenuRef = useRef<HTMLDivElement>(null);
 
   useOnClickOutside(menuWrapperRef, () => setShowTestMenu(false));
+  useOnClickOutside(attachMenuRef, () => setShowAttachMenu(false));
 
   useEffect(() => {
     if (inputRef.current) {
@@ -111,26 +119,51 @@ export default function ChatInput({
             />
             
             <div className="flex justify-between items-center px-2 pb-1">
-                <div className="flex gap-1 items-center relative" ref={menuWrapperRef}>
-                    <input type="file" multiple className="hidden" ref={fileInputRef} onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))} />
-                    
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-full text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537] transition-all">
-                      <PlusIcon className="w-5 h-5" />
-                    </button>
+                <div className="flex gap-1 items-center relative">
+                    <input type="file" multiple className="hidden" ref={cameraInputRef}
+                      accept="image/*" capture="environment"
+                      onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))} />
+                    <input type="file" multiple className="hidden" ref={galleryInputRef}
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))} />
+                    <input type="file" multiple className="hidden" ref={filesInputRef}
+                      accept=".txt,.md,.py,.csv,.json,.log,.yaml,.yml,.conf,.ini"
+                      onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))} />
 
-                    <button type="button" onClick={(e) => { e.stopPropagation(); isAutoTesting ? stopAutoTest() : setShowTestMenu(!showTestMenu); }} 
-                      className={`p-2.5 rounded-full transition-all ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:bg-[#333537]'}`}>
-                      {isAutoTesting ? <StopIcon className="w-4 h-4 fill-white" /> : <TerminalIcon className="w-4 h-4" />}
-                    </button>
-                    
-                    {showTestMenu && !isAutoTesting && (
-                      <div className="absolute bottom-[110%] left-0 mb-2 w-48 bg-[#282a2c] border border-[#333537] rounded-2xl shadow-2xl z-50 py-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                        <div className="px-4 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 mb-1">Diagnostics</div>
-                        <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('it_demo'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run IT Demo</button>
-                        <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('memory_test'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Context Test</button>
-                        <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('tool_chain'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Tool Chain</button>
-                      </div>
-                    )}
+                    <div className="relative" ref={attachMenuRef}>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); setShowAttachMenu(!showAttachMenu); }}
+                        className="p-2.5 rounded-full text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537] transition-all">
+                        <PlusIcon className="w-5 h-5" />
+                      </button>
+
+                      {showAttachMenu && (
+                        <div className="absolute bottom-[110%] left-0 mb-2 w-48 bg-[#282a2c] border border-[#333537] rounded-2xl shadow-2xl z-50 py-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                          <div className="px-4 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 mb-1">Attach</div>
+                          <button type="button" onClick={() => { setShowAttachMenu(false); cameraInputRef.current?.click(); }}
+                            className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Take a photo</button>
+                          <button type="button" onClick={() => { setShowAttachMenu(false); galleryInputRef.current?.click(); }}
+                            className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Attach from gallery</button>
+                          <button type="button" onClick={() => { setShowAttachMenu(false); filesInputRef.current?.click(); }}
+                            className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">My files</button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="relative" ref={menuWrapperRef}>
+                      <button type="button" onClick={(e) => { e.stopPropagation(); isAutoTesting ? stopAutoTest() : setShowTestMenu(!showTestMenu); }}
+                        className={`p-2.5 rounded-full transition-all ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:bg-[#333537]'}`}>
+                        {isAutoTesting ? <StopIcon className="w-4 h-4 fill-white" /> : <TerminalIcon className="w-4 h-4" />}
+                      </button>
+
+                      {showTestMenu && !isAutoTesting && (
+                        <div className="absolute bottom-[110%] left-0 mb-2 w-48 bg-[#282a2c] border border-[#333537] rounded-2xl shadow-2xl z-50 py-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                          <div className="px-4 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 mb-1">Diagnostics</div>
+                          <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('it_demo'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run IT Demo</button>
+                          <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('memory_test'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Context Test</button>
+                          <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('tool_chain'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Tool Chain</button>
+                        </div>
+                      )}
+                    </div>
 
                     <span className="text-[10px] text-gray-600 ml-2 font-mono select-none">~{totalTokens} / {APP_CONFIG.VISIBLE_TOKEN_LIMIT}</span>
                 </div>
