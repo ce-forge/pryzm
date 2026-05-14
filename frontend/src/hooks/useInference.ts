@@ -80,6 +80,17 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       });
       sessionApi.appendStartingMessages(ws, optimisticId, startingItems);
 
+      // For a brand-new chat, immediately bind the URL to the optimistic id
+      // so the cache bucket the UI reads (keyed by the URL's session id)
+      // matches the bucket we just appended into. Without this, the user
+      // bubble lives in messageCache[ws:optimisticId] but the UI is looking
+      // at messageCache[ws:temp_new_chat], so the send appears to no-op until
+      // the SSE handoff arrives — and a follow-up send before the handoff
+      // would create a second session.
+      if (!activeSessionId) {
+        sessionApi.navigateToSession(optimisticId);
+      }
+
       const controller = new AbortController();
       abortControllersRef.current.set(optimisticId, controller);
       sessionApi.streamingSessionIdsRef.current.add(optimisticId);
@@ -152,7 +163,18 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                   }));
 
                   linkSessionRef.current?.(optimisticId, newDbId);
-                  sessionApi.notifySessionCreated(optimisticId, newDbId);
+
+                  // Update the URL to the real DB session id BEFORE notifying
+                  // (which would otherwise trigger a loadSessionData against
+                  // the stale currentSession). Subsequent sends in the same
+                  // conversation rely on the URL being session-bound.
+                  if (typeof window !== "undefined") {
+                    const params = new URLSearchParams(window.location.search);
+                    const currentUrlId = params.get("session");
+                    if (!currentUrlId || currentUrlId === optimisticId) {
+                      sessionApi.navigateToSession(newDbId);
+                    }
+                  }
                 }
 
                 if (parsed.chunk) {
