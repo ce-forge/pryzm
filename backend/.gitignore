@@ -1,0 +1,3 @@
+# Per-run benchmark output (the .gitkeep is tracked; everything else isn't)
+tests/perf/results/*
+!tests/perf/results/.gitkeep
