@@ -82,6 +82,14 @@ class HeuristicRouter:
         model = self.large if tier is Tier.LARGE else self.small
         return model, tier, reason
 
+    def vision_capable(self, model_id: str) -> bool:
+        """Whether the model's catalog tags include `vision`. Driven by the
+        YAML so when a new vision-capable model lands, it's a one-line
+        tag edit. ai_engine consults this before re-attaching images to a
+        chat call; calling a non-vision model with image_url content blocks
+        would either error or silently drop the image."""
+        return "vision" in self.catalog.get(model_id, set())
+
     def _pick_tier(
         self,
         prompt: str,
