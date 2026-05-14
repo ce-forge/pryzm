@@ -8,6 +8,7 @@ import json
 from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
+from core.engine_config import engine_config_for
 from services import knowledge
 from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
@@ -21,6 +22,7 @@ import httpx
 from core import ollama
 from core.deps import get_http_client
 from services import condense
+from tools.registry import build_tool_set
 
 
 def _error_envelope(exc: Exception) -> dict:
@@ -50,6 +52,23 @@ def _resolve_workspace_or_404(slug: str, db: Session) -> models.Workspace:
     if workspace is None:
         raise HTTPException(status_code=404, detail="Workspace not found")
     return workspace
+
+
+def workspace_dep(
+    workspace: Optional[str] = None,
+    db: Session = Depends(database.get_db),
+) -> models.Workspace:
+    """Resolve a workspace slug (from query param) to its ORM row.
+
+    422 if missing, 404 if the slug does not exist. This is the single
+    boundary where slug → id resolution happens for the /analyze route.
+    """
+    if not workspace:
+        raise HTTPException(status_code=422, detail="workspace query parameter is required")
+    ws = db.query(models.Workspace).filter(models.Workspace.slug == workspace).first()
+    if not ws:
+        raise HTTPException(status_code=404, detail=f"Workspace not found: {workspace}")
+    return ws
 
 
 def _message_in_workspace_or_404(
@@ -175,8 +194,13 @@ async def analyze_data(
     http_request: Request,
     request: InferenceRequest,
     background_tasks: BackgroundTasks,
+    workspace: models.Workspace = Depends(workspace_dep),
     http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
+    # Resolve engine config and tool set once at the boundary.
+    engine_config = engine_config_for(workspace)
+    tool_set = build_tool_set(workspace)
+
     # We manage the upfront DB session manually instead of using
     # Depends(get_db) so the connection is returned to the pool BEFORE the
     # long-lived streaming response begins. With Depends, the dependency's
@@ -185,14 +209,13 @@ async def analyze_data(
     # multiple sessions stream concurrently.
     db = database.SessionLocal()
     try:
-        workspace = get_or_default(db, request.mode)
         chat_session = None
 
         if request.session_id:
             chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
 
         if not chat_session:
-            generated_title = await ai_engine.generate_title(http_client, request.prompt, request.model)
+            generated_title = await ai_engine.generate_title(http_client, request.prompt, engine_config=engine_config)
             chat_session = models.Session(
                 title=generated_title,
                 workspace_id=workspace.id,
@@ -201,7 +224,7 @@ async def analyze_data(
             db.commit()
             db.refresh(chat_session)
         elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
-            chat_session.title = await ai_engine.generate_title(http_client, request.prompt, request.model)
+            chat_session.title = await ai_engine.generate_title(http_client, request.prompt, engine_config=engine_config)
             db.commit()
             db.refresh(chat_session)
 
@@ -246,8 +269,9 @@ async def analyze_data(
                 http_client,
                 safe_messages,
                 workspace_id=workspace_id,
+                engine_config=engine_config,
+                tool_set=tool_set,
                 session_id=session_id,
-                model_name=request.model,
                 is_disconnected=http_request.is_disconnected,
             ):
                 if await http_request.is_disconnected():
@@ -301,7 +325,7 @@ async def analyze_data(
         condense.condense_for_session,
         http_client,
         session_id,
-        request.model,
+        engine_config,
     )
 
     return StreamingResponse(

@@ -14,7 +14,7 @@ export default function ChatHeader({
 }: ChatHeaderProps) {
   const { activeWorkspace } = useChatContext();
   const wsName = activeWorkspace?.display_name ?? "Pryzm";
-  const wsModel = activeWorkspace?.preferred_model;
+  const wsModel = activeWorkspace?.model_name;
   const wsColorClasses = getWorkspaceColorClasses(activeWorkspace?.color);
 
   return (

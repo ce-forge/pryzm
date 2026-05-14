@@ -108,6 +108,7 @@ function useChatValue() {
   const msgActions = useMessageActions(
     session.workspace,
     currentKey,
+    session.activeCacheKey,
     session.messages,
     session.setMessageCache,
     ai.sendMessage,

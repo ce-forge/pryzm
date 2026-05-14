@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from config import settings
 from core import ai_engine
+from core.engine_config import EngineConfig
 from db import database, models
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _session_advisory_lock(db, session_id: str):
 async def condense_for_session(
     client: httpx.AsyncClient,
     session_id: str,
-    model_name: str,
+    engine_config: EngineConfig,
 ):
     """Condense the messages for `session_id` if the threshold is met.
 
@@ -75,7 +76,7 @@ async def condense_for_session(
                 logger.info("condense skipped (lock held): session %s", session_id)
                 return
 
-            await _condense_inner(db, client, session_id, model_name)
+            await _condense_inner(db, client, session_id, engine_config)
     except Exception:
         logger.exception("condense failed for session %s", session_id)
     finally:
@@ -86,7 +87,7 @@ async def _condense_inner(
     db,
     client: httpx.AsyncClient,
     session_id: str,
-    model_name: str,
+    engine_config: EngineConfig,
 ):
     """The actual condense logic — lifted from routers/chat.py's old finally.
 
@@ -135,7 +136,7 @@ async def _condense_inner(
 
     msg_dicts = [{"role": m.role, "content": m.content} for m in to_summarize]
     new_summary_text = await ai_engine.condense_chat_memory(
-        client, old_summary, msg_dicts, model_name
+        client, old_summary, msg_dicts, engine_config=engine_config,
     )
 
     new_mem_data = {

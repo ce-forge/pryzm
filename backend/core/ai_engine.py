@@ -8,11 +8,12 @@ import httpx
 
 from db import database, models
 from services import knowledge
-from services.workspaces import resolve_tools_for_workspace, resolve_model_for_request
 from config import settings
 import tools  # triggers @tool registration as a side effect
 from core.prompt_manager import MICRO_PROMPTS
 from core import ollama
+from core.engine_config import EngineConfig
+from tools.registry import ResolvedToolSet
 from utils.formatters import (
     format_tool_execution,
     format_file_analyzed,
@@ -37,7 +38,8 @@ async def condense_chat_memory(
     client: httpx.AsyncClient,
     old_memory: str,
     messages: list,
-    model_name: str,
+    *,
+    engine_config: EngineConfig,
 ) -> str:
     """Runs asynchronously to summarize older messages and prevent context window overflow."""
     chat_text = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in messages if m['role'] in ['user', 'assistant']])
@@ -49,7 +51,7 @@ async def condense_chat_memory(
     prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
 
     try:
-        response = await ollama.generate(client, prompt=prompt, model=model_name, options={"num_ctx": 8192})
+        response = await ollama.generate(client, prompt=prompt, model=engine_config.model, options={"num_ctx": 8192})
         return response.strip()
     except Exception as e:
         print(f"Memory Condensation Failed: {e}")
@@ -82,12 +84,19 @@ async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
 async def stream_chat(
     client: httpx.AsyncClient,
     messages: list,
+    *,
     workspace_id: str,
+    engine_config: EngineConfig,
+    tool_set: ResolvedToolSet,
     session_id: str = None,
-    model_name: str = "gemma4:e4b",
     is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
 ):
-    # Fetch the workspace once (needed for tool list, prompt, and model pin).
+    workspace_tools = tool_set.callables
+    effective_model = engine_config.model
+
+    # Substitute {tool_names} placeholder in the workspace's stored
+    # system prompt. We need the system_prompt from the DB but do NOT
+    # need a full workspace fetch — retrieve it with a targeted query.
     db = database.SessionLocal()
     try:
         workspace = db.query(models.Workspace).filter(
@@ -96,24 +105,15 @@ async def stream_chat(
         if not workspace:
             yield f"\n[Engine Error: Workspace {workspace_id} not found.]"
             return
-
-        workspace_tools, workspace_tool_defs = resolve_tools_for_workspace(workspace)
-        effective_model = resolve_model_for_request(workspace, model_name)
-
-        # Substitute {tool_names} placeholder in the workspace's stored
-        # system prompt.
-        tool_names = ", ".join(workspace_tools.keys())
-        system_content = (workspace.system_prompt or "").replace("{tool_names}", tool_names)
-
-        if workspace_tools:
-            tools_payload = workspace_tool_defs
-        else:
-            tools_payload = None
-
-        system_msg = {"role": "system", "content": system_content}
-        workspace_slug = workspace.slug
+        system_prompt_raw = workspace.system_prompt or ""
     finally:
         db.close()
+
+    tool_names = ", ".join(workspace_tools.keys())
+    system_content = system_prompt_raw.replace("{tool_names}", tool_names)
+
+    tools_payload = tool_set.definitions if workspace_tools else None
+    system_msg = {"role": "system", "content": system_content}
 
     memory_content = ""
     active_messages = []
@@ -192,8 +192,8 @@ async def stream_chat(
                             raw_args = {}
                     func = workspace_tools[func_name]
                     valid_params = inspect.signature(func).parameters.keys()
-                    if "workspace" in valid_params:
-                        raw_args["workspace"] = workspace_slug
+                    if "workspace_id" in valid_params:
+                        raw_args["workspace_id"] = workspace_id
                     if "session_id" in valid_params:
                         raw_args["session_id"] = session_id
 
@@ -274,7 +274,8 @@ async def stream_chat(
 async def generate_title(
     client: httpx.AsyncClient,
     prompt: str,
-    model_name: str = "gemma4:e4b",
+    *,
+    engine_config: EngineConfig,
 ) -> str:
     clean_prompt = re.sub(r'\[Attached_File:.*?\]', '', prompt).strip()
     if not clean_prompt:
@@ -283,7 +284,7 @@ async def generate_title(
     system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
 
     try:
-        text = await ollama.generate(client, prompt=system_prompt, model=model_name, options={"num_ctx": 4096})
+        text = await ollama.generate(client, prompt=system_prompt, model=engine_config.model, options={"num_ctx": 4096})
         text = text.strip(' \n"\'*.')
         if not text:
             return MICRO_PROMPTS["title_default"]

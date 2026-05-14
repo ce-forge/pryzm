@@ -9,7 +9,7 @@ export interface Workspace {
   display_name: string;
   system_prompt: string;
   enabled_tools: string[];
-  preferred_model: string | null;
+  model_name: string | null;  // engine_config.model from backend
   is_builtin: boolean;
   color: string | null;
   created_at: string;
@@ -25,7 +25,7 @@ export interface UpdatePayload {
   display_name?: string;
   system_prompt?: string;
   enabled_tools?: string[];
-  preferred_model?: string | null;
+  model_name?: string | null;  // writes to engine_config.model on the backend
   color?: string | null;
 }
 

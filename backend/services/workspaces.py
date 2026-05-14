@@ -3,7 +3,7 @@
 This module is the single owner of "given a workspace, what tools and what
 model do we use?" The tools/registry.py module is only the source of the
 declared tool registry; this module reads the workspace's stored config
-(enabled_tools, preferred_model) and resolves it against the live registry
+(enabled_tools, engine_config) and resolves it against the live registry
 at request time.
 """
 import os
@@ -66,16 +66,12 @@ def resolve_tools_for_workspace(workspace: models.Workspace) -> Tuple[dict, list
     return callables, definitions
 
 
-def resolve_model_for_request(
-    workspace: models.Workspace,
-    request_model: Optional[str],
-) -> str:
+def resolve_model_for_request(workspace: models.Workspace) -> str:
     """Pick the model name to send to Ollama for this chat call.
 
     Resolution order, most specific first:
-      1. workspace.preferred_model (if the workspace has pinned one)
-      2. request_model (whatever the global UI picker sent in the body)
-      3. hardcoded fallback "gemma4:e4b"
+      1. workspace.engine_config["model"] (if set)
+      2. hardcoded fallback "gemma4:e4b"
 
     NOTE: this function does NOT verify the chosen model is currently
     installed in Ollama. Validation happens at PATCH /workspaces time so
@@ -85,12 +81,10 @@ def resolve_model_for_request(
     that cost on a broken-but-rare configuration than a /api/tags
     round-trip on every chat call.
     """
-    if workspace.preferred_model:
-        return workspace.preferred_model
-    if request_model:
-        return request_model
-    # No default constant on backend; the frontend always sends a model.
-    # If somehow it didn't, hardcode the project default.
+    if workspace and workspace.engine_config:
+        model = workspace.engine_config.get("model")
+        if model:
+            return model
     return "gemma4:e4b"
 
 
@@ -122,32 +116,3 @@ def read_default_prompt(slug: str) -> str:
     path = os.path.join(PROMPTS_DIR, f"{slug}.txt")
     with open(path, "r") as f:
         return f.read().strip()
-
-
-# Default tool sets — same as the seed values in
-# backend/alembic/versions/58c8b7524030_add_workspaces_table.py
-# (IT_COPILOT_TOOLS / PERSONAL_TOOLS). Keep in sync when adding built-in
-# tools. Kept here so /reset doesn't have to re-import migration code.
-DEFAULT_ENABLED_TOOLS: dict[str, list[str]] = {
-    "it_copilot": [
-        "check_port", "dns_lookup", "execute_ping", "get_public_ip",
-        "rename_chat_session", "search_knowledge_base", "ssl_inspect", "traceroute",
-    ],
-    "personal": ["rename_chat_session", "search_knowledge_base"],
-}
-
-
-# Display names for the built-in workspaces. Used by /reset to restore the
-# canonical name if a user renamed a built-in. Same drift caveat as
-# DEFAULT_ENABLED_TOOLS — keep in sync with the migration's seed values.
-DEFAULT_DISPLAY_NAMES: dict[str, str] = {
-    "it_copilot": "IT Copilot",
-    "personal": "Personal",
-}
-
-
-# Default colors for built-in workspaces. Used by /reset and the migration seed.
-DEFAULT_COLORS: dict[str, str] = {
-    "personal": "orange",
-    "it_copilot": "blue",
-}

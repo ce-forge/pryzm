@@ -2,6 +2,10 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { Message } from "@/types/chat";
 import { apiFetch } from "@/utils/apiClient";
 
+// Cache key = workspace_slug:sessionId, matching the shape used in useSession.ts.
+const cacheKey = (workspaceSlug: string, sessionId: string): string =>
+  `${workspaceSlug}:${sessionId}`;
+
 export function useInference(
   workspace: string,
   setMessageCache: React.Dispatch<React.SetStateAction<Record<string, Message[]>>>,
@@ -29,13 +33,13 @@ export function useInference(
     let fullAssistantMessage = "";
 
     setMessageCache(prev => {
-      const existing = prev[optimisticId] || [];
+      const existing = prev[cacheKey(workspace, optimisticId)] || [];
       const newItems: Message[] = [];
       if (!skipUserAdd) {
         newItems.push({ id: `temp-${Date.now()}-u`, role: "user", content: text, timestamp: new Date().toISOString() });
       }
       newItems.push({ id: `temp-${Date.now()}-a`, role: "assistant", content: "", timestamp: new Date().toISOString() });
-      return { ...prev, [optimisticId]: [...existing, ...newItems] };
+      return { ...prev, [cacheKey(workspace, optimisticId)]: [...existing, ...newItems] };
     });
 
     if (!activeSessionId) onSessionCreated("temp_new_chat", optimisticId);
@@ -45,13 +49,13 @@ export function useInference(
     streamingSessionIdsRef.current.add(optimisticId);
 
     try {
-      const res = await apiFetch("/analyze", {
+      const res = await apiFetch(`/analyze?workspace=${encodeURIComponent(workspace)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: text,
           session_id: (activeSessionId === "temp_new_chat" || !activeSessionId) ? null : activeSessionId,
-          mode: workspace, model, attachments,
+          attachments,
           skip_db_save: skipUserAdd
         }),
         signal: controller.signal
@@ -98,7 +102,7 @@ export function useInference(
                 streamingSessionIdsRef.current.add(newDbId);
 
                 // Initialize the new bucket, but DO NOT delete optimistic yet!
-                setMessageCache(prev => ({ ...prev, [newDbId]: prev[optimisticId] || [] }));
+                setMessageCache(prev => ({ ...prev, [cacheKey(workspace, newDbId)]: prev[cacheKey(workspace, optimisticId)] || [] }));
                 setStreamingContent(prev => ({ ...prev, [newDbId]: prev[optimisticId] || "" }));
               }
               
@@ -123,7 +127,7 @@ export function useInference(
     } finally {
       setIsProcessing(false);
       setMessageCache(prev => {
-        const msgs = prev[optimisticId] || [];
+        const msgs = prev[cacheKey(workspace, optimisticId)] || [];
         if (msgs.length === 0) return prev;
         const newMsgs = [...msgs];
         newMsgs[newMsgs.length - 1] = { ...newMsgs[newMsgs.length - 1], content: fullAssistantMessage };
@@ -134,10 +138,10 @@ export function useInference(
         // during the URL change; once the stream ends, the real bucket owns
         // the conversation and the optimistic key can be discarded.
         if (realDbId !== null) {
-            const { [optimisticId]: _opt, ...rest } = prev;
-            return { ...rest, [realDbId]: newMsgs };
+            const { [cacheKey(workspace, optimisticId)]: _opt, ...rest } = prev;
+            return { ...rest, [cacheKey(workspace, realDbId)]: newMsgs };
         }
-        return { ...prev, [optimisticId]: newMsgs };
+        return { ...prev, [cacheKey(workspace, optimisticId)]: newMsgs };
       });
 
       setStreamingContent(prev => {

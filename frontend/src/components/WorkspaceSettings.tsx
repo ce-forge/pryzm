@@ -34,7 +34,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
 
   const [name, setName] = useState(workspace?.display_name ?? "");
   const [prompt, setPrompt] = useState(workspace?.system_prompt ?? "");
-  const [preferredModel, setPreferredModel] = useState<string | null>(workspace?.preferred_model ?? null);
+  const [preferredModel, setPreferredModel] = useState<string | null>(workspace?.model_name ?? null);
   const [enabledTools, setEnabledTools] = useState<string[]>(workspace?.enabled_tools ?? []);
   const [color, setColor] = useState<WorkspaceColor>(
     (workspace?.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR
@@ -79,7 +79,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       if (source) {
         setName(source.display_name);
         setPrompt(source.system_prompt);
-        setPreferredModel(source.preferred_model);
+        setPreferredModel(source.model_name);
         setEnabledTools([...source.enabled_tools]);
         setColor((source.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
       }
@@ -263,7 +263,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
                 const v = e.target.value || null;
                 setPreferredModel(v);
                 dirtyRef.current = true;
-                if (mode === "edit") save({ preferred_model: v });
+                if (mode === "edit") save({ model_name: v });
               }}
               className="w-full bg-[#131314] border border-[#333537] text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500"
             >

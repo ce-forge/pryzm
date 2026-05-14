@@ -4,6 +4,11 @@ import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
 import { Message } from "@/types/chat";
 
+// Cache key = workspace_slug:sessionId so switching workspaces doesn't bleed
+// cached history across different workspace contexts.
+const cacheKey = (workspaceSlug: string, sessionId: string): string =>
+  `${workspaceSlug}:${sessionId}`;
+
 export function useSession() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -19,9 +24,12 @@ export function useSession() {
   const isNavigatingRef = useRef(false);
 
   // Computed state for the UI
-  const activeCacheKey = currentSession || "temp_new_chat";
+  const activeCacheKey = cacheKey(workspace, currentSession || "temp_new_chat");
   const hasHistory = (messageCache[activeCacheKey]?.length || 0) > 0;
-  const isActivelyStreaming = streamingSessionIdsRef.current.has(activeCacheKey) || 
+  // streamingSessionIdsRef is keyed by raw session ids (not workspace-prefixed),
+  // so check the raw session id here, not activeCacheKey.
+  const activeRawId = currentSession || "temp_new_chat";
+  const isActivelyStreaming = streamingSessionIdsRef.current.has(activeRawId) ||
                                streamingSessionIdsRef.current.has("temp_new_chat");
   const isInitialLoading = !!currentSession && currentSession !== "temp_new_chat" && !hasHistory && !isActivelyStreaming;
   
@@ -56,7 +64,7 @@ export function useSession() {
       return;
     }
 
-    const cacheLen = messageCacheRef.current[currentSession]?.length || 0;
+    const cacheLen = messageCacheRef.current[cacheKey(workspace, currentSession)]?.length || 0;
 
     // We fetch if the cache is empty OR if we are forcing a sync (after AI finishes)
     if (force || cacheLen === 0) {
@@ -65,7 +73,7 @@ export function useSession() {
         if (historyRes.ok) {
           const historyData = await historyRes.json();
           // CRITICAL: This overwrites "temp-" IDs with real DB UUIDs
-          setMessageCache(prev => ({ ...prev, [currentSession]: historyData }));
+          setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: historyData }));
         }
       } catch (error) {
         console.error("History sync failed:", error);
@@ -104,7 +112,7 @@ export function useSession() {
    */
   const prefetchSession = useCallback(async (id: string): Promise<void> => {
     if (!id || id === "temp_new_chat" || id.startsWith("optimistic-")) return;
-    if (messageCacheRef.current[id]?.length) return;      // already cached
+    if (messageCacheRef.current[cacheKey(workspace, id)]?.length) return;  // already cached
     if (prefetchingRef.current.has(id)) return;           // already in-flight
 
     prefetchingRef.current.add(id);
@@ -112,7 +120,7 @@ export function useSession() {
       const res = await apiFetch(`/sessions/${id}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        setMessageCache(prev => ({ ...prev, [id]: data }));
+        setMessageCache(prev => ({ ...prev, [cacheKey(workspace, id)]: data }));
       }
     } catch {
       // Prefetch is best-effort; swallow errors silently.
@@ -132,6 +140,7 @@ export function useSession() {
   return {
     currentSession, setCurrentSession, sessionTitle, setSessionTitle,
     messages, messageCache, setMessageCache, workspace,
+    activeCacheKey,
     isNavigatingRef, streamingSessionIdsRef, isInitialLoading,
     navigateToSession, prefetchSession, router, urlSessionId
   };

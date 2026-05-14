@@ -103,3 +103,24 @@ def test_reset_accepts_builtin(db_session):
     db_session.add(ws_builtin)
     db_session.commit()
     _validate_resettable(ws_builtin)  # must not raise
+
+
+def test_builtin_workspaces_registry_has_expected_slugs():
+    """The two original builtins must be present in the registry."""
+    from services.builtins import BUILTIN_WORKSPACES
+    slugs = {b.slug for b in BUILTIN_WORKSPACES}
+    assert "it_copilot" in slugs
+    assert "personal" in slugs
+
+
+def test_builtin_record_has_required_fields():
+    """Each registry entry has all the fields the seed + reset code needs."""
+    from services.builtins import BUILTIN_WORKSPACES, BuiltinWorkspace
+    for b in BUILTIN_WORKSPACES:
+        assert isinstance(b, BuiltinWorkspace)
+        assert b.slug
+        assert b.display_name
+        assert b.system_prompt_file
+        assert isinstance(b.enabled_tools, list)
+        assert b.engine_config["backend"] == "ollama"
+        assert b.engine_config["model"]
