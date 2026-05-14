@@ -21,7 +21,7 @@ from config import settings
 from core.llm_metrics import emit_chat_metric, emit_embed_metric
 
 
-BASE_URL = settings.OLLAMA_URL.strip().rstrip("/")
+BASE_URL = settings.LLM_SERVER_URL.strip().rstrip("/")
 
 
 async def chat_stream(

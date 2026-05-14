@@ -24,7 +24,7 @@ class Settings(BaseSettings):
         return f"postgresql://{self.DB_USER}:{safe_password}@{self.DB_HOST}:{self.DB_PORT}/{self.DB_NAME}"
     
     REDIS_URL: str = "redis://127.0.0.1:6379"
-    OLLAMA_URL: str = "http://127.0.0.1:11434"
+    LLM_SERVER_URL: str = "http://127.0.0.1:8080"
 
     # Explicit allowlist. Combining "*" with allow_credentials=True (set in
     # main.py) is rejected by browsers, so wildcarding is off. Defaults to
@@ -39,10 +39,10 @@ class Settings(BaseSettings):
 
     MAXIMUM_TOOL_LOOPS: int = 8  # Max iterations of tool use before giving up and returning a fallback response
 
-    # Async HTTP timeouts for the Ollama client (see core/ollama.py).
+    # Async HTTP timeouts for the LLM server (see core/llm_server.py).
     # LLM_TIMEOUT_SECONDS replaces the hardcoded timeout=120 that bit us in Phase 2
     # when cold-loading 35B models took >120s. Bumping to 180 gives headroom.
-    OLLAMA_CONNECT_TIMEOUT_SECONDS: float = 5.0
+    LLM_CONNECT_TIMEOUT_SECONDS: float = 5.0
     LLM_TIMEOUT_SECONDS: float = 180.0
     TOOL_TIMEOUT_SECONDS: float = 30.0
 
