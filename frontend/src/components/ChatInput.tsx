@@ -5,10 +5,36 @@ import { APP_CONFIG } from "@/utils/constants";
 import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon } from "./Icons";
 import { CircularProgress } from "./CircularProgress";
 
-/** Squash long auto-generated camera filenames (Samsung gives photos
- *  32-char hex names) down to 8 chars of base + ext. Short, human-typed
- *  names pass through. The original full name is kept on file.name for
- *  the upload itself; this is purely display. */
+/** Hash-style names from Samsung's SAF temp camera captures (32-char
+ *  hex with no separators) propagate as-is through the upload pipeline
+ *  — pill, FormData, Document.filename, [Attached_File:] marker, and
+ *  the File Analyzed widget all show the full hash, which is noise.
+ *
+ *  Detect that shape and replace it with the first 8 chars so every
+ *  downstream surface sees the short name. We rewrap as a new File
+ *  (.name is read-only) preserving type + lastModified so the upload
+ *  payload is identical apart from the filename.
+ *
+ *  Names with separators (IMG_20240515_…, vacation_paris.jpg) or
+ *  short bases pass through untouched — those carry meaning. */
+function shortenIfHashName(file: File): File {
+  const dot = file.name.lastIndexOf(".");
+  const base = dot === -1 ? file.name : file.name.slice(0, dot);
+  const ext = dot === -1 ? "" : file.name.slice(dot);
+  if (base.length < 16 || !/^[a-zA-Z0-9]+$/.test(base)) {
+    return file;
+  }
+  return new File([file], `${base.slice(0, 8)}${ext}`, {
+    type: file.type,
+    lastModified: file.lastModified,
+  });
+}
+
+/** Fallback truncation for *legitimate* long filenames (e.g. a user
+ *  uploaded "my_very_long_descriptive_vacation_photo.jpg"). Hash names
+ *  are already short by the time they reach the pill thanks to
+ *  shortenIfHashName, so this rarely fires now. Kept as defensive
+ *  display layer. */
 function shortDisplayName(name: string): string {
   const dot = name.lastIndexOf(".");
   const base = dot === -1 ? name : name.slice(0, dot);
@@ -79,10 +105,14 @@ export default function ChatInput({
     handleKeyDown(e);
   };
 
-  const processFiles = (files: File[]) => {
+  const processFiles = (rawFiles: File[]) => {
     const validExts = [".txt", ".md", ".py", ".csv", ".json", ".log", ".yaml", ".yml", ".conf", ".ini", ".jpg", ".jpeg", ".png", ".webp", ".pdf"];
-    
-    const mappedUploads = files.map(file => {
+
+    const mappedUploads = rawFiles.map(rawFile => {
+      // Rename Samsung's hash-style camera captures before anything
+      // downstream sees the file. The short name then propagates
+      // through pill, FormData, Document.filename, and the marker.
+      const file = shortenIfHashName(rawFile);
       const isSupported = validExts.some(ext => file.name.toLowerCase().endsWith(ext)) || !file.name.includes(".");
       // Mint a blob URL for image MIMEs so the pill can render a real
       // thumbnail. Revoked on remove / clear / unmount in useUploader.
