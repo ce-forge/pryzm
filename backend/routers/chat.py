@@ -9,7 +9,7 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from core.engine_config import engine_config_for
-from services import knowledge, image_describe, image_storage
+from services import knowledge, image_describe, image_storage, pdf_extract
 from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
@@ -426,6 +426,16 @@ async def upload_document(
         # caption doesn't leak files on disk; done before ingest_document
         # so the Document row carries the path from the moment it exists.
         storage_path = image_storage.save_image(content, mime=content_type)
+    elif content_type == "application/pdf" or (file.filename or "").lower().endswith(".pdf"):
+        try:
+            text_content = await asyncio.to_thread(pdf_extract.extract_text, content)
+        except pdf_extract.InvalidPdf as e:
+            raise HTTPException(status_code=400, detail=f"Could not parse PDF: {e}")
+        if not text_content.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="No extractable text in this PDF. Scanned/image-only PDFs aren't supported yet.",
+            )
     else:
         try:
             text_content = content.decode("utf-8")

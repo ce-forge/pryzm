@@ -78,6 +78,11 @@ class Settings(BaseSettings):
     IMAGE_CAPTION_MAX_TOKENS: int = 600
     IMAGE_CAPTION_TEMPERATURE: float = 0.2
 
+    # PDF ingest knob (services/pdf_extract.py). Caps the per-upload page
+    # extraction count so a hostile input can't hang the worker; ordinary
+    # IT-flavored PDFs (configs, runbooks, manuals) sit well under this.
+    PDF_EXTRACT_PAGE_LIMIT: int = 200
+
     # When False (default), the network diagnostic tools refuse to operate on
     # RFC1918, loopback, link-local, multicast, CGNAT, and reserved IPs — and
     # also refuse any hostname that resolves to one of those ranges, defeating
