@@ -37,22 +37,31 @@ def _adapt_chat_response(data: dict) -> dict:
     """Translate OpenAI chat-completion response shape into the legacy
     Ollama shape ai_engine consumes.
 
-    OpenAI:  {choices: [{message: {role, content, tool_calls?}}], usage: {prompt_tokens, completion_tokens, ...}}
-    Ollama:  {message: {role, content, tool_calls?}, prompt_eval_count, eval_count, ...}
+    OpenAI:  {choices: [{message: {role, content, tool_calls?}}], usage: {prompt_tokens, completion_tokens, ...}, timings: {prompt_ms, predicted_ms, ...}}
+    Ollama:  {message: {role, content, tool_calls?}, prompt_eval_count, eval_count, prompt_eval_duration, eval_duration, total_duration}
 
-    Returns the Ollama-shaped dict. Drops fields ai_engine never reads."""
+    The `timings` block is llama-server's OpenAI extension — it carries
+    millisecond-precision split timings for prompt eval and generation.
+    Map them into Ollama's nanosecond-precision fields so Phase A's metric
+    emitter computes a real tokens_per_sec; if `timings` is absent (a
+    different OpenAI-compatible backend), all timing fields are 0 and the
+    metric emitter falls back to caller-measured wall clock for duration_ms
+    only."""
     choice = (data.get("choices") or [{}])[0]
     message = choice.get("message", {})
     usage = data.get("usage", {}) or {}
+    timings = data.get("timings", {}) or {}
+
+    prompt_ms = float(timings.get("prompt_ms", 0))
+    predicted_ms = float(timings.get("predicted_ms", 0))
+
     return {
         "message": message,
         "prompt_eval_count": int(usage.get("prompt_tokens", 0)),
         "eval_count": int(usage.get("completion_tokens", 0)),
-        # OpenAI doesn't expose nanosecond timings the way Ollama did; the
-        # metric emitter's fallback path uses caller-measured wall clock.
-        "prompt_eval_duration": 0,
-        "eval_duration": 0,
-        "total_duration": 0,
+        "prompt_eval_duration": int(prompt_ms * 1_000_000),
+        "eval_duration": int(predicted_ms * 1_000_000),
+        "total_duration": int((prompt_ms + predicted_ms) * 1_000_000),
     }
 
 

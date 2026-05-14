@@ -59,6 +59,45 @@ async def test_chat_returns_openai_message_dict():
 
 
 @pytest.mark.asyncio
+async def test_chat_adapts_llama_server_timings():
+    """llama-server adds a `timings` extension to the OpenAI response with
+    millisecond-precision prompt/predict splits. The adapter maps them into
+    Ollama's nanosecond fields so Phase A's metric emitter computes a real TPS."""
+    openai_response = {
+        "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        "usage": {"prompt_tokens": 17, "completion_tokens": 210, "total_tokens": 227},
+        "timings": {
+            "prompt_ms": 44.7,
+            "predicted_ms": 1730.3,
+            "predicted_per_second": 121.36,
+        },
+    }
+    client, _ = _make_mock_client(openai_response)
+    out = await llm_server.chat(client, messages=[], tools=None, model="m")
+    # ms → ns conversion: 44.7 * 1e6 = 44_700_000, 1730.3 * 1e6 = 1_730_300_000
+    assert out["prompt_eval_duration"] == 44_700_000
+    assert out["eval_duration"] == 1_730_300_000
+    assert out["total_duration"] == 44_700_000 + 1_730_300_000
+
+
+@pytest.mark.asyncio
+async def test_chat_handles_missing_timings_block():
+    """When the upstream server omits `timings` (a non-llama-server OpenAI
+    backend), all timing fields are 0 — the metric emitter falls back to
+    caller-measured wall clock for duration_ms."""
+    openai_response = {
+        "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        # no timings block
+    }
+    client, _ = _make_mock_client(openai_response)
+    out = await llm_server.chat(client, messages=[], tools=None, model="m")
+    assert out["prompt_eval_duration"] == 0
+    assert out["eval_duration"] == 0
+    assert out["total_duration"] == 0
+
+
+@pytest.mark.asyncio
 async def test_chat_passes_tool_calls_through():
     """When the model emits tool_calls, they flow through unchanged."""
     openai_response = {

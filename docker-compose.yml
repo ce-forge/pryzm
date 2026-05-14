@@ -26,7 +26,7 @@ services:
       - "127.0.0.1:8080:8080"
     volumes:
       - ./infra/llama-swap-config.yaml:/app/config.yaml:ro
-      - llama_models:/root/.cache/llama.cpp
+      - llama_models:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
