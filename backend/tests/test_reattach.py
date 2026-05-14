@@ -255,6 +255,107 @@ async def test_retrieve_relevant_chunks_falls_back_when_attached_filename_missin
     assert "exists.txt" in result["sources"]
 
 
+# ---------------------------------------------------------------------------
+# Tool-RAG side-channel: search_knowledge_base publishes image paths and
+# ai_engine.consume_pending_image_paths drains them.
+# ---------------------------------------------------------------------------
+
+def test_consume_pending_image_paths_starts_empty():
+    """Fresh context, nothing published yet → empty list."""
+    knowledge.consume_pending_image_paths()  # ensure-empty
+    assert knowledge.consume_pending_image_paths() == []
+
+
+def test_publish_then_consume_returns_paths_and_clears(tmp_path):
+    """Publish a set of image-bearing docs, then drain — second drain is empty."""
+    knowledge.consume_pending_image_paths()  # clear any leftover
+
+    a = tmp_path / "a.png"; a.write_bytes(b"a")
+    b = tmp_path / "b.png"; b.write_bytes(b"b")
+
+    class FakeDoc:
+        def __init__(self, p): self.storage_path = p
+
+    knowledge._publish_pending_image_paths([FakeDoc(str(a)), FakeDoc(str(b))])
+    first = knowledge.consume_pending_image_paths()
+    assert first == [str(a), str(b)]
+    assert knowledge.consume_pending_image_paths() == []
+
+
+def test_publish_dedupes_within_a_batch(tmp_path):
+    """Same path published twice (same doc surfaced by two queries) only
+    shows up once in the consumed list."""
+    knowledge.consume_pending_image_paths()  # clear
+
+    p = tmp_path / "shared.png"; p.write_bytes(b"x")
+
+    class FakeDoc:
+        def __init__(self, p): self.storage_path = p
+
+    knowledge._publish_pending_image_paths([FakeDoc(str(p))])
+    knowledge._publish_pending_image_paths([FakeDoc(str(p))])
+
+    assert knowledge.consume_pending_image_paths() == [str(p)]
+
+
+def test_search_knowledge_base_publishes_image_doc_paths(db_session, tmp_path, monkeypatch):
+    """When search_knowledge_base hits chunks whose Documents have a
+    storage_path, those paths land in the pending-image queue. Text-only
+    docs don't publish anything."""
+    from tools.retrieval import search_knowledge_base
+    from db.database import SessionLocal as _SL
+
+    knowledge.consume_pending_image_paths()
+
+    ws = models.Workspace(
+        id="ws-tool-rag", slug="tool-rag", display_name="T",
+        system_prompt="", enabled_tools=[], is_builtin=False,
+        engine_config={"backend": "llama_cpp"},
+    )
+    img_path = tmp_path / "rag_target.png"; img_path.write_bytes(b"img")
+    image_doc = models.Document(
+        id="doc-img-tool", filename="rag_target.png", workspace_id="ws-tool-rag",
+        is_global=True, storage_path=str(img_path),
+    )
+    text_doc = models.Document(
+        id="doc-txt-tool", filename="notes.txt", workspace_id="ws-tool-rag",
+        is_global=True, storage_path=None,
+    )
+    image_chunk = models.DocumentChunk(
+        id="chk-img-tool", document_id="doc-img-tool", workspace_id="ws-tool-rag",
+        content="An image of a router rack in a data center.", embedding=[0.1] * 768,
+    )
+    text_chunk = models.DocumentChunk(
+        id="chk-txt-tool", document_id="doc-txt-tool", workspace_id="ws-tool-rag",
+        content="Operating procedure for the rack.", embedding=[0.1] * 768,
+    )
+    db_session.add_all([ws, image_doc, text_doc, image_chunk, text_chunk])
+    db_session.commit()
+
+    # Make the tool see our test DB instead of the dev DB.
+    monkeypatch.setattr("tools.retrieval.SessionLocal", lambda: db_session)
+    # Bypass embedding HTTP — return a vector that will match the seeded chunks
+    # via the cosine search OR the ILIKE fallback.
+    monkeypatch.setattr(knowledge, "_query_chunks_by_vector",
+                        lambda db, vec, q, ws_id, sess_id=None, threshold=0.45, top_k=3:
+                            db.query(models.DocumentChunk)
+                              .filter_by(workspace_id=ws_id).all())
+    # Also short-circuit search_chunks_sync's embedding HTTP.
+    import requests as _rq
+    class _DummyResp:
+        def raise_for_status(self): pass
+        def json(self): return {"data": [{"embedding": [0.1] * 768}]}
+    monkeypatch.setattr(_rq, "post", lambda *a, **kw: _DummyResp())
+
+    result = search_knowledge_base(queries=["rack"], workspace_id="ws-tool-rag")
+    assert "rack" in result.lower()
+
+    published = knowledge.consume_pending_image_paths()
+    assert published == [str(img_path)], (
+        f"expected only the image doc's path; got {published!r}"
+    )
+
+
 @pytest.mark.asyncio
 async def test_retrieve_relevant_chunks_omits_reattach_for_text_docs(
     db_session,
