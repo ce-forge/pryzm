@@ -9,7 +9,7 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from core.engine_config import engine_config_for
-from services import knowledge, ocr
+from services import knowledge, image_describe
 from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
@@ -415,17 +415,12 @@ async def upload_document(
     content = bytes(buf)
     content_type = (file.content_type or "").lower()
     if content_type.startswith("image/"):
-        if content_type not in {"image/jpeg", "image/png", "image/webp"}:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported image type: {file.content_type}. Supported: jpeg, png, webp.",
-            )
         try:
-            text_content = await asyncio.to_thread(ocr.extract_text, content)
-        except ocr.InvalidImage:
-            raise HTTPException(status_code=400, detail="Image bytes could not be decoded as a valid image.")
+            text_content = await image_describe.describe(http_client, content, mime=content_type)
+        except image_describe.InvalidImage as e:
+            raise HTTPException(status_code=400, detail=str(e))
         if not text_content.strip():
-            raise HTTPException(status_code=422, detail="No text could be extracted from this image.")
+            raise HTTPException(status_code=422, detail="The model returned no description for this image.")
     else:
         try:
             text_content = content.decode("utf-8")

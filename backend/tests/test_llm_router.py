@@ -33,8 +33,8 @@ def test_build_catalog_from_real_yaml():
     assert "gemma-4-E4B-it" in catalog
     assert "nomic-embed-text-v1.5" in catalog
     assert catalog["nomic-embed-text-v1.5"] == {"embedding"}
-    assert catalog["gemma-4-E2B-it"] == set()
-    assert catalog["gemma-4-E4B-it"] == set()
+    assert catalog["gemma-4-E2B-it"] == {"vision"}
+    assert catalog["gemma-4-E4B-it"] == {"vision"}
 
 
 # ---------------------------------------------------------------------------

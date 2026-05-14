@@ -1,7 +1,7 @@
 # Image Upload + OCR — Design Spec
 
 - **Date**: 2026-05-15
-- **Status**: Draft, autonomous-session output. Pending user review on wake.
+- **Status**: **Superseded by `docs/specs/2026-05-15-image-upload-vlm.md`.** The rapidocr-based ingestion path described here landed in PR #21; the follow-up VLM spec rips it out in favor of using Gemma-4's built-in vision capability (which was already loaded by llama-swap via the auto-mmproj behavior of `-hf`). Keep this file for historical reference.
 - **Predecessor**: future-features Item 5 sub-item "image upload + analysis" from `docs/internal/2026-05-14-future-features.md`.
 - **Branch context**: cut from `main` at 851db2e.
 

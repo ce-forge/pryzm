@@ -32,9 +32,10 @@ models:
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
     groups: ["always-on"]
-    # Capability tags consumed by the Router. `vision` is reserved for
-    # the day image input ships.
-    tags: []
+    # Capability tags consumed by the Router. mmproj is auto-downloaded
+    # by `-hf`, so image input flows through `/v1/chat/completions` with
+    # `image_url` content blocks out of the box.
+    tags: ["vision"]
 
   # Tier-2 default (larger). HARDCODED DEFAULT for Phase B1 — every chat call
   # uses this until the router lands in B2.
@@ -45,7 +46,7 @@ models:
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
     groups: ["chat"]
-    tags: []
+    tags: ["vision"]
 
   # Embedding model — pinned always-on so RAG queries don't pay swap cost.
   "nomic-embed-text-v1.5":
