@@ -92,7 +92,6 @@ async def stream_chat(
     is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
 ):
     workspace_tools = tool_set.callables
-    effective_model = engine_config.model
 
     # Substitute {tool_names} placeholder in the workspace's stored
     # system prompt. We need the system_prompt from the DB but do NOT
