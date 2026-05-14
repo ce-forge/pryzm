@@ -39,6 +39,17 @@ interface SessionContextValue {
     fromSessionId: string,
     toSessionId: string,
   ) => boolean;
+  /**
+   * Swap temp- IDs on the last user and/or assistant messages of a session
+   * for their real DB UUIDs. Called inline from the SSE handler so the cache
+   * has real IDs without any post-stream /sessions/{id} refetch.
+   */
+  swapMessageIds: (
+    workspaceSlug: string,
+    sessionId: string,
+    userMessageId: string | null,
+    assistantMessageId: string | null,
+  ) => void;
   notifySessionCreated: (
     optimisticSessionId: string,
     realSessionId: string,
@@ -50,7 +61,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const session = useSession();
-  const { setMessageCache, loadSessionData } = session;
+  const { setMessageCache, refreshSessionMeta } = session;
 
   const sessionCreatedListenersRef = useRef<Set<() => void>>(new Set());
 
@@ -110,12 +121,44 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [setMessageCache],
   );
 
+  // Swap optimistic temp-u / temp-a ids on the last two messages of this
+  // session's cache bucket for their real DB UUIDs. The SSE stream now
+  // delivers these ids inline, so the post-stream message refetch is gone —
+  // along with the race window between "stream ends" and "DB fetch resolves"
+  // that the rapid-sends test was catching.
+  const swapMessageIds = useCallback(
+    (ws: string, sid: string, userId: string | null, assistantId: string | null) => {
+      if (!userId && !assistantId) return;
+      const key = cacheKey(ws, sid);
+      setMessageCache((prev) => {
+        const msgs = prev[key];
+        if (!msgs || msgs.length === 0) return prev;
+        const next = [...msgs];
+        // Walk backwards: last message is the assistant turn just streamed;
+        // the message before it is the user turn that triggered it.
+        for (let i = next.length - 1; i >= 0 && i >= next.length - 2; i--) {
+          const m = next[i];
+          if (!m.id || !m.id.startsWith("temp-")) continue;
+          if (m.role === "assistant" && assistantId) {
+            next[i] = { ...m, id: assistantId };
+          } else if (m.role === "user" && userId) {
+            next[i] = { ...m, id: userId };
+          }
+        }
+        return { ...prev, [key]: next };
+      });
+    },
+    [setMessageCache],
+  );
+
   const notifySessionCreated = useCallback(
     (_optimisticId: string, _realId: string) => {
-      loadSessionData(true);
+      // Title refresh only — message-history refetch is no longer needed
+      // because the SSE stream delivers real message ids inline.
+      refreshSessionMeta();
       sessionCreatedListenersRef.current.forEach((fn) => fn());
     },
-    [loadSessionData],
+    [refreshSessionMeta],
   );
 
   const subscribeSessionCreated = useCallback((fn: () => void) => {
@@ -141,6 +184,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       finalizeAssistantMessage,
       replaceMessages,
       migrateBucket,
+      swapMessageIds,
       notifySessionCreated,
       subscribeSessionCreated,
     }),
@@ -159,6 +203,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       finalizeAssistantMessage,
       replaceMessages,
       migrateBucket,
+      swapMessageIds,
       notifySessionCreated,
       subscribeSessionCreated,
     ],
