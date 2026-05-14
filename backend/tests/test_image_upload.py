@@ -124,6 +124,69 @@ async def test_document_delete_cleans_up_storage_file(db_session, monkeypatch, t
     assert not os.path.exists(path), "storage file should be cleaned up on Document delete"
 
 
+def test_delete_document_endpoint_removes_row_and_file(db_session, monkeypatch, tmp_path):
+    """DELETE /documents/{id} hard-deletes the row; the after_delete
+    listener then cleans up the on-disk file. Used by the frontend
+    when the user cancels an upload pill before sending."""
+    from fastapi.testclient import TestClient
+    from main import app
+    from db import database
+    from config import settings
+
+    monkeypatch.setattr(image_storage, "_UPLOADS_DIR", str(tmp_path / "uploads"))
+    ws = _seed_workspace(db_session, slug="img-endpoint-delete")
+    path = image_storage.save_image(b"img-bytes", mime="image/png")
+
+    doc = models.Document(
+        id="doc-to-delete",
+        filename="cancel-me.png",
+        workspace_id=ws.id,
+        is_global=False,
+        storage_path=path,
+    )
+    db_session.add(doc); db_session.commit()
+    assert os.path.exists(path)
+
+    def _get_db_override():
+        yield db_session
+    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
+    monkeypatch.setattr(database, "init_db", lambda: None)
+    app.dependency_overrides[database.get_db] = _get_db_override
+    try:
+        with TestClient(app) as c:
+            c.headers.update({"Authorization": "Bearer test-token"})
+            resp = c.delete("/documents/doc-to-delete")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "deleted"}
+        assert db_session.query(models.Document).filter_by(id="doc-to-delete").first() is None
+        assert not os.path.exists(path), "after_delete listener should have unlinked the file"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_delete_document_endpoint_404_when_missing(db_session, monkeypatch):
+    """DELETE /documents/{id} returns 404 for an unknown id (idempotent
+    enough — if the frontend retries on a stale pill, the second call
+    is a no-op the user doesn't see)."""
+    from fastapi.testclient import TestClient
+    from main import app
+    from db import database
+    from config import settings
+
+    def _get_db_override():
+        yield db_session
+    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
+    monkeypatch.setattr(database, "init_db", lambda: None)
+    app.dependency_overrides[database.get_db] = _get_db_override
+    try:
+        with TestClient(app) as c:
+            c.headers.update({"Authorization": "Bearer test-token"})
+            resp = c.delete("/documents/nope")
+        assert resp.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
 @pytest.mark.asyncio
 async def test_ingest_document_persists_storage_path(db_session, monkeypatch):
     """ingest_document writes the storage_path kwarg onto the Document row."""

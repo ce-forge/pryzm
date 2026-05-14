@@ -465,6 +465,26 @@ async def upload_document(
         "session_id": active_session_id,
     }
 
+
+@router.delete("/documents/{document_id}")
+def delete_document(document_id: str, db: Session = Depends(database.get_db)):
+    """Hard-delete a Document + its chunks + its on-disk file.
+
+    Called by the frontend when the user removes an upload pill before
+    sending the prompt. Without this the Document, its embeddings, and
+    the saved bytes would sit orphaned in the workspace forever.
+
+    Chunks cascade via the FK; the on-disk file is unlinked by the
+    after_delete event listener on Document (db/models.py).
+    """
+    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+    db.delete(doc)
+    db.commit()
+    return {"status": "deleted"}
+
+
 @router.get("/folders")
 def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
     ws = get_or_default(db, workspace)

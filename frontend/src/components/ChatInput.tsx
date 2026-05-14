@@ -2,6 +2,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { FileUpload } from "@/types/chat";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { APP_CONFIG } from "@/utils/constants";
+import { apiFetch } from "@/utils/apiClient";
 import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon } from "./Icons";
 import { CircularProgress } from "./CircularProgress";
 
@@ -141,6 +142,14 @@ export default function ChatInput({
   const removeUpload = (id: string) => setUploads(prev => {
     const removed = prev.find(up => up.id === id);
     if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    // If the upload completed on the server, free the Document row +
+    // chunks + on-disk bytes server-side. Without this, cancelled
+    // pre-send uploads stay orphaned in the workspace forever.
+    // Fire-and-forget; if the request fails the orphan is non-fatal.
+    if (removed?.document_id) {
+      apiFetch(`/documents/${removed.document_id}`, { method: "DELETE" })
+        .catch(() => {});
+    }
     return prev.filter(up => up.id !== id);
   });
 
