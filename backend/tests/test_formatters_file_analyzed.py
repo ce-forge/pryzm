@@ -1,51 +1,32 @@
-"""Unit tests for format_file_analyzed's thumbnail-embedding behavior.
+"""Unit tests for format_file_analyzed.
 
-The function is called by ai_engine when the auto-RAG path produces
-retrieved context. With image-bearing chunks (Documents whose
-storage_path resolves on disk), the formatter embeds base64 data URLs
-inline so the frontend renders thumbnails inside the same blockquote.
+Earlier versions of this seam embedded base64 image data inline for a
+thumbnail in the assistant turn. That added megabytes of base64 to
+every saved assistant message and froze the chat-load UI; the embed
+was reverted (see git log for the formatter file). These tests pin
+the simple-source-line shape so we don't drift back into embedding.
 """
 from __future__ import annotations
-
-import os
 
 from utils.formatters import format_file_analyzed
 
 
-def test_no_image_paths_keeps_existing_shape():
-    """Backwards-compat: callers passing only `sources` get the original
-    blockquote line."""
+def test_single_source_shape():
     out = format_file_analyzed(["notes.md"])
     assert "**File Analyzed:** `notes.md`" in out
     assert "data:image/" not in out
 
 
-def test_image_paths_embedded_as_data_urls(tmp_path):
-    """Real on-disk PNG → emitted as a base64 data URL inside the
-    blockquote so the markdown renderer renders the thumbnail."""
-    img = tmp_path / "shot.png"
-    img.write_bytes(b"png-bytes")
-    out = format_file_analyzed(["shot.png"], image_paths=[str(img)])
-    assert "**File Analyzed:** `shot.png`" in out
-    assert "![attached image](data:image/png;base64," in out
-
-
-def test_missing_image_path_skipped_silently(tmp_path):
-    """Stale or deleted storage path → the source line still renders, no
-    broken thumbnail markup."""
-    out = format_file_analyzed(
-        ["shot.png"], image_paths=[str(tmp_path / "gone.png")]
-    )
-    assert "**File Analyzed:** `shot.png`" in out
+def test_multiple_sources_joined_with_comma():
+    out = format_file_analyzed(["a.jpg", "b.png"])
+    assert "`a.jpg, b.png`" in out
     assert "data:image/" not in out
 
 
-def test_multiple_paths_one_thumbnail_per_image(tmp_path):
-    a = tmp_path / "a.jpg"; a.write_bytes(b"a")
-    b = tmp_path / "b.png"; b.write_bytes(b"b")
-    out = format_file_analyzed(
-        ["a.jpg", "b.png"], image_paths=[str(a), str(b)]
-    )
-    assert out.count("![attached image](data:image/") == 2
-    assert "data:image/jpeg;base64," in out
-    assert "data:image/png;base64," in out
+def test_function_signature_does_not_accept_image_paths():
+    """The image_paths kwarg was removed deliberately. If a future
+    refactor re-adds it, this test will fail loudly so the change is
+    revisited intentionally."""
+    import inspect
+    params = list(inspect.signature(format_file_analyzed).parameters)
+    assert params == ["sources"]
