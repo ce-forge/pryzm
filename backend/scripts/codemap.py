@@ -2,7 +2,7 @@
 
 Crawls backend/ and frontend/src/, extracts file-level imports and
 frontend->backend API calls, renders a Cytoscape.js graph with
-Frontend / Backend / Tests zones.
+Frontend / Backend / Tests zones as horizontal bands with shaded regions.
 
 Usage:
     cd backend
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ast
 import json
+import math
 import re
 from pathlib import Path
 
@@ -306,67 +307,179 @@ def _normalize_relative(importer_dir: str, imp: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Layout & HTML rendering
+# Layout constants
 # ---------------------------------------------------------------------------
 
-# Zone x-centres (horizontal columns).
-ZONE_X: dict[str, int] = {"frontend": 250, "backend": 950, "tests": 1650}
+NODE_W = 20            # node diameter
+NODE_H = 20
+LABEL_SPACE = 140      # room for filename label beside each node
+ROW_SPACING = 30       # vertical gap between nodes in a column
+COL_W = NODE_W + LABEL_SPACE + 24   # horizontal width per file column
+MAX_ROWS_PER_COL = 12  # max files before adding a second column in a subgroup
+SUBGROUP_PADDING_X = 18
+SUBGROUP_PADDING_Y = 32   # top padding inside subgroup (room for subgroup label)
+SUBGROUP_GAP_X = 22       # horizontal gap between subgroups within a zone
+ZONE_PADDING_X = 28
+ZONE_PADDING_Y = 36       # top padding inside zone band (room for zone label)
+ZONE_GAP_Y = 50           # vertical gap between zone bands
+BAND_START_Y = 80         # Y position where the first zone starts (below header)
 
-# Preferred vertical ordering of sub-groups within each zone.
+# Preferred sub-group ordering within each zone.
 GROUP_ORDER: dict[str, list[str]] = {
     "frontend": ["app", "context", "hooks", "components", "utils", "types", "data"],
     "backend": ["routers", "services", "core", "tools", "db", "utils", "root", "unmatched"],
     "tests": ["unit", "smoke", "e2e"],
 }
 
-GROUP_LABEL_GAP = 55   # extra y-space before each new group (acts as a visual header)
-NODE_STEP = 40         # y-pixels between consecutive nodes in a group
+ZONE_ORDER = ["frontend", "backend", "tests"]
 
 
-def render_html(nodes: list, edges: list) -> str:
-    """Assign preset positions and return the full HTML string."""
-    # Bucket nodes by (zone, group).
+# ---------------------------------------------------------------------------
+# Layout computation
+# ---------------------------------------------------------------------------
+
+def _subgroup_size(num_files: int) -> tuple[int, int, int]:
+    """Return (num_cols, rows_in_last_col, pixel_width, pixel_height)."""
+    num_cols = max(1, math.ceil(num_files / MAX_ROWS_PER_COL))
+    rows = math.ceil(num_files / num_cols) if num_cols > 0 else 1
+    width = num_cols * COL_W + 2 * SUBGROUP_PADDING_X
+    height = rows * ROW_SPACING + SUBGROUP_PADDING_Y + 16  # 16 = bottom pad
+    return num_cols, rows, width, height
+
+
+def compute_positions(nodes: list[dict]) -> tuple[list[dict], list[dict], dict]:
+    """Assign positions to leaf nodes; return (positioned_nodes, compound_nodes, zone_bands).
+
+    zone_bands maps zone_id -> {"y_start": int, "y_end": int}.
+    compound_nodes are the zone + subgroup parent nodes (no position needed for compounds).
+    """
+    # Bucket leaf nodes by (zone, group).
     by_zone_group: dict[tuple[str, str], list[dict]] = {}
     for n in nodes:
         key = (n["data"]["zone"], n["data"]["group"])
         by_zone_group.setdefault(key, []).append(n)
 
-    cur_y: dict[str, float] = {z: 80 for z in ["frontend", "backend", "tests"]}
-
+    compound_nodes: list[dict] = []
     positioned: list[dict] = []
+    zone_bands: dict[str, dict] = {}
 
-    for zone in ["frontend", "backend", "tests"]:
+    current_band_y = BAND_START_Y
+
+    for zone in ZONE_ORDER:
+        zone_id = f"zone_{zone}"
         known_order = GROUP_ORDER.get(zone, [])
         all_groups = sorted({g for (z, g) in by_zone_group if z == zone})
         ordered_groups = [g for g in known_order if g in all_groups] + [
             g for g in all_groups if g not in known_order
         ]
 
+        # First pass: calculate max subgroup height for this zone row.
+        # All subgroups in a zone sit side by side horizontally.
+        # We need to find the tallest subgroup to know the band height.
+        subgroup_data: list[dict] = []
         for group in ordered_groups:
             group_nodes = by_zone_group.get((zone, group), [])
             if not group_nodes:
                 continue
             group_nodes.sort(key=lambda n: n["data"]["label"])
-            cur_y[zone] += GROUP_LABEL_GAP
-            for n in group_nodes:
-                n["position"] = {"x": ZONE_X[zone], "y": cur_y[zone]}
+            num_cols, rows, sg_width, sg_height = _subgroup_size(len(group_nodes))
+            subgroup_data.append({
+                "group": group,
+                "nodes": group_nodes,
+                "num_cols": num_cols,
+                "rows": rows,
+                "sg_width": sg_width,
+                "sg_height": sg_height,
+            })
+
+        if not subgroup_data:
+            continue
+
+        max_sg_height = max(s["sg_height"] for s in subgroup_data)
+        band_inner_height = max_sg_height + ZONE_PADDING_Y + 16
+        band_y_start = current_band_y
+        band_y_end = current_band_y + band_inner_height
+        zone_bands[zone_id] = {"y_start": band_y_start, "y_end": band_y_end}
+
+        # Add zone compound node (no position — compound auto-sizes in Cytoscape).
+        compound_nodes.append({
+            "data": {
+                "id": zone_id,
+                "label": zone.upper(),
+                "zone": zone,
+                "kind": "zone_compound",
+            }
+        })
+
+        # Second pass: place subgroups left-to-right.
+        current_sg_x = ZONE_PADDING_X
+
+        for s in subgroup_data:
+            group = s["group"]
+            group_nodes = s["nodes"]
+            num_cols = s["num_cols"]
+            rows = s["rows"]
+            sg_width = s["sg_width"]
+
+            sg_id = f"subgroup_{zone}_{group}"
+
+            # Add subgroup compound node.
+            compound_nodes.append({
+                "data": {
+                    "id": sg_id,
+                    "label": group,
+                    "zone": zone,
+                    "group": group,
+                    "kind": "subgroup_compound",
+                    "parent": zone_id,
+                }
+            })
+
+            # Place leaf nodes inside the subgroup.
+            # Origin: top-left of subgroup content area.
+            # In Cytoscape preset layout, positions are the CENTER of each node.
+            # We position relative to an absolute canvas coordinate.
+            # Zone starts at band_y_start; subgroup content starts after zone+subgroup padding.
+            sg_origin_x = current_sg_x + SUBGROUP_PADDING_X + NODE_W / 2
+            sg_origin_y = band_y_start + ZONE_PADDING_Y + SUBGROUP_PADDING_Y + NODE_H / 2
+
+            for idx, n in enumerate(group_nodes):
+                col = idx % num_cols
+                row = idx // num_cols
+                x = sg_origin_x + col * COL_W
+                y = sg_origin_y + row * ROW_SPACING
+                n["position"] = {"x": x, "y": y}
+                # Assign parent to compound subgroup node.
+                n["data"]["parent"] = sg_id
                 positioned.append(n)
-                cur_y[zone] += NODE_STEP
 
-    # Compute zone background panel heights for the SVG overlay.
-    zone_heights: dict[str, float] = {}
-    for zone in ["frontend", "backend", "tests"]:
-        zone_heights[zone] = cur_y[zone] + 60  # padding below last node
+            current_sg_x += sg_width + SUBGROUP_GAP_X
 
-    max_height = max(zone_heights.values())
+        current_band_y = band_y_end + ZONE_GAP_Y
 
-    elements_json = json.dumps(positioned + edges, indent=None)
-    zone_heights_json = json.dumps(zone_heights)
+    return positioned, compound_nodes, zone_bands
+
+
+# ---------------------------------------------------------------------------
+# HTML rendering
+# ---------------------------------------------------------------------------
+
+def render_html(nodes: list, edges: list) -> str:
+    """Assign preset positions, inject compound parent nodes, return HTML."""
+    # Separate phantom nodes (they have zone/group but no real path) from the rest.
+    # All nodes go through compute_positions.
+    positioned, compound_nodes, zone_bands = compute_positions(nodes)
+
+    # Combine: compound parents first (Cytoscape requires parents before children
+    # when using the array form — but the JS side handles it fine either way).
+    all_elements = compound_nodes + positioned + edges
+
+    elements_json = json.dumps(all_elements, indent=None)
+    zone_bands_json = json.dumps(zone_bands)
 
     html = _HTML_TEMPLATE
     html = html.replace("__ELEMENTS_JSON__", elements_json)
-    html = html.replace("__ZONE_HEIGHTS_JSON__", zone_heights_json)
-    html = html.replace("__MAX_HEIGHT__", str(int(max_height + 200)))
+    html = html.replace("__ZONE_BANDS_JSON__", zone_bands_json)
     return html
 
 
@@ -418,9 +531,9 @@ html, body {
     <span class="li"><span class="sw" style="background:#f97316"></span>Backend route</span>
     <span class="li"><span class="sw" style="background:#a855f7"></span>Tests</span>
     <span class="li"><span class="sw" style="background:#ef4444"></span>Phantom (unmatched API)</span>
-    <span class="li"><span class="sw" style="background:#444;border:1px solid #888"></span>Import edge (solid)</span>
+    <span class="li"><span class="sw" style="background:#444;border:1px solid #888"></span>Import (solid)</span>
     <span class="li"><span class="sw" style="background:transparent;border:2px dashed #f97316"></span>API call (dashed)</span>
-    <span class="li"><span class="sw" style="background:transparent;border:2px dashed #ef4444"></span>Unmatched API (red dashed)</span>
+    <span class="li"><span class="sw" style="background:transparent;border:2px dashed #ef4444"></span>Unmatched API</span>
   </div>
   <div id="stats"></div>
 </div>
@@ -429,30 +542,19 @@ html, body {
 
 <script>
 const elements = __ELEMENTS_JSON__;
-const zoneHeights = __ZONE_HEIGHTS_JSON__;
-const maxHeight = __MAX_HEIGHT__;
-
-// Zone background parameters (drawn as SVG underlay via pan/zoom events).
-const ZONE_X = { frontend: 250, backend: 950, tests: 1650 };
-const ZONE_WIDTH = 340;
-const ZONE_COLORS = {
-  frontend: "rgba(59,130,246,0.07)",
-  backend:  "rgba(34,197,94,0.07)",
-  tests:    "rgba(168,85,247,0.07)",
-};
-const ZONE_LABELS = { frontend: "FRONTEND", backend: "BACKEND", tests: "TESTS" };
+const zoneBands = __ZONE_BANDS_JSON__;
 
 function nodeColor(d) {
-  if (d.kind === "phantom") return "#ef4444";
-  if (d.kind === "route")   return "#f97316";
-  if (d.zone === "frontend") return "#3b82f6";
-  if (d.zone === "tests")    return "#a855f7";
+  if (d.kind === "phantom")    return "#ef4444";
+  if (d.kind === "route")      return "#f97316";
+  if (d.zone === "frontend")   return "#3b82f6";
+  if (d.zone === "tests")      return "#a855f7";
   return "#22c55e";
 }
 
 function nodeBorderColor(d) {
-  if (d.kind === "phantom") return "#b91c1c";
-  if (d.kind === "api_consumer") return "#93c5fd";
+  if (d.kind === "phantom")        return "#b91c1c";
+  if (d.kind === "api_consumer")   return "#93c5fd";
   return "#27272a";
 }
 
@@ -460,9 +562,72 @@ const cy = cytoscape({
   container: document.getElementById("cy"),
   elements,
   layout: { name: "preset" },
+
+  // Lock nodes — no dragging.
+  autoungrabify: true,
+  userZoomingEnabled: true,
+  userPanningEnabled: true,
+  boxSelectionEnabled: false,
+
   style: [
+    // ---- Zone compound nodes ----
     {
-      selector: "node",
+      selector: 'node[kind = "zone_compound"]',
+      style: {
+        "background-opacity": 0.08,
+        "background-color": ele => {
+          const z = ele.data("zone");
+          return z === "frontend" ? "#3b82f6" : z === "backend" ? "#22c55e" : "#a855f7";
+        },
+        "border-width": 1.5,
+        "border-color": ele => {
+          const z = ele.data("zone");
+          return z === "frontend" ? "#3b82f6" : z === "backend" ? "#22c55e" : "#a855f7";
+        },
+        "border-opacity": 0.35,
+        "label": "data(label)",
+        "color": ele => {
+          const z = ele.data("zone");
+          return z === "frontend" ? "#60a5fa" : z === "backend" ? "#4ade80" : "#c084fc";
+        },
+        "font-size": "14px",
+        "font-weight": "700",
+        "text-valign": "top",
+        "text-halign": "center",
+        "text-margin-y": -6,
+        "padding": "36px",
+        "shape": "roundrectangle",
+      }
+    },
+    // ---- Subgroup compound nodes ----
+    {
+      selector: 'node[kind = "subgroup_compound"]',
+      style: {
+        "background-opacity": 0.12,
+        "background-color": ele => {
+          const z = ele.data("zone");
+          return z === "frontend" ? "#3b82f6" : z === "backend" ? "#22c55e" : "#a855f7";
+        },
+        "border-width": 1,
+        "border-color": ele => {
+          const z = ele.data("zone");
+          return z === "frontend" ? "#3b82f6" : z === "backend" ? "#22c55e" : "#a855f7";
+        },
+        "border-opacity": 0.25,
+        "label": "data(label)",
+        "color": "#9ca3af",
+        "font-size": "10px",
+        "font-weight": "600",
+        "text-valign": "top",
+        "text-halign": "center",
+        "text-margin-y": -2,
+        "padding": "18px",
+        "shape": "roundrectangle",
+      }
+    },
+    // ---- Leaf file nodes ----
+    {
+      selector: "node[kind != 'zone_compound'][kind != 'subgroup_compound']",
       style: {
         "background-color": ele => nodeColor(ele.data()),
         "label": "data(label)",
@@ -478,16 +643,25 @@ const cy = cytoscape({
         "shape": ele => ele.data("kind") === "phantom" ? "diamond" : "ellipse",
       }
     },
+    // ---- Edges ----
     {
       selector: "edge",
       style: {
         "width": 1,
-        "line-color": "#374151",
-        "target-arrow-color": "#374151",
+        "line-color": "#5a5a5e",
+        "target-arrow-color": "#5a5a5e",
         "target-arrow-shape": "triangle",
         "arrow-scale": 0.7,
         "curve-style": "bezier",
-        "opacity": 0.45,
+        "opacity": 0.5,
+      }
+    },
+    {
+      selector: 'edge[kind = "import"]',
+      style: {
+        "line-color": "#5a5a5e",
+        "target-arrow-color": "#5a5a5e",
+        "opacity": 0.5,
       }
     },
     {
@@ -498,7 +672,7 @@ const cy = cytoscape({
         "line-style": "dashed",
         "line-dash-pattern": [6, 4],
         "width": 1.5,
-        "opacity": 0.75,
+        "opacity": 0.9,
       }
     },
     {
@@ -509,26 +683,45 @@ const cy = cytoscape({
         "line-style": "dashed",
         "line-dash-pattern": [4, 3],
         "width": 1.5,
-        "opacity": 0.8,
+        "opacity": 0.85,
       }
     },
-    { selector: "node:selected",   style: { "border-color": "#fff", "border-width": 2.5 } },
+    // Cross-zone import edges get a lighter, distinct color.
+    {
+      selector: 'edge[kind = "import"].cross-zone',
+      style: {
+        "line-color": "#9ca3af",
+        "target-arrow-color": "#9ca3af",
+        "opacity": 0.55,
+      }
+    },
+    { selector: "node:selected",    style: { "border-color": "#fff", "border-width": 2.5 } },
     { selector: "node.highlighted", style: { "border-color": "#fef08a", "border-width": 2.5 } },
     { selector: "edge.highlighted", style: { "opacity": 1, "width": 2.5 } },
-    { selector: "node.dimmed",      style: { "opacity": 0.15 } },
-    { selector: "edge.dimmed",      style: { "opacity": 0.06 } },
+    { selector: "node.dimmed",      style: { "opacity": 0.12 } },
+    { selector: "edge.dimmed",      style: { "opacity": 0.05 } },
   ],
   zoom: 0.55,
-  minZoom: 0.08,
+  minZoom: 0.05,
   maxZoom: 4,
 });
 
-// Stats.
-const nodeCount = cy.nodes().filter(n => n.data("kind") !== "phantom").length;
-const phantomCount = cy.nodes().filter(n => n.data("kind") === "phantom").length;
-const edgeCount = cy.edges().length;
+// Tag cross-zone import edges after graph is built.
+cy.edges('[kind = "import"]').forEach(e => {
+  if (e.source().data("zone") !== e.target().data("zone")) {
+    e.addClass("cross-zone");
+  }
+});
+
+// Stats (exclude compound parents from the file count).
+const leafNodes = cy.nodes().filter(n =>
+  n.data("kind") !== "zone_compound" && n.data("kind") !== "subgroup_compound"
+);
+const fileNodes  = leafNodes.filter(n => n.data("kind") !== "phantom");
+const phantomCount = leafNodes.filter(n => n.data("kind") === "phantom").length;
+const edgeCount  = cy.edges().length;
 document.getElementById("stats").textContent =
-  `${nodeCount} files · ${edgeCount} edges · ${phantomCount} phantom`;
+  `${fileNodes.length} files · ${edgeCount} edges · ${phantomCount} phantom`;
 
 cy.fit(undefined, 60);
 
@@ -537,6 +730,13 @@ const panel = document.getElementById("panel");
 
 cy.on("tap", "node", evt => {
   const d = evt.target.data();
+  // Skip compound parent taps — just show generic info.
+  if (d.kind === "zone_compound" || d.kind === "subgroup_compound") {
+    panel.innerHTML = `<b>${d.label}</b>  <i>compound region</i>`;
+    panel.classList.remove("hidden");
+    return;
+  }
+
   const lines = [
     `<b>${d.label}</b>  <i>${d.path || d.id}</i>  <span style="color:#6b7280">zone: ${d.zone} / ${d.group}</span>`,
   ];
@@ -550,7 +750,7 @@ cy.on("tap", "node", evt => {
     for (const c of d.api_calls)
       lines.push(`&nbsp;&nbsp;<span style="color:#fbbf24">${c}</span>`);
   }
-  if (d.functions && d.functions.length && !d.routes.length) {
+  if (d.functions && d.functions.length && (!d.routes || !d.routes.length)) {
     lines.push("<u>functions</u>");
     lines.push(`&nbsp;&nbsp;${d.functions.slice(0, 12).join("&nbsp;&nbsp;")}${d.functions.length > 12 ? " …" : ""}`);
   }
@@ -597,13 +797,19 @@ def main():
     phantoms = sum(1 for n in nodes if n["data"].get("kind") == "phantom")
     api_edges = sum(1 for e in edges if e["data"].get("kind") in ("api", "api_unmatched"))
     import_edges = sum(1 for e in edges if e["data"].get("kind") == "import")
-    print(f"  {len(nodes)} nodes ({phantoms} phantom), {len(edges)} edges")
+    print(f"  {len(nodes)} leaf nodes ({phantoms} phantom), {len(edges)} edges")
     print(f"  import edges: {import_edges}  |  API-call edges: {api_edges}")
 
     html = render_html(nodes, edges)
     OUT_HTML.write_text(html, encoding="utf-8")
     size_kb = OUT_HTML.stat().st_size // 1024
+
+    # Count compound nodes added by render_html by parsing elements out of html.
+    # Quick way: regenerate to get counts.
+    positioned, compound_nodes, _ = compute_positions(nodes)
+    total_nodes = len(positioned) + len(compound_nodes)
     print(f"\nWrote {OUT_HTML}  ({size_kb} KB)")
+    print(f"  total nodes in graph: {total_nodes} ({len(compound_nodes)} compound parents + {len(positioned)} leaf nodes)")
     print(f"Open:  file://{OUT_HTML.resolve()}")
 
 
