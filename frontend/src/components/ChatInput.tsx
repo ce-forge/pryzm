@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect } from "react";
 import { FileUpload } from "@/types/chat"; 
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { APP_CONFIG } from "@/utils/constants";
-import { PlusIcon, SendIcon, StopIcon, TerminalIcon, LoadingIcon, CancelIcon, DatabaseIcon } from "./Icons";
+import { PlusIcon, SendIcon, StopIcon, TerminalIcon, LoadingIcon, CancelIcon, DatabaseIcon, ImageIcon } from "./Icons";
 
 interface ChatInputProps {
   prompt: string;
@@ -29,6 +29,11 @@ export default function ChatInput({
   const [isDragging, setIsDragging] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
   const dragCounter = useRef(0);
+  // Two flat inputs (no popover). Image-only `accept` makes mobile pickers
+  // surface Camera + Gallery as native sources; file-only `accept` skips
+  // those entries so the Files chooser opens directly. On desktop both
+  // open the standard file dialog with the respective filter applied.
+  const photoInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuWrapperRef = useRef<HTMLDivElement>(null);
 
@@ -112,20 +117,36 @@ export default function ChatInput({
             
             <div className="flex justify-between items-center px-2 pb-1">
                 <div className="flex gap-1 items-center relative" ref={menuWrapperRef}>
-                    {/* Single file input with an `accept` allowlist. On mobile the OS
-                        native picker uses these hints to surface Camera + Gallery +
-                        Files entries directly; no custom popover needed. On desktop
-                        the standard file dialog opens with the filter applied. */}
+                    {/* Image-only input. Mobile native picker surfaces Camera +
+                        Gallery from this accept; desktop opens the file dialog
+                        filtered to images. */}
+                    <input
+                      type="file"
+                      multiple
+                      className="hidden"
+                      ref={photoInputRef}
+                      accept="image/*"
+                      onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))}
+                    />
+                    {/* Text-file input. Excludes images so mobile pickers don't
+                        offer Camera/Gallery in this flow. */}
                     <input
                       type="file"
                       multiple
                       className="hidden"
                       ref={fileInputRef}
-                      accept="image/jpeg,image/png,image/webp,.txt,.md,.py,.csv,.json,.log,.yaml,.yml,.conf,.ini"
+                      accept=".txt,.md,.py,.csv,.json,.log,.yaml,.yml,.conf,.ini"
                       onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))}
                     />
 
-                    <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 rounded-full text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537] transition-all">
+                    <button type="button" onClick={() => photoInputRef.current?.click()}
+                      aria-label="Attach photo"
+                      className="p-2.5 rounded-full text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537] transition-all">
+                      <ImageIcon className="w-5 h-5" />
+                    </button>
+                    <button type="button" onClick={() => fileInputRef.current?.click()}
+                      aria-label="Attach file"
+                      className="p-2.5 rounded-full text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537] transition-all">
                       <PlusIcon className="w-5 h-5" />
                     </button>
 
