@@ -19,13 +19,14 @@ services:
       - ./pgdata:/var/lib/postgresql/data
     restart: always
 
-  ollama:
-    image: ollama/ollama:latest
-    container_name: pryzm_ollama
+  llama-swap:
+    image: ghcr.io/mostlygeek/llama-swap:cuda
+    container_name: pryzm_llama_swap
     ports:
-      - "127.0.0.1:11434:11434"
+      - "127.0.0.1:8080:8080"
     volumes:
-      - ./ollama_models:/root/.ollama
+      - ./infra/llama-swap-config.yaml:/app/config.yaml:ro
+      - llama_models:/root/.cache/llama.cpp
     deploy:
       resources:
         reservations:
@@ -34,3 +35,6 @@ services:
               count: 1
               capabilities: [gpu]
     restart: always
+
+volumes:
+  llama_models:
