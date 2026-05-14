@@ -49,7 +49,7 @@ _ASSISTANT_HAS_CONTENT = """
     if (!chatEl) return false;
     const paragraphs = chatEl.querySelectorAll('p');
     for (const p of paragraphs) {
-        if ((p.textContent || '').trim().length > 5) return true;
+        if ((p.textContent || '').trim().length > 0) return true;
     }
     return false;
 }

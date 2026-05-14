@@ -26,10 +26,18 @@ def _open_app_with_token(page: Page, token: str) -> None:
 
 
 def _send_chat_message(page: Page, text: str) -> None:
+    """Fill, press Enter, and wait for the user bubble in DOM. The
+    DOM-confirmation step protects against the silent-drop case where
+    handleInference bails because currentIsProcessing is still true from a
+    prior turn."""
     textarea = page.locator('textarea[placeholder="Ask Pryzm anything..."]')
     textarea.wait_for(state="visible", timeout=5_000)
     textarea.fill(text)
     textarea.press("Enter")
+    page.wait_for_function(
+        f"() => (document.body.textContent || '').includes({text!r})",
+        timeout=10_000,
+    )
 
 
 _ASSISTANT_HAS_CONTENT = """
@@ -39,7 +47,11 @@ _ASSISTANT_HAS_CONTENT = """
     if (!chatEl) return false;
     const paragraphs = chatEl.querySelectorAll('p');
     for (const p of paragraphs) {
-        if ((p.textContent || '').trim().length > 5) return true;
+        // Any non-empty <p> in the chat scroll area means the assistant has
+        // rendered a response. See test_phase4_smoke.py for the threshold
+        // history — Gemma 4 produces literal one-word replies to "say one
+        // word" so the old > 5 char threshold rejected them.
+        if ((p.textContent || '').trim().length > 0) return true;
     }
     return false;
 }
@@ -90,7 +102,7 @@ def test_rapid_sends_distinct_ids_and_ordered(page: Page, api_token: str, screen
                 if (!chatEl) return false;
                 const ps = Array.from(chatEl.querySelectorAll('p'));
                 const lastLen = (ps[ps.length - 1]?.textContent || '').length;
-                if (lastLen === window.__lastAssistantLen && lastLen > 5) {
+                if (lastLen === window.__lastAssistantLen && lastLen > 0) {
                     window.__assistantStableCount++;
                 } else {
                     window.__assistantStableCount = 0;
@@ -160,7 +172,7 @@ def test_navigate_during_stream_no_orphan_bubble(page: Page, api_token: str, scr
             const lastLen = (ps[ps.length - 1]?.textContent || '').length;
             window.__lastAssistantLen = window.__lastAssistantLen ?? -1;
             window.__assistantStableCount = window.__assistantStableCount ?? 0;
-            if (lastLen === window.__lastAssistantLen && lastLen > 5) {
+            if (lastLen === window.__lastAssistantLen && lastLen > 0) {
                 window.__assistantStableCount++;
             } else {
                 window.__assistantStableCount = 0;

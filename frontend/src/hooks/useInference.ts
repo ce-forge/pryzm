@@ -57,6 +57,13 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       let realDbId: string | null = null;
       const ws = workspaceSlug;
 
+      // Mark streaming BEFORE we touch the cache. The post-stream
+      // loadSessionData(true) for the prior turn races with this turn's setup;
+      // its DB-fetched snapshot will overwrite the cache (and lose the
+      // optimistic bubbles we're about to append) unless this ref shows the
+      // session is mid-stream by the time loadSessionData commits.
+      sessionApi.streamingSessionIdsRef.current.add(optimisticId);
+
       setStreamingContent((prev) => ({ ...prev, [optimisticId]: "" }));
 
       let fullAssistantMessage = "";
@@ -91,7 +98,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
       const controller = new AbortController();
       abortControllersRef.current.set(optimisticId, controller);
-      sessionApi.streamingSessionIdsRef.current.add(optimisticId);
+      // (streaming flag set near the top of sendMessage; nothing to do here)
 
       try {
         const res = await apiFetch(
