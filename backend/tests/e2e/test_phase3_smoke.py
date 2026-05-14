@@ -159,7 +159,9 @@ def test_error_envelope_shows_clean_error_ui(page: Page, api_token: str, screens
             body=body,
         )
 
-    page.route("**/analyze", _handle_route)
+    # Phase 4 appended ?workspace= to /analyze; use ** suffix so the glob
+    # matches the full URL including query parameters.
+    page.route("**/analyze**", _handle_route)
     _send_chat_message(page, "Trigger an error.")
 
     # The frontend hook converts the error envelope into '⚠ Simulated Ollama failure.'
@@ -187,4 +189,4 @@ def test_error_envelope_shows_clean_error_ui(page: Page, api_token: str, screens
     )
 
     screenshot("error-envelope")
-    page.unroute("**/analyze")
+    page.unroute("**/analyze**")
