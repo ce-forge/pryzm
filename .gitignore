@@ -32,3 +32,6 @@ Thumbs.db
 # branch is checked out — see backend/data/.gitkeep on feature/dev-dashboard.
 backend/data/*
 !backend/data/.gitkeep
+
+# Codemap script output.
+backend/scripts/_out/
