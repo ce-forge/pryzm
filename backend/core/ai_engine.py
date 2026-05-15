@@ -367,11 +367,16 @@ async def stream_chat(
                         "function": {"name": func_name, "arguments": raw_args}
                     }
 
-                    # Hide auto-injected context params from the user-visible
-                    # System Action line — they're plumbing, not signal. The
-                    # user cares about `query` / `hostname` / `port` etc., not
-                    # workspace_id or session_id which are always the same.
+                    # Hide noisy args from the user-visible System Action
+                    # line. workspace_id/session_id are plumbing (always
+                    # the same). For search_knowledge_base specifically,
+                    # `queries` is usually a paraphrase of the user's own
+                    # question — showing it twice adds noise — while
+                    # `filenames` carries useful signal ("which file got
+                    # searched").
                     _hidden = {"workspace_id", "session_id"}
+                    if func_name == "search_knowledge_base":
+                        _hidden = _hidden | {"queries"}
                     display_args = {k: v for k, v in raw_args.items()
                                     if k in valid_params and k not in _hidden}
                     yield format_tool_execution(func_name, display_args)
