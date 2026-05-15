@@ -22,6 +22,13 @@ async def ingest_document(
     is_global: bool = False,
     storage_path: str | None = None,
 ):
+    """Create a Document row and chunk+embed its content in one shot.
+
+    Synchronous-path entrypoint preserved for callers that want the
+    pre-async-ingestion behavior (insert-and-fill). The async pipeline
+    (PR 3) goes through `add_chunks_to_document` instead so the
+    Document row can be created upfront in `processing` state.
+    """
     new_doc = models.Document(
         filename=filename,
         workspace_id=workspace_id,
@@ -33,6 +40,23 @@ async def ingest_document(
     db.commit()
     db.refresh(new_doc)
 
+    chunks_created = await add_chunks_to_document(client, db, new_doc, content)
+    return {"status": "success", "chunks_created": chunks_created, "document_id": new_doc.id}
+
+
+async def add_chunks_to_document(
+    client: httpx.AsyncClient,
+    db: Session,
+    document: models.Document,
+    content: str,
+) -> int:
+    """Chunk + embed `content` and persist the chunks against an
+    already-committed Document row. Returns the chunk count.
+
+    Used by the async-ingestion pipeline where the Document is
+    created upfront in `processing` state and chunks are added later
+    by a background task.
+    """
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=1000,
         chunk_overlap=200,
@@ -50,14 +74,14 @@ async def ingest_document(
     for chunk_text in chunks:
         vector = await get_embedding(client, chunk_text)
         db.add(models.DocumentChunk(
-            document_id=new_doc.id,
-            workspace_id=workspace_id,
+            document_id=document.id,
+            workspace_id=document.workspace_id,
             content=chunk_text,
             embedding=vector,
         ))
 
     db.commit()
-    return {"status": "success", "chunks_created": len(chunks), "document_id": new_doc.id}
+    return len(chunks)
 
 def _strip_query_prefix(query: str) -> str:
     """Lowercase the query and strip the common interrogative prefixes that

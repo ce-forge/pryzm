@@ -214,19 +214,32 @@ async def test_ingest_document_persists_storage_path(db_session, monkeypatch):
     assert doc.storage_path == "/tmp/fake/example.png"
 
 
-def test_upload_endpoint_rejects_unsupported_image_type(db_session, monkeypatch):
-    """/upload returns 400 when content_type is image/* but not in the
-    supported set (jpeg, png, webp)."""
+def test_upload_endpoint_returns_202_and_inserts_processing_row(
+    db_session, monkeypatch
+):
+    """Async-ingestion contract: /upload commits a Document(status='processing')
+    synchronously, then spawns the pipeline as a background task and returns
+    202 with the doc id. The terminal flip arrives later via SSE.
+    """
     from fastapi.testclient import TestClient
     from main import app
     from db import database
+    from services import ingest_broker
     from config import settings
 
-    _seed_workspace(db_session, slug="img-tiff-test")
+    _seed_workspace(db_session, slug="img-202-test")
+
+    captured: list = []
+    def _capture_task(coro):
+        captured.append(coro)
+        coro.close()  # we're verifying the route, not running the pipeline
+        class _Stub:
+            def add_done_callback(self, *_a, **_kw): pass
+        return _Stub()
+    monkeypatch.setattr(ingest_broker, "add_task", _capture_task)
 
     def _get_db_override():
         yield db_session
-
     monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
     app.dependency_overrides[database.get_db] = _get_db_override
@@ -235,47 +248,100 @@ def test_upload_endpoint_rejects_unsupported_image_type(db_session, monkeypatch)
             c.headers.update({"Authorization": "Bearer test-token"})
             resp = c.post(
                 "/upload",
-                files={"file": ("t.tiff", b"\x00" * 64, "image/tiff")},
-                data={"workspace": "img-tiff-test"},
+                files={"file": ("hi.png", b"img-bytes", "image/png")},
+                data={"workspace": "img-202-test"},
             )
-        assert resp.status_code == 400
-        assert "Unsupported image MIME" in resp.json()["detail"]
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["status"] == "processing"
+        assert body["filename"] == "hi.png"
+        assert body["document_id"]
+        # The row is real and queryable immediately — frontend depends
+        # on this so the pill can open SSE against the returned id.
+        doc = db_session.query(models.Document).filter_by(id=body["document_id"]).one()
+        assert doc.status == "processing"
+        assert doc.error_message is None
+        # And the pipeline was scheduled.
+        assert len(captured) == 1
     finally:
         app.dependency_overrides.clear()
 
 
-def test_upload_endpoint_returns_422_when_model_yields_empty_caption(
-    db_session, monkeypatch
-):
-    """If the VLM returns an empty caption, /upload responds 422 rather
-    than creating an empty-content Document."""
-    from fastapi.testclient import TestClient
-    from main import app
+def _bind_pipeline_db(monkeypatch, db_session):
+    """Re-bind `database.SessionLocal` to the test engine so that the
+    pipeline (which opens its own session via `database.SessionLocal()`)
+    reads/writes the same DB the test fixture is using."""
+    from sqlalchemy.orm import sessionmaker
     from db import database
-    from config import settings
+    test_engine = db_session.get_bind()
+    TestSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    monkeypatch.setattr(database, "SessionLocal", TestSessionLocal)
 
-    _seed_workspace(db_session, slug="img-empty-test")
+
+@pytest.mark.asyncio
+async def test_pipeline_marks_unsupported_image_mime_as_error(db_session, monkeypatch):
+    """Pipeline-level error path: an unsupported image MIME used to raise
+    HTTPException at /upload (400). Under async ingestion the task
+    catches it, persists status='error' + error_message, and publishes
+    a terminal event."""
+    from services import ingest_pipeline, ingest_broker
+
+    ws = _seed_workspace(db_session, slug="img-tiff-async")
+    doc = models.Document(filename="t.tiff", workspace_id=ws.id, status="processing")
+    db_session.add(doc); db_session.commit(); db_session.refresh(doc)
+    _bind_pipeline_db(monkeypatch, db_session)
+
+    broker = ingest_broker.broker()
+    queue = broker.subscribe(doc.id)
+
+    async with httpx.AsyncClient() as client:
+        await ingest_pipeline.ingest_doc(
+            document_id=doc.id,
+            http_client=client,
+            content=b"\x00" * 64,
+            mime="image/tiff",
+            filename="t.tiff",
+        )
+
+    db_session.refresh(doc)
+    assert doc.status == "error"
+    assert "Unsupported image MIME" in (doc.error_message or "")
+    import asyncio
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event["status"] == "error"
+    assert "Unsupported image MIME" in event["error"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_marks_empty_caption_as_error(db_session, monkeypatch):
+    """VLM returns an empty caption → row flips to status='error' with
+    a description-of-no-description message."""
+    from services import ingest_pipeline, ingest_broker
+
+    ws = _seed_workspace(db_session, slug="img-empty-async")
+    doc = models.Document(filename="blank.png", workspace_id=ws.id, status="processing")
+    db_session.add(doc); db_session.commit(); db_session.refresh(doc)
+    _bind_pipeline_db(monkeypatch, db_session)
 
     async def empty_chat(client, messages, tools, model, options=None):
         return {"message": {"content": "", "reasoning_content": ""}}
-
     monkeypatch.setattr(llm_server, "chat", empty_chat)
 
-    def _get_db_override():
-        yield db_session
+    broker = ingest_broker.broker()
+    queue = broker.subscribe(doc.id)
 
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
-    monkeypatch.setattr(database, "init_db", lambda: None)
-    app.dependency_overrides[database.get_db] = _get_db_override
-    try:
-        with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
-            resp = c.post(
-                "/upload",
-                files={"file": ("blank.png", b"opaque-png-bytes", "image/png")},
-                data={"workspace": "img-empty-test"},
-            )
-        assert resp.status_code == 422
-        assert "no description" in resp.json()["detail"].lower()
-    finally:
-        app.dependency_overrides.clear()
+    async with httpx.AsyncClient() as client:
+        await ingest_pipeline.ingest_doc(
+            document_id=doc.id,
+            http_client=client,
+            content=b"opaque-png-bytes",
+            mime="image/png",
+            filename="blank.png",
+        )
+
+    db_session.refresh(doc)
+    assert doc.status == "error"
+    assert "no description" in (doc.error_message or "").lower()
+    import asyncio
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event["status"] == "error"

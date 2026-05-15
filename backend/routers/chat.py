@@ -7,9 +7,10 @@ import json
 
 from db import database, models
 from core import ai_engine
+from core.auth import require_token
 from core.prompt_manager import MICRO_PROMPTS
 from core.engine_config import engine_config_for
-from services import ingest_pipeline
+from services import ingest_broker, ingest_pipeline
 from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
@@ -386,7 +387,7 @@ async def analyze_data(
         background=background_tasks,
     )
 
-@router.post("/upload")
+@router.post("/upload", status_code=202)
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
@@ -396,6 +397,14 @@ async def upload_document(
     db: Session = Depends(database.get_db),
     http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
+    """Accept an upload, persist a `Document(status='processing')` row,
+    and spawn the ingestion pipeline as a background task.
+
+    Returns 202 immediately with `{document_id, status: 'processing',
+    session_id, filename}`. The client opens an SSE connection at
+    `/uploads/{document_id}/events` to learn when the doc flips to
+    `ready` or `error`.
+    """
     ws = get_or_default(db, workspace)
     # Stream the upload in 8KB chunks and bail as soon as we cross the
     # configured ceiling. Reading the whole body unbounded (await file.read())
@@ -421,22 +430,105 @@ async def upload_document(
         if existing_session:
             active_session_id = session_id
 
-    result = await ingest_pipeline.ingest_doc(
-        http_client=http_client,
-        db=db,
-        content=content,
-        mime=content_type,
+    doc = models.Document(
         filename=file.filename,
         workspace_id=ws.id,
         session_id=active_session_id,
         is_global=is_global,
+        status="processing",
     )
+    db.add(doc)
+    db.commit()
+    db.refresh(doc)
+    document_id = doc.id
+
+    ingest_broker.add_task(ingest_pipeline.ingest_doc(
+        document_id=document_id,
+        http_client=http_client,
+        content=content,
+        mime=content_type,
+        filename=file.filename,
+    ))
 
     return {
-        "message": f"Successfully ingested {file.filename}",
-        "details": result,
+        "document_id": document_id,
+        "status": "processing",
+        "filename": file.filename,
         "session_id": active_session_id,
     }
+
+
+@router.get("/uploads/{document_id}/events")
+async def upload_events(
+    document_id: str,
+    request: Request,
+    db: Session = Depends(database.get_db),
+    _auth: None = Depends(require_token),
+):
+    """Server-Sent Events stream for one document's ingestion lifecycle.
+
+    The handler:
+
+    1. Subscribes to the broker FIRST (so we can't miss a publish that
+       races us between the DB read and the subscribe).
+    2. Reads the current Document.status. If it's already terminal
+       (`ready` or `error`), replays it as a single event and returns —
+       no point holding a connection open for a row that's done.
+    3. Otherwise loops on the queue, forwarding events until a terminal
+       one arrives or the client disconnects.
+
+    Authenticates via `Authorization: Bearer` or `?token=` (EventSource
+    can't set custom headers; the URL fallback is the SSE-friendly
+    concession documented in core/auth.py).
+    """
+    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    broker = ingest_broker.broker()
+    queue = broker.subscribe(document_id)
+
+    # Snapshot terminal state after subscribing. Order matters: if the
+    # task finishes between the snapshot and the subscribe call we'd
+    # never wake up; subscribing first means the publish queues into
+    # `queue` even if status is still 'processing' below.
+    db.refresh(doc)
+    initial_status = doc.status
+    initial_error = doc.error_message
+
+    async def event_stream():
+        try:
+            if initial_status in ("ready", "error"):
+                payload = {"status": initial_status}
+                if initial_status == "error" and initial_error:
+                    payload["error"] = initial_error
+                yield f"data: {json.dumps(payload)}\n\n"
+                return
+
+            while True:
+                if await request.is_disconnected():
+                    return
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # SSE keepalive — browsers and proxies time out idle
+                    # connections silently otherwise.
+                    yield ": keepalive\n\n"
+                    continue
+                yield f"data: {json.dumps(event)}\n\n"
+                if event.get("status") in ("ready", "error"):
+                    return
+        finally:
+            broker.unsubscribe(document_id, queue)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.delete("/documents/{document_id}")
