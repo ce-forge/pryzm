@@ -39,6 +39,22 @@ _THINK_BLOCK_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
+# Strip LLM-generated mimicry of the engine's own tool-call rendering. The
+# engine emits `> **Tool:** ...` headers and ```text``` result blocks itself
+# after each real tool execution (see format_tool_execution / format_code_block
+# in utils/formatters.py). When the model's *narrative content* contains those
+# same patterns it's regurgitating prior-turn context, not invoking a new tool
+# — drop it before the chunk reaches the chat surface so the displayed tool
+# output stays trustworthy.
+_TOOL_HEADER_MIMICRY = re.compile(r"^\s*> \*\*Tool:\*\* [^\n]*\n?", re.MULTILINE)
+_TEXT_BLOCK_MIMICRY = re.compile(r"```text\n.*?\n```\n?", re.DOTALL)
+
+
+def _strip_tool_mimicry(content: str) -> str:
+    content = _TOOL_HEADER_MIMICRY.sub("", content)
+    content = _TEXT_BLOCK_MIMICRY.sub("", content)
+    return content
+
 
 # Filename pattern for natural-language mentions ("show me screenshot.png").
 # Restricted to the extensions we actually ingest — keeps false positives
@@ -377,7 +393,8 @@ async def stream_chat(
                 if content is None:
                     content = ""
 
-                content = _THINK_BLOCK_RE.sub('', content).strip()
+                content = _THINK_BLOCK_RE.sub('', content)
+                content = _strip_tool_mimicry(content).strip()
 
                 # Catch the model stalling out: a one-or-two-word "thought"
                 # emission, or echoing the tool-loop instruction back at us.
