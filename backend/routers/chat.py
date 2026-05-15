@@ -275,13 +275,17 @@ def get_session_history(
         q = q.limit(limit)
     messages = q.all()
 
-    return [{"id": m.id,
-            "role": m.role,
-            "content": m.content,
-            "status": m.status,
-            "timestamp": m.created_at.isoformat() if m.created_at else None,
-            }
-            for m in messages
+    return [
+        MessageHistory(
+            id=m.id,
+            role=m.role,
+            content=m.content,
+            status=m.status,
+            timestamp=m.created_at.isoformat() if m.created_at else None,
+            referenced_files=m.referenced_docs or None,
+            tool_calls=m.tool_calls or None,
+        )
+        for m in messages
     ]
 
 @router.patch("/sessions/{session_id}")
