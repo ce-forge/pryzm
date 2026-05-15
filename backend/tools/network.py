@@ -102,7 +102,7 @@ def execute_ping(hostname: str) -> str:
         "port": {"type": "integer", "description": "The port number to check (e.g. 80, 443, 3389)"}
     },
     required=["hostname", "port"],
-    system_prompt_directive="Run `dns_lookup` first on a hostname so the port check uses the resolved IP.",
+    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first so the port check uses the resolved IP.",
 )
 def check_port(hostname: str, port: int) -> str:
     """Check if a specific TCP port is open on a target host."""
