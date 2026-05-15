@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # image's content (no re-attach at chat time), so missed text
     # cannot be recovered short of re-uploading.
     IMAGE_CAPTION_MAX_TOKENS: int = 2500
-    IMAGE_CAPTION_TEMPERATURE: float = 0.2
+    IMAGE_CAPTION_TEMPERATURE: float = 0.15
 
     # PDF ingest knob (services/pdf_extract.py). Caps the per-upload page
     # extraction count so a hostile input can't hang the worker; ordinary
