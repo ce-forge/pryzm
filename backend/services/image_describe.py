@@ -14,6 +14,7 @@ tune temperature without touching the router. See
 from __future__ import annotations
 
 import base64
+import logging
 import os
 
 import httpx
@@ -21,6 +22,8 @@ import httpx
 from config import settings
 from core import llm_server
 from core.llm_router import get_router
+
+_logger = logging.getLogger(__name__)
 
 
 # Test-only stub gate. When `PRYZM_TEST_STUB_VLM=1` is set in the
@@ -169,4 +172,7 @@ async def describe(
         # field so we don't surface an empty caption for what was
         # actually a successful generation.
         content = (message.get("reasoning_content") or "").strip()
+    # Pair with ocr_extract's text log so the full captioning output
+    # is greppable in backend logs.
+    _logger.info("image_describe: caption content:\n%s", content)
     return content

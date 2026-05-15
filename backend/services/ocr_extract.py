@@ -128,4 +128,8 @@ def extract_text(image_bytes: bytes, mime: str) -> Optional[str]:
         "ocr_extract: detected %d lines (%d chars) in %.2fs",
         len(out_lines), len(text_out), elapsed,
     )
+    # Full text content at INFO so the dev can grep backend logs and
+    # see exactly what OCR captured. Indispensable for diagnosing
+    # "the OCR gave crappy text" — without this we'd be guessing.
+    _logger.info("ocr_extract: text content:\n%s", text_out)
     return text_out
