@@ -14,6 +14,16 @@ from services import knowledge, pdf_extract
 from tests.test_pdf_extract import _make_text_pdf
 
 
+def _bind_pipeline_db(monkeypatch, db_session):
+    """Re-bind `database.SessionLocal` so the pipeline (which opens its
+    own session) hits the same test DB the fixture is writing to."""
+    from sqlalchemy.orm import sessionmaker
+    from db import database
+    test_engine = db_session.get_bind()
+    TestSessionLocal = sessionmaker(bind=test_engine, autoflush=False, autocommit=False)
+    monkeypatch.setattr(database, "SessionLocal", TestSessionLocal)
+
+
 def _seed_workspace(db, slug="pdf-test") -> models.Workspace:
     ws = models.Workspace(
         id=f"ws-{slug}",
@@ -63,87 +73,90 @@ async def test_pdf_text_becomes_searchable_chunk(db_session, monkeypatch):
     assert any("RUNBOOK" in c.content.upper() for c in chunks)
 
 
-def test_upload_endpoint_accepts_pdf(db_session, monkeypatch):
-    """End-to-end at the endpoint: POST a PDF, assert 200 and the
-    captioned/extracted text persisted as chunks."""
-    from fastapi.testclient import TestClient
-    from main import app
-    from db import database
-    from config import settings
+@pytest.mark.asyncio
+async def test_pipeline_ingests_pdf_end_to_end(db_session, monkeypatch):
+    """End-to-end at the pipeline layer: a Document is inserted in
+    'processing' state, then ingest_doc reads bytes → extracts text →
+    chunks → flips status='ready' and publishes a terminal event."""
+    from services import ingest_broker, ingest_pipeline
 
-    _seed_workspace(db_session, slug="pdf-endpoint")
+    ws = _seed_workspace(db_session, slug="pdf-pipeline-end-to-end")
     pdf = _make_text_pdf("DEVICE LAPTOP-042 NETWORK CONFIG")
 
     async def fake_embed(client, text, model):
         return [0.1] * 768
     monkeypatch.setattr(llm_server, "embed", fake_embed)
 
-    def _get_db_override():
-        yield db_session
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
-    monkeypatch.setattr(database, "init_db", lambda: None)
-    app.dependency_overrides[database.get_db] = _get_db_override
+    doc = models.Document(
+        filename="config.pdf", workspace_id=ws.id, is_global=True, status="processing"
+    )
+    db_session.add(doc); db_session.commit(); db_session.refresh(doc)
+    _bind_pipeline_db(monkeypatch, db_session)
 
-    try:
-        with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
-            resp = c.post(
-                "/upload",
-                files={"file": ("config.pdf", pdf, "application/pdf")},
-                data={"workspace": "pdf-endpoint", "is_global": "true"},
-            )
-        assert resp.status_code == 200, resp.text
-        doc_id = resp.json()["details"]["document_id"]
-        chunks = (
-            db_session.query(models.DocumentChunk)
-            .filter_by(document_id=doc_id)
-            .all()
+    broker = ingest_broker.broker()
+    queue = broker.subscribe(doc.id)
+
+    async with httpx.AsyncClient() as client:
+        await ingest_pipeline.ingest_doc(
+            document_id=doc.id,
+            http_client=client,
+            content=pdf,
+            mime="application/pdf",
+            filename="config.pdf",
         )
-        assert any("LAPTOP-042" in c.content for c in chunks)
-    finally:
-        app.dependency_overrides.clear()
+
+    db_session.refresh(doc)
+    assert doc.status == "ready"
+    assert doc.error_message is None
+    chunks = (
+        db_session.query(models.DocumentChunk)
+        .filter_by(document_id=doc.id)
+        .all()
+    )
+    assert any("LAPTOP-042" in c.content for c in chunks)
+    import asyncio
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event["status"] == "ready"
 
 
-def test_upload_endpoint_rejects_invalid_pdf(db_session, monkeypatch):
-    """Bytes that aren't a valid PDF but advertise application/pdf →
-    400 with the parser error."""
-    from fastapi.testclient import TestClient
-    from main import app
-    from db import database
-    from config import settings
+@pytest.mark.asyncio
+async def test_pipeline_marks_invalid_pdf_as_error(db_session, monkeypatch):
+    """Bytes that aren't a valid PDF → row flips to status='error'
+    with the parser-error message, terminal event published."""
+    from services import ingest_broker, ingest_pipeline
 
-    _seed_workspace(db_session, slug="pdf-bad")
+    ws = _seed_workspace(db_session, slug="pdf-bad-async")
+    doc = models.Document(filename="bad.pdf", workspace_id=ws.id, status="processing")
+    db_session.add(doc); db_session.commit(); db_session.refresh(doc)
+    _bind_pipeline_db(monkeypatch, db_session)
 
-    def _get_db_override():
-        yield db_session
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
-    monkeypatch.setattr(database, "init_db", lambda: None)
-    app.dependency_overrides[database.get_db] = _get_db_override
-    try:
-        with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
-            resp = c.post(
-                "/upload",
-                files={"file": ("bad.pdf", b"not a pdf at all", "application/pdf")},
-                data={"workspace": "pdf-bad"},
-            )
-        assert resp.status_code == 400
-        assert "Could not parse PDF" in resp.json()["detail"]
-    finally:
-        app.dependency_overrides.clear()
+    broker = ingest_broker.broker()
+    queue = broker.subscribe(doc.id)
+
+    async with httpx.AsyncClient() as client:
+        await ingest_pipeline.ingest_doc(
+            document_id=doc.id,
+            http_client=client,
+            content=b"not a pdf at all",
+            mime="application/pdf",
+            filename="bad.pdf",
+        )
+
+    db_session.refresh(doc)
+    assert doc.status == "error"
+    assert "Could not parse PDF" in (doc.error_message or "")
+    import asyncio
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event["status"] == "error"
 
 
-def test_upload_endpoint_returns_422_when_pdf_has_no_text(db_session, monkeypatch):
-    """A valid PDF with no extractable text (e.g. a scanned image-only
-    PDF in shape) → 422 with the right message. Built here as a
-    structurally-valid empty-content PDF."""
-    from fastapi.testclient import TestClient
-    from main import app
-    from db import database
-    from config import settings
+@pytest.mark.asyncio
+async def test_pipeline_marks_textless_pdf_as_error(db_session, monkeypatch):
+    """Valid PDF with no extractable text → status='error' on the row
+    with the explicit no-extractable-text message."""
+    from services import ingest_broker, ingest_pipeline
 
-    _seed_workspace(db_session, slug="pdf-empty")
-
+    ws = _seed_workspace(db_session, slug="pdf-empty-async")
     # Empty-content PDF: same shape used in test_pdf_extract's no-text test.
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
@@ -165,20 +178,25 @@ def test_upload_endpoint_returns_422_when_pdf_has_no_text(db_session, monkeypatc
         f"startxref\n{xref_pos}\n%%EOF\n"
     ).encode()
 
-    def _get_db_override():
-        yield db_session
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
-    monkeypatch.setattr(database, "init_db", lambda: None)
-    app.dependency_overrides[database.get_db] = _get_db_override
-    try:
-        with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
-            resp = c.post(
-                "/upload",
-                files={"file": ("scan.pdf", out, "application/pdf")},
-                data={"workspace": "pdf-empty"},
-            )
-        assert resp.status_code == 422
-        assert "No extractable text" in resp.json()["detail"]
-    finally:
-        app.dependency_overrides.clear()
+    doc = models.Document(filename="scan.pdf", workspace_id=ws.id, status="processing")
+    db_session.add(doc); db_session.commit(); db_session.refresh(doc)
+    _bind_pipeline_db(monkeypatch, db_session)
+
+    broker = ingest_broker.broker()
+    queue = broker.subscribe(doc.id)
+
+    async with httpx.AsyncClient() as client:
+        await ingest_pipeline.ingest_doc(
+            document_id=doc.id,
+            http_client=client,
+            content=out,
+            mime="application/pdf",
+            filename="scan.pdf",
+        )
+
+    db_session.refresh(doc)
+    assert doc.status == "error"
+    assert "No extractable text" in (doc.error_message or "")
+    import asyncio
+    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+    assert event["status"] == "error"

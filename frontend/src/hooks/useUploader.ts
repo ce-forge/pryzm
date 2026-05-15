@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { FileUpload } from "@/types/chat";
 import { APP_CONFIG } from "@/utils/constants";
 import { getToken } from "@/utils/apiClient";
@@ -42,6 +43,73 @@ function uploadWithProgress(
   });
 }
 
+/**
+ * Open an EventSource on /uploads/{document_id}/events and forward
+ * terminal status into the upload pill.
+ *
+ * EventSource can't set custom Authorization headers — the token rides
+ * in the URL as `?token=...`. This is the SSE-friendly fallback
+ * documented in core/auth.py; the rest of the API still uses bearer
+ * headers via apiFetch. Long-term endpoint is cookie auth.
+ *
+ * Closes on the first terminal event (`ready` or `error`) or on the
+ * `onerror` callback. The browser does NOT need us to call .close()
+ * for the connection to drop on page unload, but we do it anyway to
+ * keep the open-connection count tight when many pills resolve in
+ * quick succession.
+ */
+function subscribeToIngestionStatus(
+  documentId: string,
+  pillId: string,
+  setUploads: Dispatch<SetStateAction<FileUpload[]>>,
+): void {
+  const token = getToken();
+  const url = new URL(`${APP_CONFIG.API_URL}/uploads/${documentId}/events`);
+  if (token) url.searchParams.set("token", token);
+  const es = new EventSource(url.toString());
+
+  es.onmessage = (e) => {
+    let payload: { status?: string; error?: string };
+    try {
+      payload = JSON.parse(e.data);
+    } catch {
+      return;
+    }
+    if (payload.status === "ready") {
+      setUploads((prev) =>
+        prev.map((u) =>
+          u.id === pillId ? { ...u, status: "success" } : u,
+        ),
+      );
+      es.close();
+    } else if (payload.status === "error") {
+      setUploads((prev) =>
+        prev.map((u) =>
+          u.id === pillId
+            ? { ...u, status: "error", errorMessage: payload.error || "Processing failed" }
+            : u,
+        ),
+      );
+      es.close();
+    }
+  };
+
+  es.onerror = () => {
+    // Network blip or server hangup. We can't tell the user the doc
+    // failed (it may still be processing) — surface a generic message
+    // and let them re-attach if needed.
+    setUploads((prev) =>
+      prev.map((u) =>
+        u.id === pillId && u.status === "processing"
+          ? { ...u, status: "error", errorMessage: "Lost connection to server. Please re-attach the file." }
+          : u,
+      ),
+    );
+    es.close();
+  };
+}
+
+
 export function useUploader(workspace: string) {
   const [uploads, setUploads] = useState<FileUpload[]>([]);
 
@@ -72,18 +140,26 @@ export function useUploader(workspace: string) {
 
         if (res.ok) {
           const data = JSON.parse(res.body);
+          const documentId: string | undefined = data.document_id;
           setUploads((prev) =>
             prev.map((u) =>
               u.id === item.id
                 ? {
                     ...u,
-                    status: "success",
+                    status: "processing",
                     progress: 100,
-                    document_id: data.details?.document_id,
+                    document_id: documentId,
                   }
                 : u,
             ),
           );
+          // PR 3 of async-ingestion: /upload now returns 202 with the
+          // doc in 'processing' state. The terminal flip to ready/error
+          // arrives via SSE — open that stream now and apply whichever
+          // event lands first.
+          if (documentId) {
+            subscribeToIngestionStatus(documentId, item.id, setUploads);
+          }
         } else {
           // Try to surface the server's detail message rather than a
           // generic "Failed" — the user has been seeing 422/400 with

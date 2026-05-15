@@ -81,13 +81,15 @@ export default function ChatInput({
     }
   }, [prompt, inputRef]);
 
-  // Block send while any attached file is still uploading. Otherwise the
-  // prompt goes out with an [Attached_File:foo.jpg] marker but the bytes
-  // aren't on the server yet, the auto-RAG path misses the chunk, and the
-  // user gets a worse answer than if they'd waited. Covers both 'pending'
-  // (queued, not started) and 'uploading' (in flight) states.
+  // Block send while any attached file is still being prepared. Without
+  // this gate the prompt goes out with an [Attached_File:foo.jpg] marker
+  // but the chunks aren't in the DB yet, the auto-RAG path misses them,
+  // and the user gets a worse answer than if they'd waited. Covers:
+  // - 'pending' (queued client-side, not started),
+  // - 'uploading' (XHR in flight),
+  // - 'processing' (bytes on server, captioning/embedding in progress).
   const uploadsInProgress = uploads.some(
-    (u) => u.status === "pending" || u.status === "uploading",
+    (u) => u.status === "pending" || u.status === "uploading" || u.status === "processing",
   );
 
   const guardedSubmit = (e?: React.FormEvent) => {
@@ -177,9 +179,12 @@ export default function ChatInput({
                   ) : (
                     <DatabaseIcon className="w-7 h-7 p-1" />
                   )}
-                  {u.status === "uploading" && (
+                  {(u.status === "uploading" || u.status === "processing") && (
                     <span className="absolute inset-0 bg-black/40 rounded flex items-center justify-center">
-                      <CircularProgress value={u.progress} className="w-6 h-6" />
+                      <CircularProgress
+                        value={u.status === "processing" ? 100 : u.progress}
+                        className="w-6 h-6"
+                      />
                     </span>
                   )}
                   {u.status === "error" && (
