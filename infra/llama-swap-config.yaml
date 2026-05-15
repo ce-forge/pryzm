@@ -32,9 +32,6 @@ models:
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
     groups:
     - always-on
-    # Capability tags consumed by the Router. mmproj is auto-downloaded
-    # by `-hf`, so image input flows through `/v1/chat/completions` with
-    # `image_url` content blocks out of the box.
     tags: []
 
   # Tier-2 default (larger). HARDCODED DEFAULT for Phase B1 — every chat call
@@ -43,15 +40,13 @@ models:
     cmd: |-
       /app/llama-server --port ${PORT}
       -hf bartowski/google_gemma-4-E4B-it-GGUF:Q4_K_M
-      -ngl 99 --ctx-size 8192 --jinja --flash-attn on
+      -ngl 99 --ctx-size 60000 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
     groups:
     - chat
     tags:
     - vision
     - code
-
-  # Embedding model — pinned always-on so RAG queries don't pay swap cost.
   "nomic-embed-text-v1.5":
     cmd: >
       /app/llama-server --port ${PORT}
