@@ -30,7 +30,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from db import database, models
-from services import image_describe, image_storage, ingest_broker, knowledge, pdf_extract
+from services import image_describe, image_preprocess, image_storage, ingest_broker, knowledge, pdf_extract
 
 _logger = logging.getLogger(__name__)
 
@@ -108,8 +108,11 @@ async def _extract_text(
     """Return (text_content, storage_path). storage_path is non-None
     only for images, which we persist to disk after captioning succeeds."""
     if mime.startswith("image/"):
+        # Preprocess in-memory for the VLM; persist the ORIGINAL bytes
+        # so the on-disk file matches what the user uploaded.
+        preprocessed = image_preprocess.prepare_for_vlm(content, mime)
         try:
-            text_content = await image_describe.describe(http_client, content, mime=mime)
+            text_content = await image_describe.describe(http_client, preprocessed, mime=mime)
         except image_describe.InvalidImage as e:
             raise _IngestionError(str(e))
         if not text_content.strip():
