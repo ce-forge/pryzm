@@ -11,8 +11,9 @@ from .registry import tool
 
 
 MODULE_DIRECTIVE = (
-    "Network tools only run when the user provides a valid TLD "
-    "(e.g. \"reddit.com\") or an explicit IPv4/IPv6 address."
+    "Network tools require a valid TLD (e.g. \"reddit.com\") or an explicit "
+    "IPv4/IPv6 address. If the user names a known web brand without a TLD "
+    "(e.g. \"youtube\"), append \".com\" before calling."
 )
 
 # Single safe-char regex for both shell-arg use and resolver input. Allows
