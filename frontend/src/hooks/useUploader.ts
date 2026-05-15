@@ -141,22 +141,27 @@ export function useUploader(workspace: string) {
         if (res.ok) {
           const data = JSON.parse(res.body);
           const documentId: string | undefined = data.document_id;
+          // Hybrid UX: flip the pill to 'success' the moment the upload
+          // XHR returns 202, even though analysis is still running
+          // server-side. The pill FEELS instant — analysis runs in
+          // the background, and the /analyze route waits for the
+          // doc to be ready via the broker if the user sends a prompt
+          // before analysis finishes (no auto-RAG miss). We still
+          // open the SSE stream to catch terminal-error events from
+          // the ingest pipeline, but 'ready' events are now a no-op
+          // (pill is already green).
           setUploads((prev) =>
             prev.map((u) =>
               u.id === item.id
                 ? {
                     ...u,
-                    status: "processing",
+                    status: "success",
                     progress: 100,
                     document_id: documentId,
                   }
                 : u,
             ),
           );
-          // PR 3 of async-ingestion: /upload now returns 202 with the
-          // doc in 'processing' state. The terminal flip to ready/error
-          // arrives via SSE — open that stream now and apply whichever
-          // event lands first.
           if (documentId) {
             subscribeToIngestionStatus(documentId, item.id, setUploads);
           }
