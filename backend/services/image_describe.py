@@ -54,34 +54,45 @@ _SUPPORTED_MIME = {"image/jpeg", "image/png", "image/webp"}
 # the rarer non-text image (a photograph, a chart) the prompt still
 # falls through to a description path.
 _SYSTEM_PROMPT = (
-    "You analyze images for a knowledge base. Most images are screenshots, "
-    "error dialogs, terminal output, device labels, configuration screens, "
-    "and similar text-heavy content. Text accuracy is critical.\n"
+    "You describe images for an IT knowledge base. A separate OCR "
+    "engine handles verbatim text transcription — your job is "
+    "structure and context, NOT character-by-character text reading.\n"
     "\n"
-    "Your output has two parts, in this exact order:\n"
+    "Output one or two short paragraphs covering:\n"
+    "- What kind of screen/image this is (Windows error dialog, "
+    "network monitoring console, terminal session, mobile app UI, "
+    "physical device label, photograph of hardware, etc.).\n"
+    "- The layout: top bar, sidebar, dialog body, tables, buttons, "
+    "form fields, indicators. Describe each by its ROLE and POSITION.\n"
+    "- Visual details a text search wouldn't surface: colors, icons, "
+    "status indicators (red/green dots, warning triangles, progress "
+    "bars), the apparent state of UI elements (selected vs disabled, "
+    "errored vs normal).\n"
+    "- For non-UI images (hardware photos, diagrams without legible "
+    "text), describe subject, layout, what's visible, identifying "
+    "features.\n"
     "\n"
-    "1. EXTRACTED TEXT — every piece of visible text VERBATIM. Do not "
-    "paraphrase, summarize into prose, or skip text you consider "
-    "boring (window titles, button labels, table headers, status "
-    "indicators, version strings, timestamps, IP addresses, error "
-    "codes, file paths — ALL of it). For each block of text, note "
-    "WHERE it sits (top bar, left panel, dialog body, table row 3, "
-    "bottom status bar, etc.) and what it's grouped with (which error "
-    "code refers to which device, which value pairs with which field, "
-    "which row contains which header).\n"
+    "CRITICAL: do NOT transcribe verbatim text content. Do not "
+    "reproduce error codes, IP addresses, usernames, version strings, "
+    "or any specific text strings — that's OCR's job, not yours. "
+    "Refer to text by its role (e.g., 'an error code is displayed', "
+    "'the username field is populated', 'a timestamp is visible in "
+    "the top-right'), not its content. Including verbatim text in "
+    "your output is a failure mode we are explicitly trying to avoid.\n"
     "\n"
-    "2. CONTEXT — one short paragraph after the extracted text "
-    "covering: what the screen/image is (Windows error dialog, network "
-    "monitoring console, mobile app UI, terminal session, etc.), and "
-    "any visual details a text search wouldn't otherwise surface.\n"
-    "\n"
-    "If the image is NOT text-heavy (a photograph of a physical device, "
-    "a chart with no readable labels, a non-textual diagram), skip "
-    "section 1 and describe its visual contents in technical detail "
-    "instead: subject, layout, what's visible, identifying features.\n"
-    "\n"
-    "No preamble, no 'I see' or 'this image shows' filler. No thinking "
-    "out loud. Start directly with the extracted content."
+    "No preamble, no 'I see' or 'this image shows' filler. Start "
+    "directly with the description."
+)
+
+
+# Used in the fallback path when OCR finds nothing — preserves the
+# original verbatim-extraction behavior so we never store an empty
+# caption on text-light images OCR can't read.
+_FALLBACK_VERBATIM_PROMPT = (
+    "You analyze images for a knowledge base. Output every piece of "
+    "visible text verbatim, then a short context paragraph describing "
+    "what the screen or image is. Note position information (top bar, "
+    "dialog body, row N, etc.) alongside the text. No preamble."
 )
 
 _USER_TEXT = "Analyze this image for the knowledge base."
@@ -95,6 +106,8 @@ async def describe(
     client: httpx.AsyncClient,
     image_bytes: bytes,
     mime: str,
+    *,
+    verbatim_fallback: bool = False,
 ) -> str:
     """Send the image to the captioning model and return a paragraph
     describing it. The returned string is what gets chunked + embedded
@@ -125,8 +138,9 @@ async def describe(
             "with 'vision' in infra/llama-swap-config.yaml."
         )
 
+    system_prompt = _FALLBACK_VERBATIM_PROMPT if verbatim_fallback else _SYSTEM_PROMPT
     messages = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {
             "role": "user",
             "content": [

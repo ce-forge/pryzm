@@ -314,8 +314,9 @@ async def test_pipeline_marks_unsupported_image_mime_as_error(db_session, monkey
 
 @pytest.mark.asyncio
 async def test_pipeline_marks_empty_caption_as_error(db_session, monkeypatch):
-    """VLM returns an empty caption → row flips to status='error' with
-    a description-of-no-description message."""
+    """When BOTH OCR and the VLM produce nothing — opaque/garbage
+    bytes that don't parse as an image AND the VLM falls back to
+    an empty response — the pipeline flips status='error'."""
     from services import ingest_pipeline, ingest_broker
 
     ws = _seed_workspace(db_session, slug="img-empty-async")
@@ -341,7 +342,9 @@ async def test_pipeline_marks_empty_caption_as_error(db_session, monkeypatch):
 
     db_session.refresh(doc)
     assert doc.status == "error"
-    assert "no description" in (doc.error_message or "").lower()
+    # Pipeline rolls "OCR failed + VLM empty" into a single message.
+    err = (doc.error_message or "").lower()
+    assert "ocr" in err or "vlm" in err or "no text" in err
     import asyncio
     event = await asyncio.wait_for(queue.get(), timeout=1.0)
     assert event["status"] == "error"
