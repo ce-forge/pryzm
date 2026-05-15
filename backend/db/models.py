@@ -69,6 +69,15 @@ class Message(Base):
     # to "aborted" or "failed" when the stream did not reach a clean end.
     status = Column(String, nullable=False, default="complete", server_default="complete")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # JSON list of image-document references surfaced by this turn
+    # ({id, filename, mime}). NULL for user/memory rows and for assistant
+    # turns that referenced no files. Added by migration a4e0c1d83f29.
+    referenced_docs = Column(JSONB, nullable=True)
+    # JSON list of tool calls executed during this assistant turn
+    # ([{name, args, result}, ...]). NULL for user/memory rows and for
+    # legacy assistant rows written before this column existed (those keep
+    # using the single-content shape; history-rebuild handles both).
+    tool_calls = Column(JSONB, nullable=True)
     session = relationship("Session", back_populates="messages")
 
 
