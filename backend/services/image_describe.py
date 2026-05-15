@@ -14,12 +14,30 @@ tune temperature without touching the router. See
 from __future__ import annotations
 
 import base64
+import os
 
 import httpx
 
 from config import settings
 from core import llm_server
 from core.llm_router import get_router
+
+
+# Test-only stub gate. When `PRYZM_TEST_STUB_VLM=1` is set in the
+# backend process's env, `describe()` returns a canned caption
+# immediately and never hits llama-server. This is read at call
+# time (not import) so smoke tests can flip it without restarting.
+# Production deployments leave the variable unset; the env-var name
+# is namespaced with `TEST_` so it's obviously not a runtime knob.
+_STUB_CAPTION = (
+    "EXTRACTED TEXT\n"
+    "Top bar: 'Pryzm Smoke Test Fixture'\n"
+    "Body: 'BACKUP SERVICE FAILED', 'Code: 0x80070005', "
+    "'Device: LAPTOP-042', 'Target: nas01-share-daily'\n\n"
+    "CONTEXT\n"
+    "Synthetic IT-error-dialog fixture used by the async-ingestion "
+    "smoke harness. Returned directly without hitting the VLM."
+)
 
 
 class InvalidImage(Exception):
@@ -89,6 +107,12 @@ async def describe(
     """
     if mime not in _SUPPORTED_MIME:
         raise InvalidImage(f"Unsupported image MIME: {mime}")
+
+    # Test-only short-circuit. Set PRYZM_TEST_STUB_VLM=1 when running
+    # the e2e smoke harness so the upload pill flips quickly without
+    # cold-loading a 4B-param vision model. Never set in production.
+    if os.environ.get("PRYZM_TEST_STUB_VLM") == "1":
+        return _STUB_CAPTION
 
     # Source of truth for the captioning model is the `vision` tag in
     # llama-swap-config.yaml — pick whichever chat model carries it.
