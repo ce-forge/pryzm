@@ -42,6 +42,39 @@ def test_build_catalog_from_real_yaml():
 
 
 # ---------------------------------------------------------------------------
+# vision_capable_model — picks the chat model with the `vision` tag
+# ---------------------------------------------------------------------------
+
+
+def test_vision_capable_model_returns_tagged_chat_model():
+    r = HeuristicRouter({
+        "mini-2b": set(),
+        "big-4b": {"vision"},
+        "embed-1b": {"embedding"},
+    })
+    assert r.vision_capable_model() == "big-4b"
+
+
+def test_vision_capable_model_skips_embedding_even_if_misstagged():
+    """Defensive: an embedding model accidentally tagged 'vision'
+    must not be picked as the captioner."""
+    r = HeuristicRouter({
+        "mini-2b": set(),
+        "big-4b": set(),
+        "embed-1b": {"embedding", "vision"},
+    })
+    assert r.vision_capable_model() is None
+
+
+def test_vision_capable_model_none_when_no_chat_model_tagged():
+    r = HeuristicRouter({
+        "mini-2b": set(),
+        "big-4b": set(),
+    })
+    assert r.vision_capable_model() is None
+
+
+# ---------------------------------------------------------------------------
 # _partition_chat_models — picks endpoints, excludes embedding
 # ---------------------------------------------------------------------------
 
