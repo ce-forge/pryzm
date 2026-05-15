@@ -33,8 +33,8 @@ from utils.formatters import format_tool_results
     workspaces=["it_copilot", "personal"],
 )
 def search_knowledge_base(
-    queries,
-    workspace_id: str,
+    queries=None,
+    workspace_id: str = "",
     session_id: str = None,
     filenames=None,
 ) -> str:
