@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
-import { Message } from "@/types/chat";
+import { Message, ReferencedFile, ToolCall } from "@/types/chat";
 
 // Cache key = workspace_slug:sessionId so switching workspaces doesn't bleed
 // cached history across different workspace contexts.
@@ -118,7 +118,18 @@ export function useSession() {
           // DB snapshot would be stale relative to the in-flight optimistic
           // bubble.
           if (!streamingSessionIdsRef.current.has(currentSession)) {
-            setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: historyData }));
+            const mapped: Message[] = historyData.map((m: Message & {
+              referenced_files?: ReferencedFile[];
+              tool_calls?: ToolCall[];
+            }) => ({
+              id: m.id,
+              role: m.role,
+              content: m.content,
+              timestamp: m.timestamp,
+              referencedFiles: m.referenced_files ?? undefined,
+              toolCalls: m.tool_calls ?? undefined,
+            }));
+            setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: mapped }));
           }
         }
       } catch (error) {
@@ -157,7 +168,18 @@ export function useSession() {
       const res = await apiFetch(`/sessions/${id}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
-        setMessageCache(prev => ({ ...prev, [cacheKey(workspace, id)]: data }));
+        const mapped: Message[] = data.map((m: Message & {
+          referenced_files?: ReferencedFile[];
+          tool_calls?: ToolCall[];
+        }) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+          referencedFiles: m.referenced_files ?? undefined,
+          toolCalls: m.tool_calls ?? undefined,
+        }));
+        setMessageCache(prev => ({ ...prev, [cacheKey(workspace, id)]: mapped }));
       }
     } catch {
       // Prefetch is best-effort; swallow errors silently.

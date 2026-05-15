@@ -1,8 +1,22 @@
+export interface ReferencedFile {
+  document_id: string;
+  filename: string;
+  preview_url?: string;
+}
+
+export interface ToolCall {
+  name: string;
+  args: Record<string, unknown>;
+  result: string;
+}
+
 export interface Message {
   id?: string;
   role: "user" | "assistant";
   content: string;
   timestamp?: string;
+  referencedFiles?: ReferencedFile[];
+  toolCalls?: ToolCall[];
 }
 
 export interface FileUpload {
