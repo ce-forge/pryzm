@@ -12,6 +12,18 @@ import pytest
 from services import image_describe
 
 
+@pytest.fixture(autouse=True)
+def _stub_vision_router(monkeypatch):
+    """`describe()` queries the router for the vision-tagged model.
+    In unit-test isolation the router isn't initialised — stub it so
+    describe() can resolve a model name without standing up the full
+    app lifespan."""
+    class _StubRouter:
+        def vision_capable_model(self):
+            return "qwen2-vl-2B-it"
+    monkeypatch.setattr(image_describe, "get_router", lambda: _StubRouter())
+
+
 @pytest.mark.asyncio
 async def test_describe_calls_llm_with_image_url(monkeypatch):
     """The outgoing chat payload must include the image as a base64
@@ -32,7 +44,7 @@ async def test_describe_calls_llm_with_image_url(monkeypatch):
     )
 
     assert result == "A test description."
-    assert captured["model"] == "gemma-4-E4B-it"
+    assert captured["model"] == "qwen2-vl-2B-it"
     assert captured["tools"] is None
     assert "max_tokens" in captured["options"]
 

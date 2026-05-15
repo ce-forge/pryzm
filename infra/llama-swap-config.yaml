@@ -34,8 +34,12 @@ models:
     - always-on
     tags: []
 
-  # Tier-2 default (larger). HARDCODED DEFAULT for Phase B1 — every chat call
-  # uses this until the router lands in B2.
+  # Tier-2 default (larger). Used for complex/long prompts the router
+  # decides E2B can't handle. NO LONGER carries the `vision` tag —
+  # captioning routes to Qwen2-VL-2B (below) which handles both
+  # verbatim text extraction and structural understanding in a single
+  # call, with stronger OCR/document benchmarks than Gemma-4 for this
+  # use case.
   "gemma-4-E4B-it":
     cmd: |-
       /app/llama-server --port ${PORT}
@@ -45,8 +49,29 @@ models:
     groups:
     - chat
     tags:
-    - vision
     - code
+
+  # Captioning model. Replaces the hybrid Gemma-4-vision + RapidOCR
+  # pipeline. Qwen2-VL-2B is specifically benchmarked on UI screenshots
+  # (VCR 81.45%) and documents (DocVQA 90.1, OCRBench 794), reads
+  # verbatim text without language-prior pattern completion, and
+  # preserves multi-column form layout — closes the value-label
+  # ambiguity that broke "what is the user and pass" extraction on
+  # password-manager screenshots.
+  #
+  # Drops in via llama-server's -hf flag; the bartowski quant ships
+  # mmproj alongside the GGUF and llama-server picks it up
+  # automatically. ~1 GB at Q4_K_M.
+  "qwen2-vl-2B-it":
+    cmd: |-
+      /app/llama-server --port ${PORT}
+      -hf bartowski/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M
+      -ngl 99 --ctx-size 8192 --jinja --flash-attn on
+    groups:
+    - chat
+    tags:
+    - vision
+
   "nomic-embed-text-v1.5":
     cmd: >
       /app/llama-server --port ${PORT}
