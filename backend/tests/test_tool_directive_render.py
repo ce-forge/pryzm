@@ -43,3 +43,116 @@ def test_decorator_default_directive_is_empty():
         return "ok"
 
     assert _probe_directive_default.system_prompt_directive == ""
+
+
+from tools.registry import ResolvedToolSet, render_tool_directives
+import sys
+import types
+
+
+def _make_module_with_directive(module_name: str, directive: str | None) -> types.ModuleType:
+    """Build a throwaway module object with a MODULE_DIRECTIVE constant (or none).
+    Registered in sys.modules so callables placed in it report __module__ correctly."""
+    mod = types.ModuleType(module_name)
+    if directive is not None:
+        mod.MODULE_DIRECTIVE = directive
+    sys.modules[module_name] = mod
+    return mod
+
+
+def _make_callable(name: str, module: types.ModuleType, directive: str = "") -> callable:
+    def _fn():
+        return None
+    _fn.__name__ = name
+    _fn.__module__ = module.__name__
+    _fn.system_prompt_directive = directive
+    return _fn
+
+
+def test_render_empty_toolset_returns_empty_string():
+    """No enabled tools = no rendered block at all (caller treats empty as 'no header')."""
+    result = render_tool_directives(ResolvedToolSet(callables={}, definitions=[], per_tool_config={}))
+    assert result == ""
+
+
+def test_render_tool_with_no_directive_omitted():
+    """A tool with empty directive and no MODULE_DIRECTIVE renders nothing."""
+    mod = _make_module_with_directive("test_pkg.no_directive_mod", None)
+    fn = _make_callable("solo_tool", mod, "")
+    result = render_tool_directives(
+        ResolvedToolSet(callables={"solo_tool": fn}, definitions=[], per_tool_config={})
+    )
+    assert result == ""
+
+
+def test_render_per_tool_directive_no_module():
+    """A tool with its own directive renders as a single bullet."""
+    mod = _make_module_with_directive("test_pkg.per_tool_mod", None)
+    fn = _make_callable("ping_tool", mod, "Use this for ICMP probes.")
+    result = render_tool_directives(
+        ResolvedToolSet(callables={"ping_tool": fn}, definitions=[], per_tool_config={})
+    )
+    assert result == (
+        "== AVAILABLE TOOLS ==\n\n"
+        "- ping_tool: Use this for ICMP probes."
+    )
+
+
+def test_render_module_directive_with_one_member():
+    """MODULE_DIRECTIVE renders once above the module's tools, even if only one is enabled."""
+    mod = _make_module_with_directive("test_pkg.network_mod", "Network tools only on public hosts.")
+    fn = _make_callable("dns_lookup", mod, "")
+    result = render_tool_directives(
+        ResolvedToolSet(callables={"dns_lookup": fn}, definitions=[], per_tool_config={})
+    )
+    assert result == (
+        "== AVAILABLE TOOLS ==\n\n"
+        "[Network tools only on public hosts.]"
+    )
+
+
+def test_render_module_directive_plus_per_tool_bullets():
+    """MODULE_DIRECTIVE above; per-tool directives below as bullets."""
+    mod = _make_module_with_directive("test_pkg.net2", "Network rule.")
+    a = _make_callable("dns_lookup", mod, "")
+    b = _make_callable("check_port", mod, "Use after dns_lookup.")
+    result = render_tool_directives(
+        ResolvedToolSet(callables={"dns_lookup": a, "check_port": b}, definitions=[], per_tool_config={})
+    )
+    assert result == (
+        "== AVAILABLE TOOLS ==\n\n"
+        "[Network rule.]\n"
+        "- check_port: Use after dns_lookup."
+    )
+
+
+def test_render_two_modules_separated_by_blank_line():
+    """Modules render in deterministic order (by module name) separated by blank lines."""
+    m_net = _make_module_with_directive("test_pkg.aaa_net", "Net rule.")
+    m_sys = _make_module_with_directive("test_pkg.zzz_sys", None)
+    a = _make_callable("dns_lookup", m_net, "")
+    b = _make_callable("rename_chat_session", m_sys, "Invent a title if none given.")
+    result = render_tool_directives(
+        ResolvedToolSet(
+            callables={"dns_lookup": a, "rename_chat_session": b},
+            definitions=[],
+            per_tool_config={},
+        )
+    )
+    assert result == (
+        "== AVAILABLE TOOLS ==\n\n"
+        "[Net rule.]\n"
+        "\n"
+        "- rename_chat_session: Invent a title if none given."
+    )
+
+
+def test_render_module_import_error_does_not_raise():
+    """If sys.modules has no entry for a tool's __module__, render proceeds without it."""
+    fn = _make_callable("orphan_tool", types.ModuleType("test_pkg.gone"), "x")
+    fn.__module__ = "test_pkg.this_was_unloaded"  # not in sys.modules
+    # The tool has no module record AND no MODULE_DIRECTIVE — should still emit its bullet.
+    result = render_tool_directives(
+        ResolvedToolSet(callables={"orphan_tool": fn}, definitions=[], per_tool_config={})
+    )
+    assert "orphan_tool: x" in result
