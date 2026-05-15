@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { apiFetch, getToken, setToken, clearToken } from "@/utils/apiClient";
 import ModelsSection from "@/components/SettingsModels";
 
-export default function SettingsModal({ workspace, close }: { workspace: string, close: () => void }) {
+export default function SettingsModal({ workspace: _workspace, close }: { workspace: string, close: () => void }) {
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [initialPrompts, setInitialPrompts] = useState<Record<string, string>>({});
 
@@ -40,7 +40,7 @@ export default function SettingsModal({ workspace, close }: { workspace: string,
 
       setShowSuccess(true);
       setTimeout(() => setShowSuccess(false), 3000);
-    } catch (e) {}
+    } catch {}
     setIsSaving(false);
   };
 

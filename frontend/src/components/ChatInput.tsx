@@ -121,7 +121,7 @@ export default function ChatInput({
       return {
         id: Math.random().toString(36).substring(7),
         file,
-        status: (isSupported ? "pending" : "error") as any,
+        status: (isSupported ? "pending" : "error") as FileUpload["status"],
         progress: isSupported ? 0 : 100,
         previewUrl,
         errorMessage: isSupported ? undefined : "Unsupported format"
@@ -168,6 +168,7 @@ export default function ChatInput({
               >
                 <div className="relative w-7 h-7 shrink-0">
                   {u.previewUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- data: URLs don't work with next/Image without a custom loader
                     <img
                       src={u.previewUrl}
                       alt=""
@@ -240,7 +241,11 @@ export default function ChatInput({
                       <PlusIcon className="w-5 h-5" />
                     </button>
 
-                    <button type="button" onClick={(e) => { e.stopPropagation(); isAutoTesting ? stopAutoTest() : setShowTestMenu(!showTestMenu); }}
+                    <button type="button" onClick={(e) => {
+                        e.stopPropagation();
+                        if (isAutoTesting) stopAutoTest();
+                        else setShowTestMenu(!showTestMenu);
+                      }}
                       className={`p-2.5 rounded-full transition-all ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:bg-[#333537]'}`}>
                       {isAutoTesting ? <StopIcon className="w-4 h-4 fill-white" /> : <TerminalIcon className="w-4 h-4" />}
                     </button>

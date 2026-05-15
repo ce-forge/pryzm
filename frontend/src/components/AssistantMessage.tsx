@@ -75,8 +75,8 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
         const element = child as React.ReactElement<{ children?: React.ReactNode }>;
         if (element.props && element.props.children) {
           return React.cloneElement(element, {
-            children: highlightChildren(element.props.children, query)
-          } as any);
+            children: highlightChildren(element.props.children, query),
+          } as React.HTMLAttributes<HTMLElement>);
         }
       }
       return child;
@@ -115,9 +115,12 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
               </blockquote>
             );
           },
-          pre({ children }: any) {
-            if (children?.props) {
-              const { className, children: codeContent } = children.props;
+          pre({ children }: { children?: React.ReactNode }) {
+            // react-markdown wraps fenced code in <pre><code className="language-x">…</code></pre>.
+            // Drill in to read the language + raw text, then render via CodeBlock.
+            const codeChild = children as React.ReactElement<{ className?: string; children?: React.ReactNode }> | undefined;
+            if (codeChild?.props) {
+              const { className, children: codeContent } = codeChild.props;
               const match = /language-(\w+)/.exec(className || "");
               return <CodeBlock language={match ? match[1] : "text"} value={String(codeContent).replace(/\n$/, "")} />;
             }
@@ -152,6 +155,7 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
             // before the url is fully buffered.
             if (typeof src !== "string" || !src) return null;
             return (
+              // eslint-disable-next-line @next/next/no-img-element -- data: URLs don't work with next/Image without a custom loader
               <img
                 src={src}
                 alt={alt || "attached image"}

@@ -202,13 +202,13 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                     return next;
                   });
                 }
-              } catch (e) {
+              } catch {
                 /* malformed line, skip */
               }
             }
           }
         }
-      } catch (error: any) {
+      } catch {
         // AbortError, network errors — stream ended early.
       } finally {
         setIsProcessing(false);
