@@ -1,15 +1,21 @@
-"""VLM-based image description.
+"""VLM-based image captioning.
 
-Replaces the rapidocr-based seam from PR #21. The captioning step now runs
-through the existing llama-server (`llm_server.chat`) using a
-vision-capable model. The function signature is intentionally identical
-to the old `ocr.extract_text` so call sites (today: `/upload`) didn't
-need to change shape; only the import.
+Single-call captioning: one vision-language model produces both the
+verbatim text extraction and the structural description. Replaces the
+previous hybrid RapidOCR + Gemma-4 pipeline (PR #66), which suffered
+from multi-column layout collapse in the OCR step — value-label
+relationships got lost when sidebar items at the same Y as form
+values got mashed onto the same output line.
 
-Why a separate module: keeps the upload endpoint thin and gives a single
-location to revise the captioning prompt, change the captioning model, or
-tune temperature without touching the router. See
-`docs/specs/2026-05-15-image-upload-vlm.md` for the broader design.
+Qwen2-VL-2B is the captioning model. It's specifically benchmarked
+on UI screenshots (VCR 81.45%) and documents (DocVQA 90.1, OCRBench
+794), preserves layout in its training, and reads verbatim text
+without language-prior pattern completion.
+
+The captioning model is selected via the `vision` tag in
+llama-swap-config.yaml — `services/image_describe.describe()` queries
+the router for whichever chat model carries that tag. Swap models by
+re-tagging in the YAML; no code change.
 """
 from __future__ import annotations
 
@@ -27,12 +33,9 @@ from core.llm_router import get_router
 _logger = logging.getLogger(__name__)
 
 
-# Test-only stub gate. When `PRYZM_TEST_STUB_VLM=1` is set in the
-# backend process's env, `describe()` returns a canned caption
-# immediately and never hits llama-server. This is read at call
-# time (not import) so smoke tests can flip it without restarting.
-# Production deployments leave the variable unset; the env-var name
-# is namespaced with `TEST_` so it's obviously not a runtime knob.
+# Test-only stub for the e2e smoke harness. PRYZM_TEST_STUB_VLM=1 in
+# the backend env returns this canned caption without hitting the
+# model server, so the upload pill flips quickly during tests.
 _STUB_CAPTION = (
     "EXTRACTED TEXT\n"
     "Top bar: 'Pryzm Smoke Test Fixture'\n"
@@ -50,42 +53,47 @@ class InvalidImage(Exception):
 
 _SUPPORTED_MIME = {"image/jpeg", "image/png", "image/webp"}
 
-# The caption is the SOLE record of the image's content once the upload
-# completes — there's no re-attach at chat time. Bias the prompt heavily
-# toward verbatim text extraction because the IT-copilot use case is
-# dominated by screenshots, error dialogs, terminal output, device
-# labels, configuration screens, and similar text-heavy content. For
-# the rarer non-text image (a photograph, a chart) the prompt still
-# falls through to a description path.
+
+# Single-call prompt: extract verbatim text AND describe structure.
+# The captioning model owns BOTH jobs — separate OCR is gone.
+#
+# Discovered (PR #66 → undone here) that splitting the work between
+# RapidOCR (verbatim) and a structure-only VLM produced subtle
+# layout-collapse bugs on multi-column forms. Qwen2-VL handles both
+# concerns natively because it reads pixels with full spatial
+# awareness.
 _SYSTEM_PROMPT = (
-    "You analyze images for a knowledge base. Most images are screenshots, "
-    "error dialogs, terminal output, device labels, configuration screens, "
-    "and similar text-heavy content. Text accuracy is critical.\n"
+    "You analyze images for an IT knowledge base. Most images are "
+    "screenshots, error dialogs, terminal output, device labels, "
+    "configuration screens, and similar text-heavy content where "
+    "BOTH the verbatim text AND the visual structure matter.\n"
     "\n"
-    "Your output has two parts, in this exact order:\n"
+    "Output two sections, in this exact order:\n"
     "\n"
-    "1. EXTRACTED TEXT — every piece of visible text VERBATIM. Do not "
-    "paraphrase, summarize into prose, or skip text you consider "
-    "boring (window titles, button labels, table headers, status "
-    "indicators, version strings, timestamps, IP addresses, error "
-    "codes, file paths — ALL of it). For each block of text, note "
-    "WHERE it sits (top bar, left panel, dialog body, table row 3, "
-    "bottom status bar, etc.) and what it's grouped with (which error "
-    "code refers to which device, which value pairs with which field, "
-    "which row contains which header).\n"
+    "1. EXTRACTED TEXT — every piece of visible text VERBATIM, "
+    "preserving layout cues. For form-style content, output as "
+    "`Label: value` pairs so the relationship is unambiguous (e.g., "
+    "`Username: admin`, `Password: nfsyg9yehhp9bt9x`, `Last Changed: "
+    "over 2 years ago`). For sidebar nav and other list-style items, "
+    "output each on its own line. For tables, preserve row+column "
+    "structure. Read EVERY character precisely — usernames, IDs, "
+    "error codes, IP addresses, version strings, file paths matter "
+    "as exact strings, not paraphrases.\n"
     "\n"
     "2. CONTEXT — one short paragraph after the extracted text "
-    "covering: what the screen/image is (Windows error dialog, network "
-    "monitoring console, mobile app UI, terminal session, etc.), and "
-    "any visual details a text search wouldn't otherwise surface.\n"
+    "covering what the screen/image IS (Windows error dialog, "
+    "network monitoring console, password manager view, terminal "
+    "session, etc.), plus any visual details a text search wouldn't "
+    "otherwise surface (colors, icons, status indicators, the "
+    "apparent state of UI elements).\n"
     "\n"
-    "If the image is NOT text-heavy (a photograph of a physical device, "
-    "a chart with no readable labels, a non-textual diagram), skip "
-    "section 1 and describe its visual contents in technical detail "
-    "instead: subject, layout, what's visible, identifying features.\n"
+    "If the image is NOT text-heavy (hardware photo, non-textual "
+    "diagram), skip section 1 and describe its visual contents in "
+    "section 2 with technical detail: subject, layout, identifying "
+    "features.\n"
     "\n"
-    "No preamble, no 'I see' or 'this image shows' filler. No thinking "
-    "out loud. Start directly with the extracted content."
+    "No preamble, no 'I see' or 'this image shows' filler. Start "
+    "directly with the EXTRACTED TEXT heading."
 )
 
 _USER_TEXT = "Analyze this image for the knowledge base."
@@ -100,28 +108,22 @@ async def describe(
     image_bytes: bytes,
     mime: str,
 ) -> str:
-    """Send the image to the captioning model and return a paragraph
-    describing it. The returned string is what gets chunked + embedded
-    into the RAG store as if it were the document's text.
+    """Send the image to the captioning model and return the merged
+    EXTRACTED TEXT + CONTEXT caption. The returned string is what
+    gets chunked + embedded into the RAG store as if it were the
+    document's text.
 
-    Raises InvalidImage if `mime` isn't in the supported set; we keep
-    that gate here (not at the router) so the seam owns its contract.
-    Network/timeout errors propagate to the caller, which maps them to
-    the right HTTP status.
+    Raises InvalidImage if `mime` isn't in the supported set.
+    Network/timeout errors propagate to the caller.
     """
     if mime not in _SUPPORTED_MIME:
         raise InvalidImage(f"Unsupported image MIME: {mime}")
 
-    # Test-only short-circuit. Set PRYZM_TEST_STUB_VLM=1 when running
-    # the e2e smoke harness so the upload pill flips quickly without
-    # cold-loading a 4B-param vision model. Never set in production.
     if os.environ.get("PRYZM_TEST_STUB_VLM") == "1":
         return _STUB_CAPTION
 
-    # Source of truth for the captioning model is the `vision` tag in
-    # llama-swap-config.yaml — pick whichever chat model carries it.
-    # If no model has the tag we can't caption; surface a clear error
-    # the upload endpoint can translate to a 503.
+    # Captioning model resolves via the `vision` tag in llama-swap
+    # config. Swap models by re-tagging the YAML; no code change.
     model = get_router().vision_capable_model()
     if model is None:
         raise InvalidImage(
@@ -156,13 +158,13 @@ async def describe(
     message = response.get("message") or {}
     content = (message.get("content") or "").strip()
     if not content:
-        # Gemma-4 sometimes routes the answer through `reasoning_content`
-        # when it decides the task warrants thinking. Fall back to that
-        # field so we don't surface an empty caption for what was
-        # actually a successful generation.
+        # Some reasoning models route the answer through
+        # `reasoning_content` when they decide to think. Fall back so
+        # we don't surface an empty caption for a successful generation.
         content = (message.get("reasoning_content") or "").strip()
     _logger.info(
         "image_describe: model=%s elapsed=%.2fs caption_chars=%d",
         model, elapsed, len(content),
     )
+    _logger.info("image_describe: caption content:\n%s", content)
     return content

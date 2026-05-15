@@ -99,6 +99,30 @@ class _IngestionError(Exception):
     exceptions so the finalize path can keep them out of the log noise."""
 
 
+async def _caption_image(
+    http_client: httpx.AsyncClient,
+    content: bytes,
+    mime: str,
+) -> str:
+    """Single VLM call. The captioning model (currently Qwen2-VL-2B
+    via the `vision` tag in llama-swap-config.yaml) produces both the
+    verbatim text extraction and the structural description in one
+    response.
+
+    Previously a hybrid pipeline ran RapidOCR + a structure-only VLM
+    in parallel and merged their outputs, but that approach had a
+    fundamental flaw: RapidOCR flattened multi-column form layouts
+    into a 1D text stream, breaking value-label relationships
+    (sidebar items at the same Y as form values got mashed into the
+    same output position). A single VLM with full spatial awareness
+    handles both concerns without the layout-collapse failure mode.
+    """
+    try:
+        return await image_describe.describe(http_client, content, mime=mime)
+    except image_describe.InvalidImage as e:
+        raise _IngestionError(str(e))
+
+
 async def _extract_text(
     http_client: httpx.AsyncClient,
     content: bytes,
@@ -108,12 +132,9 @@ async def _extract_text(
     """Return (text_content, storage_path). storage_path is non-None
     only for images, which we persist to disk after captioning succeeds."""
     if mime.startswith("image/"):
-        try:
-            text_content = await image_describe.describe(http_client, content, mime=mime)
-        except image_describe.InvalidImage as e:
-            raise _IngestionError(str(e))
+        text_content = await _caption_image(http_client, content, mime)
         if not text_content.strip():
-            raise _IngestionError("The model returned no description for this image.")
+            raise _IngestionError("Neither OCR nor the VLM produced any text for this image.")
         storage_path = image_storage.save_image(content, mime=mime)
         return text_content, storage_path
 

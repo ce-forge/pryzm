@@ -30,6 +30,19 @@ if not _pryzm_llm_logger.handlers:
     _pryzm_llm_logger.setLevel(logging.INFO)
     _pryzm_llm_logger.propagate = False
 
+# Same shape for `services.*` so diagnostic INFO logs from ocr_extract,
+# image_describe, model_prewarm, etc. surface in the dev terminal.
+# uvicorn's default config only wires uvicorn.* at INFO; everything else
+# inherits root WARNING and gets silently dropped.
+# Note: we leave propagate=True so pytest's caplog (which captures from
+# root) still works for tests that import this module transitively.
+_services_logger = logging.getLogger("services")
+if not _services_logger.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(message)s"))
+    _services_logger.addHandler(_handler)
+    _services_logger.setLevel(logging.INFO)
+
 
 class RequestLogger:
     """Pure ASGI middleware that prints METHOD path status duration_ms per
