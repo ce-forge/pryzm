@@ -78,7 +78,7 @@ def validate_target(host: str) -> tuple[bool, str]:
 @tool(
     properties={"hostname": {"type": "string", "description": "The hostname or IP. Append '.com' if it's a known web brand."}},
     required=["hostname"],
-    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first so the ping targets the resolved IP.",
+    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first, then call `execute_ping` with the resolved IP.",
 )
 def execute_ping(hostname: str) -> str:
     """Ping an IP address or hostname to check network connectivity and latency."""
@@ -104,7 +104,7 @@ def execute_ping(hostname: str) -> str:
         "port": {"type": "integer", "description": "The port number to check (e.g. 80, 443, 3389)"}
     },
     required=["hostname", "port"],
-    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first so the port check uses the resolved IP.",
+    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first, then call `check_port` with the resolved IP.",
 )
 def check_port(hostname: str, port: int) -> str:
     """Check if a specific TCP port is open on a target host."""
@@ -119,7 +119,7 @@ def check_port(hostname: str, port: int) -> str:
         return f"Port {port} on {hostname} ({detail}) is CLOSED or unreachable. Details: {str(e)}"
 
 @tool(
-    properties={"domain": {"type": "string", "description": "The domain name to resolve."}},
+    properties={"domain": {"type": "string", "description": "The domain name to resolve. Append '.com' if the user gave a bare web-brand name (e.g. \"youtube\" → \"youtube.com\")."}},
     required=["domain"]
 )
 def dns_lookup(domain: str) -> str:
