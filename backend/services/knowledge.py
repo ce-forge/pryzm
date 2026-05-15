@@ -1,11 +1,17 @@
 import httpx
 from db import models
-from sqlalchemy import or_
+from sqlalchemy import or_, func as sa_func
 from sqlalchemy.orm import Session
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import settings
 from utils.formatters import format_rag_context
 from core import llm_server
+
+
+# Reciprocal Rank Fusion constant. 60 is the canonical default from the
+# Cormack/Clarke/Buettcher 2009 paper that introduced RRF for combining
+# heterogeneous ranked lists. No reason to tune it for our scale.
+_RRF_K = 60
 
 
 async def get_embedding(client: httpx.AsyncClient, text: str) -> list[float]:
@@ -83,22 +89,135 @@ async def add_chunks_to_document(
     db.commit()
     return len(chunks)
 
-def _strip_query_prefix(query: str) -> str:
-    """Lowercase the query and strip the common interrogative prefixes that
-    hurt the ILIKE substring fallback. Single source of truth — both the
-    auto-RAG path and the search_knowledge_base tool use this."""
-    return (
-        query.lower()
-        .replace("what is the ", "")
-        .replace("who is ", "")
-        .replace("what is ", "")
-        .strip()
+def _scope_filter(session_id: str | None):
+    """Common WHERE clause restricting docs to the current session OR
+    any workspace-global ones. Both retrieval paths apply this."""
+    return or_(
+        models.Document.session_id == session_id,
+        models.Document.is_global == True,
+    )
+
+
+def _filename_filter(restrict_to_filenames: list[str] | None):
+    """When non-empty, return a SQL filter restricting documents to the
+    specified filenames (case-insensitive). Empty list / None returns
+    None so callers can spread it conditionally into a filter list."""
+    if not restrict_to_filenames:
+        return None
+    return sa_func.lower(models.Document.filename).in_(
+        [f.lower() for f in restrict_to_filenames]
     )
 
 
 def _query_chunks_by_vector(
     db: Session,
     query_vector: list[float],
+    workspace_id: str,
+    session_id: str = None,
+    threshold: float = 0.65,
+    top_k: int = 10,
+    restrict_to_filenames: list[str] | None = None,
+):
+    """Pure vector search. Returns up to top_k chunks ordered by cosine
+    distance ascending. `top_k` defaults to 10 because hybrid retrieval
+    over-fetches from each side so RRF has material to merge.
+
+    `restrict_to_filenames` narrows the search to chunks whose parent
+    Document.filename matches one of the entries (case-insensitive).
+    """
+    distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
+    filters = [
+        models.Document.workspace_id == workspace_id,
+        _scope_filter(session_id),
+        distance < threshold,
+    ]
+    fn_filter = _filename_filter(restrict_to_filenames)
+    if fn_filter is not None:
+        filters.append(fn_filter)
+
+    return (
+        db.query(models.DocumentChunk)
+        .join(models.Document)
+        .filter(*filters)
+        .order_by(distance)
+        .limit(top_k)
+        .all()
+    )
+
+
+def _query_chunks_by_keyword(
+    db: Session,
+    query: str,
+    workspace_id: str,
+    session_id: str = None,
+    top_k: int = 10,
+    restrict_to_filenames: list[str] | None = None,
+):
+    """Keyword search via tsvector. Returns chunks ordered by ts_rank
+    descending. Best at exact identifier strings (usernames, IDs,
+    error codes, IPs) — exactly where vector similarity blurs.
+
+    Uses `websearch_to_tsquery` which tolerates user-typed text
+    (quotes for phrases, OR operators, etc.). Empty query → empty
+    list (parser would otherwise produce a NULL tsquery).
+    """
+    if not query.strip():
+        return []
+    ts_q = sa_func.websearch_to_tsquery("simple", query)
+    rank = sa_func.ts_rank(models.DocumentChunk.content_tsv, ts_q)
+    filters = [
+        models.Document.workspace_id == workspace_id,
+        _scope_filter(session_id),
+        models.DocumentChunk.content_tsv.op("@@")(ts_q),
+    ]
+    fn_filter = _filename_filter(restrict_to_filenames)
+    if fn_filter is not None:
+        filters.append(fn_filter)
+
+    return (
+        db.query(models.DocumentChunk)
+        .join(models.Document)
+        .filter(*filters)
+        .order_by(rank.desc())
+        .limit(top_k)
+        .all()
+    )
+
+
+def _rrf_merge(
+    vector_results: list,
+    keyword_results: list,
+    top_k: int,
+) -> list:
+    """Reciprocal Rank Fusion. Combines two ranked lists into one by
+    summing 1/(K + rank) contributions from each list per chunk. Chunks
+    appearing high in either list get high scores; chunks appearing
+    in BOTH get the highest scores. Returns the top_k merged chunks
+    in descending RRF score order.
+
+    Key property: only rank order matters, not raw scores from the
+    underlying searches. Lets us combine cosine distance + ts_rank
+    cleanly without normalization headaches.
+    """
+    scores: dict[str, tuple[float, object]] = {}
+    for rank, chunk in enumerate(vector_results):
+        chunk_id = chunk.id
+        scores[chunk_id] = (1.0 / (_RRF_K + rank), chunk)
+    for rank, chunk in enumerate(keyword_results):
+        chunk_id = chunk.id
+        if chunk_id in scores:
+            score, c = scores[chunk_id]
+            scores[chunk_id] = (score + 1.0 / (_RRF_K + rank), c)
+        else:
+            scores[chunk_id] = (1.0 / (_RRF_K + rank), chunk)
+
+    merged = sorted(scores.values(), key=lambda sc: sc[0], reverse=True)
+    return [chunk for _score, chunk in merged[:top_k]]
+
+
+def _query_chunks_hybrid(
+    db: Session,
+    query_vector: list[float] | None,
     query: str,
     workspace_id: str,
     session_id: str = None,
@@ -106,56 +225,29 @@ def _query_chunks_by_vector(
     top_k: int = 3,
     restrict_to_filenames: list[str] | None = None,
 ):
-    """Pure-DB chunk search given a pre-computed embedding vector.
+    """Hybrid retrieval — vector + keyword, merged via RRF. Each side
+    over-fetches (top_k * 4, capped at 12) so RRF has material to work
+    with; the final top_k chunks come from the merge.
 
-    `restrict_to_filenames`, when non-empty, narrows the search to
-    chunks whose parent Document.filename matches one of the entries
-    (case-insensitive). Used by the explicit search tool to scope
-    retrieval to a user-named file.
+    `query_vector=None` is permitted (e.g., when embedding failed) —
+    falls back to keyword-only. Empty/conversational queries that
+    produce no keyword hits fall back to vector-only.
     """
-    distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
-    scope_filter = or_(
-        models.Document.session_id == session_id,
-        models.Document.is_global == True,
-    )
-    extra_filters = []
-    if restrict_to_filenames:
-        from sqlalchemy import func as sa_func
-        extra_filters.append(
-            sa_func.lower(models.Document.filename).in_(
-                [f.lower() for f in restrict_to_filenames]
-            )
+    fetch_k = min(max(top_k * 4, 8), 12)
+    vector_results = []
+    if query_vector:
+        vector_results = _query_chunks_by_vector(
+            db, query_vector,
+            workspace_id=workspace_id, session_id=session_id,
+            threshold=threshold, top_k=fetch_k,
+            restrict_to_filenames=restrict_to_filenames,
         )
-
-    results = (
-        db.query(models.DocumentChunk)
-        .join(models.Document)
-        .filter(
-            models.Document.workspace_id == workspace_id,
-            scope_filter,
-            distance < threshold,
-            *extra_filters,
-        )
-        .order_by(distance)
-        .limit(top_k)
-        .all()
+    keyword_results = _query_chunks_by_keyword(
+        db, query,
+        workspace_id=workspace_id, session_id=session_id,
+        top_k=fetch_k, restrict_to_filenames=restrict_to_filenames,
     )
-    if results:
-        return results
-
-    clean_query = _strip_query_prefix(query)
-    return (
-        db.query(models.DocumentChunk)
-        .join(models.Document)
-        .filter(
-            models.Document.workspace_id == workspace_id,
-            scope_filter,
-            models.DocumentChunk.content.ilike(f"%{clean_query}%"),
-            *extra_filters,
-        )
-        .limit(top_k)
-        .all()
-    )
+    return _rrf_merge(vector_results, keyword_results, top_k)
 
 
 async def search_chunks(
@@ -168,20 +260,21 @@ async def search_chunks(
     top_k: int = 3,
 ):
     """Async chunk-search used by the auto-RAG path. Embeds the query then
-    delegates to _query_chunks_by_vector for the DB work.
+    runs the hybrid (vector + keyword) retrieval merged via RRF.
 
-    The two callers pass different thresholds on purpose:
+    The two callers (auto-RAG vs the explicit tool) pass different
+    thresholds on purpose:
     - Auto-RAG uses a permissive 0.65 because it runs hands-off; we'd
       rather show the model a loosely-relevant chunk than skip RAG.
     - The explicit tool uses a stricter 0.45 because the LLM chose to
       look something up; precision over recall.
-
-    Returns the list of matching DocumentChunk rows (possibly empty).
     """
-    query_vector = await get_embedding(client, query)
-    if not query_vector:
-        return []
-    return _query_chunks_by_vector(db, query_vector, query, workspace_id, session_id, threshold, top_k)
+    query_vector = await get_embedding(client, query) if query.strip() else None
+    return _query_chunks_hybrid(
+        db, query_vector, query,
+        workspace_id=workspace_id, session_id=session_id,
+        threshold=threshold, top_k=top_k,
+    )
 
 
 def search_chunks_sync(
@@ -194,27 +287,29 @@ def search_chunks_sync(
     restrict_to_filenames: list[str] | None = None,
 ):
     """Sync chunk-search for use from tool functions (called synchronously
-    by ai_engine's tool dispatch). Embeds via a direct HTTP POST and
-    delegates to _query_chunks_by_vector.
+    by ai_engine's tool dispatch). Embeds via a direct HTTP POST then
+    runs hybrid retrieval merged via RRF.
 
-    `restrict_to_filenames` narrows the search to chunks from documents
-    with matching filenames (case-insensitive)."""
-    import requests
-    url = f"{settings.LLM_SERVER_URL.strip().rstrip('/')}/v1/embeddings"
-    try:
-        resp = requests.post(
-            url,
-            json={"model": llm_server.DEFAULT_EMBED_MODEL, "input": query},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        query_vector = resp.json()["data"][0]["embedding"]
-    except Exception:
-        query_vector = []
-    if not query_vector:
-        return []
-    return _query_chunks_by_vector(
-        db, query_vector, query, workspace_id, session_id, threshold, top_k,
+    `restrict_to_filenames` narrows both sides to documents with matching
+    filenames (case-insensitive)."""
+    query_vector = None
+    if query.strip():
+        import requests
+        url = f"{settings.LLM_SERVER_URL.strip().rstrip('/')}/v1/embeddings"
+        try:
+            resp = requests.post(
+                url,
+                json={"model": llm_server.DEFAULT_EMBED_MODEL, "input": query},
+                timeout=30,
+            )
+            resp.raise_for_status()
+            query_vector = resp.json()["data"][0]["embedding"]
+        except Exception:
+            query_vector = None
+    return _query_chunks_hybrid(
+        db, query_vector, query,
+        workspace_id=workspace_id, session_id=session_id,
+        threshold=threshold, top_k=top_k,
         restrict_to_filenames=restrict_to_filenames,
     )
 
