@@ -87,6 +87,7 @@ models:
       /app/llama-server --port ${PORT}
       -hf bartowski/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
+      --repeat-penalty 1.15
     tags:
     - vision
 
