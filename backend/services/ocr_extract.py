@@ -101,26 +101,19 @@ def extract_text(image_bytes: bytes, mime: str) -> Optional[str]:
         _logger.info("ocr_extract: all detections below confidence threshold")
         return None
 
-    # Group rows whose y_top is within a line-height of each other,
-    # then sort each group left-to-right. Approximates reading order
-    # without needing real layout analysis.
+    # Output each detected text segment on its own line, sorted by
+    # (y, x) for top-to-bottom-then-left-to-right reading order. We do
+    # NOT try to merge same-Y detections into "lines" — that broke
+    # multi-column forms (e.g. sidebar items + main-panel form values
+    # at the same vertical position got mashed together, hiding the
+    # value-label relationship from the LLM downstream).
+    #
+    # Keeping each detection on its own line lets the LLM associate
+    # labels with nearby values via proximity in the text stream.
+    # Real layout reconstruction (column detection, table parsing) is
+    # a deeper change handled by layout-aware OCR engines if needed.
     rows.sort()
-    out_lines: list[str] = []
-    current_line: list[tuple[float, str]] = []
-    current_y: Optional[float] = None
-    line_height = 20  # rough; OCR bboxes for normal UI text are 15-30px tall
-    for y_top, x_left, text in rows:
-        if current_y is None or abs(y_top - current_y) <= line_height:
-            current_line.append((x_left, text))
-            current_y = y_top if current_y is None else current_y
-        else:
-            current_line.sort()
-            out_lines.append(" ".join(t for _, t in current_line))
-            current_line = [(x_left, text)]
-            current_y = y_top
-    if current_line:
-        current_line.sort()
-        out_lines.append(" ".join(t for _, t in current_line))
+    out_lines = [text for _, _, text in rows]
 
     elapsed = time.perf_counter() - started
     text_out = "\n".join(out_lines)
