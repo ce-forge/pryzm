@@ -47,6 +47,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     isProcessing: currentIsProcessing,
   });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
   useEffect(() => {
     const isDesktopPointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
@@ -81,9 +82,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
 
       const textToSend = attachedPrefix + rawPrompt;
       uploader.clearQueue();
-      await ai.sendMessage(textToSend, activeIdToUse, documentIds);
+      const modes = webSearchEnabled ? ["web_search"] : [];
+      await ai.sendMessage(textToSend, activeIdToUse, documentIds, false, modes);
     },
-    [currentIsProcessing, session.currentSession, uploader, ai],
+    [currentIsProcessing, session.currentSession, uploader, ai, webSearchEnabled],
   );
 
   const stopAllInference = useCallback(() => {
@@ -197,6 +199,8 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
           processUploadQueue={(files) => uploader.processUploadQueue(files)}
           totalTokens={promptState.totalTokens}
           inputRef={textareaRef}
+          webSearchEnabled={webSearchEnabled}
+          setWebSearchEnabled={setWebSearchEnabled}
         />
       </div>
 

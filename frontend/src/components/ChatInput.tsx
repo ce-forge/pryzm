@@ -3,7 +3,7 @@ import { FileUpload } from "@/types/chat";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
-import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon } from "./Icons";
+import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon, GlobeIcon } from "./Icons";
 import { CircularProgress } from "./CircularProgress";
 
 /** Hash-style names from Samsung's SAF temp camera captures (32-char
@@ -58,12 +58,15 @@ interface ChatInputProps {
   processUploadQueue: (files: FileUpload[]) => void;
   totalTokens: number;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  webSearchEnabled: boolean;
+  setWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export default function ChatInput({
   prompt, setPrompt, uploads, setUploads, isProcessing, isAutoTesting,
   handleInference, stopAutoTest, handleKeyDown, runTestSuite,
-  processUploadQueue, totalTokens, inputRef
+  processUploadQueue, totalTokens, inputRef,
+  webSearchEnabled, setWebSearchEnabled,
 }: ChatInputProps) {
   
   const [isDragging, setIsDragging] = useState(false);
@@ -257,6 +260,19 @@ export default function ChatInput({
                       aria-label="Attach file"
                       className="p-2.5 rounded-full text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537] transition-all">
                       <PlusIcon className="w-5 h-5" />
+                    </button>
+
+                    <button type="button"
+                      onClick={() => setWebSearchEnabled((v) => !v)}
+                      aria-label={webSearchEnabled ? "Web search on" : "Web search off"}
+                      title={webSearchEnabled ? "Web search: on" : "Web search: off"}
+                      aria-pressed={webSearchEnabled}
+                      className={`p-2.5 rounded-full transition-all ${
+                        webSearchEnabled
+                          ? "bg-blue-500/20 text-blue-300 hover:bg-blue-500/30"
+                          : "text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537]"
+                      }`}>
+                      <GlobeIcon className="w-4 h-4" />
                     </button>
 
                     <button type="button" onClick={(e) => {

@@ -19,6 +19,7 @@ from core.engine_config import EngineConfig
 from core.llm_router import Tier, get_router
 from core.llm_metrics import emit_route, emit_escalate
 from tools.registry import ResolvedToolSet, render_tool_directives
+from core.modes import apply_modes
 from utils.formatters import (
     format_file_analyzed,
     format_knowledge_reference,
@@ -212,9 +213,8 @@ async def stream_chat(
     is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
     tier: Optional[Tier] = None,
     escalated: bool = False,
+    modes: Optional[list[str]] = None,
 ):
-    workspace_tools = tool_set.callables
-
     # Substitute {tool_names} placeholder in the workspace's stored
     # system prompt. We need the system_prompt from the DB but do NOT
     # need a full workspace fetch — retrieve it with a targeted query.
@@ -230,6 +230,17 @@ async def stream_chat(
     finally:
         db.close()
 
+    # Apply per-turn modes BEFORE rendering tool_names + directives so any
+    # force-included tool appears in both the LLM-visible tool list and the
+    # `== AVAILABLE TOOLS ==` directive block. (Tier hint from modes is
+    # captured but not consumed in v1 — no shipped mode sets one.)
+    tier_hint_from_modes = None
+    if modes:
+        tool_set, system_prompt_raw, tier_hint_from_modes = apply_modes(
+            tool_set, system_prompt_raw, modes,
+        )
+
+    workspace_tools = tool_set.callables
     tool_names = ", ".join(workspace_tools.keys())
     system_content = system_prompt_raw.replace("{tool_names}", tool_names)
     rendered_directives = render_tool_directives(tool_set)
@@ -517,6 +528,7 @@ async def stream_chat(
                 is_disconnected=is_disconnected,
                 tier=Tier.LARGE,
                 escalated=True,
+                modes=modes,
             ):
                 yield chunk
             return

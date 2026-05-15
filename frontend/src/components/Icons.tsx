@@ -181,6 +181,14 @@ export const PlusIcon = (props: React.SVGProps<SVGSVGElement>) => (
   </svg>
 );
 
+export const GlobeIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...baseProps} {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="2" y1="12" x2="22" y2="12" />
+    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+  </svg>
+);
+
 export const ChevronRightIcon = (props: React.SVGProps<SVGSVGElement>) => (
   <svg {...baseProps} {...props}>
     <polyline points="9 18 15 12 9 6" />
