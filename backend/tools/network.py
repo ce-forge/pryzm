@@ -47,10 +47,22 @@ def validate_target(host: str) -> tuple[bool, str]:
     if settings.NETWORK_TOOLS_ALLOW_PRIVATE:
         return True, host
 
-    try:
-        info = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        return False, f"DNS resolution failed: {exc}"
+    # Tolerate bare brand names ("youtube") by retrying with ".com" appended
+    # if the input has no dot and initial resolution fails. The TLD is the
+    # only thing missing in the common case — adding it once is cheap and
+    # avoids forcing every caller (LLM included) to remember the suffix.
+    candidates = [host] if "." in host else [host, f"{host}.com"]
+    last_err: Exception | None = None
+    info = None
+    for candidate in candidates:
+        try:
+            info = socket.getaddrinfo(candidate, None, type=socket.SOCK_STREAM)
+            host = candidate
+            break
+        except socket.gaierror as exc:
+            last_err = exc
+    if info is None:
+        return False, f"DNS resolution failed: {last_err}"
 
     resolved = sorted({entry[4][0] for entry in info})
     for ip_str in resolved:
