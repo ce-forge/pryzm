@@ -195,6 +195,73 @@ def test_remove_pill_fires_document_delete(
 
 
 # ---------------------------------------------------------------------------
+# Multi-image upload (sequential queue, both reach success)
+# ---------------------------------------------------------------------------
+
+def test_multiple_images_upload_sequentially_to_success(
+    page: Page, api_token: str, tmp_path, screenshot,
+):
+    """Pick two images in a single picker action. processUploadQueue
+    runs them sequentially (await per item); both pills should be
+    visible immediately, both should reach success state, and the
+    send button should stay disabled until both finish."""
+    from PIL import Image, ImageDraw
+
+    # Image 1: the cat fixture (general image).
+    # Image 2: a synthetic text-heavy "error dialog" so the test
+    # exercises the text-extraction-first prompt on at least one of
+    # the two captions.
+    text_img = tmp_path / "error_dialog.png"
+    img = Image.new("RGB", (560, 280), "white")
+    d = ImageDraw.Draw(img)
+    d.text((20, 20), "BACKUP SERVICE FAILED", fill="black")
+    d.text((20, 60), "Code: 0x80070005", fill="black")
+    d.text((20, 100), "Device: LAPTOP-042", fill="black")
+    d.text((20, 140), "Target: nas01-share-daily", fill="black")
+    d.text((20, 180), "Fix: Restart VSS service", fill="black")
+    d.text((20, 220), "[ Retry ]   [ Cancel ]", fill="black")
+    img.save(text_img)
+
+    _open_app_with_token(page, api_token)
+    # Type something so the `!prompt.trim()` clause doesn't dominate the
+    # submit button's disabled state — we want to assert specifically
+    # on uploads-in-progress vs settled, not on empty-textarea.
+    page.locator('textarea[placeholder="Ask Pryzm anything..."]').fill(
+        "what's in these"
+    )
+    page.locator('input[type="file"]').set_input_files(
+        [str(FIXTURE_IMG), str(text_img)]
+    )
+
+    # Both pills should appear right away (in any order — order isn't a
+    # contract we're testing). Wait for at least 2 thumbnail/database-
+    # icon slots inside the upload pill area.
+    pills = page.locator('div.relative.w-7.h-7.shrink-0')
+    pills.first.wait_for(state="visible", timeout=5_000)
+    page.wait_for_function(
+        '() => document.querySelectorAll("div.relative.w-7.h-7.shrink-0").length >= 2',
+        timeout=5_000,
+    )
+
+    # Send must be blocked while either upload is in flight.
+    submit = page.locator('button[type="submit"]').first
+    expect(submit).to_be_disabled(timeout=5_000)
+    screenshot("multi-uploading")
+
+    # Both pills should flip to emerald-success eventually. 120 s
+    # accommodates a cold E4B swap-in for the first upload + the
+    # second sequential captioning behind it.
+    page.wait_for_function(
+        '() => document.querySelectorAll("div.border-emerald-500\\\\/30").length >= 2',
+        timeout=120_000,
+    )
+    screenshot("multi-success")
+
+    # And the send button should be back.
+    expect(submit).to_be_enabled(timeout=2_000)
+
+
+# ---------------------------------------------------------------------------
 # Viewport — h-dvh prevents mobile chrome from covering the chat input
 # ---------------------------------------------------------------------------
 
