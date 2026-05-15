@@ -104,17 +104,28 @@ def _query_chunks_by_vector(
     session_id: str = None,
     threshold: float = 0.65,
     top_k: int = 3,
+    restrict_to_filenames: list[str] | None = None,
 ):
     """Pure-DB chunk search given a pre-computed embedding vector.
 
-    Separated from the embedding step so the sync tool path (tools/retrieval.py)
-    can supply its own vector without entering async context.
+    `restrict_to_filenames`, when non-empty, narrows the search to
+    chunks whose parent Document.filename matches one of the entries
+    (case-insensitive). Used by the explicit search tool to scope
+    retrieval to a user-named file.
     """
     distance = models.DocumentChunk.embedding.cosine_distance(query_vector)
     scope_filter = or_(
         models.Document.session_id == session_id,
         models.Document.is_global == True,
     )
+    extra_filters = []
+    if restrict_to_filenames:
+        from sqlalchemy import func as sa_func
+        extra_filters.append(
+            sa_func.lower(models.Document.filename).in_(
+                [f.lower() for f in restrict_to_filenames]
+            )
+        )
 
     results = (
         db.query(models.DocumentChunk)
@@ -123,6 +134,7 @@ def _query_chunks_by_vector(
             models.Document.workspace_id == workspace_id,
             scope_filter,
             distance < threshold,
+            *extra_filters,
         )
         .order_by(distance)
         .limit(top_k)
@@ -139,6 +151,7 @@ def _query_chunks_by_vector(
             models.Document.workspace_id == workspace_id,
             scope_filter,
             models.DocumentChunk.content.ilike(f"%{clean_query}%"),
+            *extra_filters,
         )
         .limit(top_k)
         .all()
@@ -178,11 +191,14 @@ def search_chunks_sync(
     session_id: str = None,
     threshold: float = 0.65,
     top_k: int = 3,
+    restrict_to_filenames: list[str] | None = None,
 ):
-    """Sync chunk-search for use from tool functions (which are called
-    synchronously by ai_engine). Embeds via a direct HTTP POST to the LLM
-    server's /v1/embeddings endpoint and delegates to _query_chunks_by_vector
-    for the DB work."""
+    """Sync chunk-search for use from tool functions (called synchronously
+    by ai_engine's tool dispatch). Embeds via a direct HTTP POST and
+    delegates to _query_chunks_by_vector.
+
+    `restrict_to_filenames` narrows the search to chunks from documents
+    with matching filenames (case-insensitive)."""
     import requests
     url = f"{settings.LLM_SERVER_URL.strip().rstrip('/')}/v1/embeddings"
     try:
@@ -197,7 +213,10 @@ def search_chunks_sync(
         query_vector = []
     if not query_vector:
         return []
-    return _query_chunks_by_vector(db, query_vector, query, workspace_id, session_id, threshold, top_k)
+    return _query_chunks_by_vector(
+        db, query_vector, query, workspace_id, session_id, threshold, top_k,
+        restrict_to_filenames=restrict_to_filenames,
+    )
 
 
 def _label_chunk(chunk) -> str:

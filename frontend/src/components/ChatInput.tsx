@@ -237,10 +237,25 @@ export default function ChatInput({
                       className="hidden"
                       ref={fileInputRef}
                       accept="image/jpeg, image/png, image/webp"
-                      onChange={(e) => e.target.files && processFiles(Array.from(e.target.files))}
+                      onChange={(e) => {
+                        const files = e.target.files;
+                        if (files && files.length > 0) {
+                          processFiles(Array.from(files));
+                        }
+                        // Reset so re-picking the same file fires onChange.
+                        // Without this, Samsung PWA users hit a silent
+                        // no-op on the second pick of an identical file.
+                        e.target.value = "";
+                      }}
                     />
 
-                    <button type="button" onClick={() => fileInputRef.current?.click()}
+                    <button type="button" onClick={() => {
+                      // Pre-clear value defensively — Samsung PWA can
+                      // swallow the first programmatic click after a
+                      // re-render when the input has a stale value.
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                      fileInputRef.current?.click();
+                    }}
                       aria-label="Attach file"
                       className="p-2.5 rounded-full text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537] transition-all">
                       <PlusIcon className="w-5 h-5" />
