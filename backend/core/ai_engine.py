@@ -36,6 +36,53 @@ _THINK_BLOCK_RE = re.compile(
     re.DOTALL | re.IGNORECASE,
 )
 
+
+# Filename pattern for natural-language mentions ("show me screenshot.png").
+# Restricted to the extensions we actually ingest — keeps false positives
+# down (e.g. "version 1.5.2" is not a filename in our world).
+_FILENAME_MENTION_RE = re.compile(
+    r'\b([\w\-]+\.(?:jpg|jpeg|png|webp|pdf|txt|md|py|csv|json|log|yaml|yml|conf|ini))\b',
+    re.IGNORECASE,
+)
+
+
+def _match_session_filename_mentions(
+    text: str,
+    *,
+    workspace_id: str,
+    session_id: Optional[str],
+) -> list[str]:
+    """Return filenames mentioned in `text` that match a Document in the
+    current session (or workspace globals). Empty list if none.
+
+    Used by stream_chat as a fallback when no [Attached_File:] marker
+    is present — lets the user reference earlier uploads by filename
+    in natural conversation without re-attaching.
+    """
+    candidates = _FILENAME_MENTION_RE.findall(text)
+    if not candidates:
+        return []
+    # Lowercase + dedupe so ILIKE-style matching is straightforward.
+    candidates_lower = list({c.lower() for c in candidates})
+    db = database.SessionLocal()
+    try:
+        from sqlalchemy import func, or_
+        rows = (
+            db.query(models.Document.filename)
+            .filter(
+                models.Document.workspace_id == workspace_id,
+                func.lower(models.Document.filename).in_(candidates_lower),
+                or_(
+                    models.Document.session_id == session_id,
+                    models.Document.is_global == True,  # noqa: E712 — SQLAlchemy column comparison
+                ),
+            )
+            .all()
+        )
+        return [r[0] for r in rows]
+    finally:
+        db.close()
+
 async def condense_chat_memory(
     client: httpx.AsyncClient,
     old_memory: str,
@@ -161,13 +208,27 @@ async def stream_chat(
 
     if recent_messages and recent_messages[-1].get("role") == "user":
         last_query = recent_messages[-1].get("content", "")
-        has_attachment = "[Attached_File:" in last_query
-        # Pull every attached filename out of the marker so the retrieval
-        # step can scope to those documents specifically. Without this the
-        # auto-RAG path runs a workspace-wide semantic search and surfaces
-        # unrelated docs alongside the one the user actually attached.
-        attached_filenames = re.findall(r'\[Attached_File:\s*([^\]]+?)\s*\]', last_query)
-        clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
+        # Two ways to scope auto-RAG to a specific document:
+        #   1. Explicit [Attached_File:X] marker from this turn's upload.
+        #   2. Natural-language filename mention that matches a Document
+        #      already in this session/workspace (e.g. "what's in
+        #      screenshot.png" referring to an earlier upload).
+        # Marker path strips the marker from the visible user text;
+        # mention path leaves the filename in place (it's part of the
+        # real prompt).
+        marker_filenames = re.findall(r'\[Attached_File:\s*([^\]]+?)\s*\]', last_query)
+        has_attachment = bool(marker_filenames)
+        attached_filenames: list[str] = marker_filenames
+        clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip() if has_attachment else last_query.strip()
+
+        if not has_attachment:
+            mention_match = _match_session_filename_mentions(
+                last_query, workspace_id=workspace_id, session_id=session_id,
+            )
+            if mention_match:
+                attached_filenames = mention_match
+                has_attachment = True
+
         if has_attachment:
             # No user text alongside the attachment → caller wants an overview
             # of the file, not a semantic search. Flag instead of magic-string.

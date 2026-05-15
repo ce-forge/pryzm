@@ -69,18 +69,16 @@ async def warm_model(
         _logger.warning("pre-warm failed for %s: %s", model_id, e)
 
 
-async def warm_always_on(
+async def warm_models(
     client: httpx.AsyncClient,
     llm_server_url: str,
     models: Iterable[tuple[str, set[str]]],
 ) -> None:
-    """Warm every model in `models`. Runs them sequentially because
-    llama-swap loads one at a time anyway (single GPU, swap=true on
-    the chat group). Parallel calls would just queue inside llama-swap.
+    """Warm every model in `models` sequentially. llama-swap serializes
+    loads on a single GPU anyway, so parallel calls just queue.
 
     Independence matters: if `gemma-4-E2B-it` fails to load, we still
-    want the embedding model to be warm by the time a user opens the
-    chat UI and triggers auto-RAG.
+    want the embedding model warm by the time auto-RAG fires.
     """
     for model_id, tags in models:
         await warm_model(client, llm_server_url, model_id, tags)

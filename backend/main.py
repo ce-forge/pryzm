@@ -90,15 +90,15 @@ async def lifespan(app: FastAPI):
     catalog = llm_router.build_catalog_from_yaml(_LLAMA_SWAP_CONFIG_PATH)
     llm_router.init_router(catalog)
 
-    # Pre-warm always-on models in the background. The server is ready
-    # for traffic immediately; the warmup completes in ~10-30s. Without
-    # this the first user request after a restart pays the cold-load
-    # cost (and llama-swap's `persistent: true` doesn't help — it
-    # prevents eviction, not initial load).
-    always_on = llm_router.always_on_models_from_yaml(_LLAMA_SWAP_CONFIG_PATH)
+    # Pre-warm always-on + vision-tagged models in the background. The
+    # server is ready for traffic immediately; warmup completes in
+    # ~10-30s. Without this, first user request pays cold-load cost
+    # (llama-swap's `persistent: true` prevents eviction, not initial
+    # load), and first image upload pays it on the VLM specifically.
+    models = llm_router.models_to_prewarm_from_yaml(_LLAMA_SWAP_CONFIG_PATH)
     prewarm_task = asyncio.create_task(
-        model_prewarm.warm_always_on(
-            app.state.http_client, settings.LLM_SERVER_URL, always_on,
+        model_prewarm.warm_models(
+            app.state.http_client, settings.LLM_SERVER_URL, models,
         )
     )
 

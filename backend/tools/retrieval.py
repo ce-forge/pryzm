@@ -16,23 +16,42 @@ from utils.formatters import format_tool_results
                 "Do NOT issue separate tool calls for each item; this tool batches multiple "
                 "queries internally and labels the results by query."
             ),
-        }
+        },
+        "filenames": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "OPTIONAL. When the user references specific files by name (e.g., "
+                "'what's in screenshot.png' or 'check runbook.pdf'), pass those "
+                "filenames here. Retrieval will be scoped to those documents only, "
+                "so unrelated content in the workspace doesn't compete in the results. "
+                "Omit when the user is asking a general question across the knowledge base."
+            ),
+        },
     },
     required=["queries"],
     workspaces=["it_copilot", "personal"],
 )
-def search_knowledge_base(queries, workspace_id: str, session_id: str = None) -> str:
+def search_knowledge_base(
+    queries,
+    workspace_id: str,
+    session_id: str = None,
+    filenames=None,
+) -> str:
     """Search the internal documentation and knowledge base.
 
     Accepts a list of search terms. For each, runs an independent vector
-    search and returns a labeled section. Single-query callers can pass a
-    one-element list — the function also tolerates a bare string for
-    backward-compat with mid-stream model calls during the schema migration."""
+    search and returns a labeled section. Optionally scoped to a list of
+    filenames when the user references specific files. Single-query
+    callers can pass a one-element list — the function also tolerates a
+    bare string for backward-compat with older model calls."""
     # Backward-compat: a model that hasn't updated may still send a string.
     if isinstance(queries, str):
         queries = [queries]
     if not queries:
         return "No queries provided."
+    if isinstance(filenames, str):
+        filenames = [filenames]
 
     db = SessionLocal()
     try:
@@ -44,6 +63,7 @@ def search_knowledge_base(queries, workspace_id: str, session_id: str = None) ->
             results = search_chunks_sync(
                 db, q, workspace_id=workspace_id, session_id=session_id,
                 threshold=0.45, top_k=3,
+                restrict_to_filenames=filenames or None,
             )
             if results:
                 blocks = [_label_chunk(chunk) for chunk in results]

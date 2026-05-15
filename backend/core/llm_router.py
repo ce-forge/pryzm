@@ -126,25 +126,29 @@ def build_catalog_from_yaml(path: str | pathlib.Path) -> dict[str, set[str]]:
     }
 
 
-def always_on_models_from_yaml(
+def models_to_prewarm_from_yaml(
     path: str | pathlib.Path,
 ) -> list[tuple[str, set[str]]]:
-    """Return `[(model_id, tags), ...]` for every model in the `always-on`
-    group. Used by the startup pre-warmer to know which models to load
-    before the first user request arrives.
+    """Return `[(model_id, tags), ...]` for models the startup pre-warmer
+    should load before the first user request.
 
-    The `always-on` group in llama-swap means "don't unload once loaded"
-    — it doesn't mean "load at startup". Pairing this list with a
-    background pre-warm closes that gap.
+    Includes anything in the `always-on` group (those need an initial
+    load — `persistent: true` only prevents eviction) AND anything
+    tagged `vision`, so image-upload captioning doesn't pay cold-load
+    cost on the first image of a session.
+
+    Dedup is by model_id; a model that's both always-on and vision
+    appears once.
     """
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
-    result: list[tuple[str, set[str]]] = []
+    seen: dict[str, set[str]] = {}
     for model_id, model_cfg in (cfg.get("models") or {}).items():
-        groups = model_cfg.get("groups") or []
-        if "always-on" in groups:
-            result.append((model_id, set(model_cfg.get("tags") or [])))
-    return result
+        tags = set(model_cfg.get("tags") or [])
+        groups = set(model_cfg.get("groups") or [])
+        if "always-on" in groups or "vision" in tags:
+            seen[model_id] = tags
+    return list(seen.items())
 
 
 _router_singleton: Optional[HeuristicRouter] = None

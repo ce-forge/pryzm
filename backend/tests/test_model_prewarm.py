@@ -17,10 +17,13 @@ def _yaml_at(tmp_path: pathlib.Path, content: str) -> pathlib.Path:
 
 
 # ---------------------------------------------------------------------------
-# always_on_models_from_yaml
+# models_to_prewarm_from_yaml
 # ---------------------------------------------------------------------------
 
-def test_always_on_yaml_returns_only_models_in_always_on_group(tmp_path):
+def test_prewarm_yaml_includes_always_on_and_vision_tagged(tmp_path):
+    """Pre-warm list includes anything in the `always-on` group OR
+    tagged `vision`. The vision-tagged E4B (`chat` group, swappable)
+    is included so the first image upload doesn't pay cold-load cost."""
     path = _yaml_at(tmp_path, """
 models:
   "gemma-4-E2B-it":
@@ -31,17 +34,37 @@ models:
     cmd: "x"
     groups: ["chat"]
     tags: ["vision"]
+  "untagged-chat":
+    cmd: "x"
+    groups: ["chat"]
+    tags: []
   "nomic-embed":
     cmd: "x"
     groups: ["always-on"]
     tags: ["embedding"]
 """)
-    out = llm_router.always_on_models_from_yaml(path)
+    out = llm_router.models_to_prewarm_from_yaml(path)
     out_ids = {model_id for model_id, _ in out}
-    assert out_ids == {"gemma-4-E2B-it", "nomic-embed"}
+    assert out_ids == {"gemma-4-E2B-it", "gemma-4-E4B-it", "nomic-embed"}
+    assert "untagged-chat" not in out_ids
 
 
-def test_always_on_yaml_preserves_tags(tmp_path):
+def test_prewarm_yaml_dedupes_always_on_plus_vision_model(tmp_path):
+    """A model that's both always-on AND vision-tagged appears once."""
+    path = _yaml_at(tmp_path, """
+models:
+  "vision-pinned":
+    cmd: "x"
+    groups: ["always-on"]
+    tags: ["vision"]
+""")
+    out = llm_router.models_to_prewarm_from_yaml(path)
+    assert len(out) == 1
+    assert out[0][0] == "vision-pinned"
+    assert "vision" in out[0][1]
+
+
+def test_prewarm_yaml_preserves_tags(tmp_path):
     """Embedding tag in particular needs to survive — the pre-warmer
     uses it to pick /v1/embeddings vs /v1/chat/completions."""
     path = _yaml_at(tmp_path, """
@@ -51,13 +74,13 @@ models:
     groups: ["always-on"]
     tags: ["embedding"]
 """)
-    out = llm_router.always_on_models_from_yaml(path)
+    out = llm_router.models_to_prewarm_from_yaml(path)
     assert out == [("embed", {"embedding"})]
 
 
-def test_always_on_yaml_handles_missing_groups_field(tmp_path):
-    """A model with no `groups:` key (or null) shouldn't blow up; just
-    skip it. Defensive against partial config edits."""
+def test_prewarm_yaml_handles_missing_groups_field(tmp_path):
+    """A model with no groups/tags shouldn't blow up; just skip it.
+    Defensive against partial config edits."""
     path = _yaml_at(tmp_path, """
 models:
   "model-a":
@@ -69,12 +92,12 @@ models:
     cmd: "x"
     groups: ["always-on"]
 """)
-    out_ids = {m for m, _ in llm_router.always_on_models_from_yaml(path)}
+    out_ids = {m for m, _ in llm_router.models_to_prewarm_from_yaml(path)}
     assert out_ids == {"model-c"}
 
 
 # ---------------------------------------------------------------------------
-# warm_model / warm_always_on
+# warm_model / warm_models
 # ---------------------------------------------------------------------------
 
 class _StubTransport(httpx.AsyncBaseTransport):
@@ -130,7 +153,7 @@ async def test_warm_model_swallows_failure_and_logs(caplog):
 
 
 @pytest.mark.asyncio
-async def test_warm_always_on_runs_each_independently():
+async def test_warm_models_runs_each_independently():
     """One failing model must not stop subsequent models from warming.
     Embedding model coming AFTER a failed chat model is the realistic
     case — we don't want auto-RAG to pay the embed-load cost just
@@ -138,7 +161,7 @@ async def test_warm_always_on_runs_each_independently():
     transport = _StubTransport()
     transport.fail_for = {"flaky-chat"}
     async with httpx.AsyncClient(transport=transport) as client:
-        await model_prewarm.warm_always_on(
+        await model_prewarm.warm_models(
             client,
             "http://llama:9000",
             [("flaky-chat", set()), ("nomic-embed", {"embedding"})],
