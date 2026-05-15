@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Dict, Optional, List
 import asyncio
 import json
+import logging
 
 from db import database, models
 from core import ai_engine
@@ -25,6 +26,36 @@ from core.deps import get_http_client
 from core.llm_metrics import get_last_chat_snapshot as _last_chat_metric_snapshot
 from services import condense
 from tools.registry import build_tool_set
+
+_log = logging.getLogger(__name__)
+
+
+def _accumulate_tool_event(acc: list, event: dict) -> None:
+    """Append/update tool-call accumulator from a streamed event.
+
+    Pairs by ORDER (not by name): a tool_result always completes the most-
+    recent entry whose result is still None. A tool_result with no open
+    entry is logged and dropped (defensive guard against engine bugs)."""
+    etype = event.get("type")
+    if etype == "tool_call":
+        acc.append({
+            "name": event.get("name", ""),
+            "args": event.get("args") or {},
+            "result": None,
+        })
+    elif etype == "tool_result":
+        for i in range(len(acc) - 1, -1, -1):
+            if acc[i]["result"] is None:
+                acc[i]["result"] = event.get("result", "")
+                return
+        _log.warning("tool_result %r arrived with no open tool_call; dropping", event.get("name"))
+
+
+def _finalize_tool_calls(acc: list) -> list:
+    """Drop entries with no result (left unpaired by a mid-stream disconnect).
+
+    Returned list is safe to persist as the assistant row's tool_calls JSONB."""
+    return [tc for tc in acc if tc.get("result") is not None]
 
 
 def _error_envelope(exc: Exception) -> dict:
@@ -349,6 +380,7 @@ async def analyze_data(
         completed = False
         disconnected = False
         assistant_message_id: Optional[str] = None
+        tool_calls_acc: list[dict] = []
 
         try:
             async for chunk in ai_engine.stream_chat(
@@ -363,6 +395,11 @@ async def analyze_data(
                 if await http_request.is_disconnected():
                     disconnected = True
                     break
+                if isinstance(chunk, dict):
+                    if chunk.get("type") in ("tool_call", "tool_result"):
+                        _accumulate_tool_event(tool_calls_acc, chunk)
+                    yield json.dumps(chunk) + "\n"
+                    continue
                 full_response += chunk
                 yield json.dumps({"chunk": chunk}) + "\n"
 
@@ -379,6 +416,7 @@ async def analyze_data(
                             role="assistant",
                             content=full_response,
                             status="complete",
+                            tool_calls=_finalize_tool_calls(tool_calls_acc) or None,
                         )
                         save_db.add(ai_msg)
                         save_db.commit()
