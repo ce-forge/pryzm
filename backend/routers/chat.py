@@ -64,22 +64,37 @@ def build_safe_messages(history) -> list[dict]:
     Legacy rows (tool_calls NULL) emit one flat {role, content}. New rows
     with structured tool_calls emit one {role: "assistant", content,
     tool_calls: [...]} followed by one {role: "tool", name, content: result}
-    per call, in order. Malformed tool_calls (non-list) is treated as legacy."""
+    per call, in order. Malformed tool_calls (non-list) is treated as legacy.
+
+    OpenAI-spec compliance matters: llama-swap strictly requires
+    tool_calls[].id, tool_calls[].type=="function", arguments as a JSON
+    string, and {role:"tool"}.tool_call_id matching back. We synthesise
+    deterministic ids from the row id + index since we don't round-trip
+    the LLM's original call ids through the JSONB column."""
     out: list[dict] = []
     for msg in history:
         tcs = getattr(msg, "tool_calls", None)
         if msg.role == "assistant" and isinstance(tcs, list) and tcs:
+            call_ids = [f"call_{i}_{msg.id}" for i in range(len(tcs))]
             out.append({
                 "role": "assistant",
                 "content": msg.content or "",
                 "tool_calls": [
-                    {"function": {"name": tc["name"], "arguments": tc.get("args") or {}}}
-                    for tc in tcs
+                    {
+                        "id": call_ids[i],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": json.dumps(tc.get("args") or {}),
+                        },
+                    }
+                    for i, tc in enumerate(tcs)
                 ],
             })
-            for tc in tcs:
+            for i, tc in enumerate(tcs):
                 out.append({
                     "role": "tool",
+                    "tool_call_id": call_ids[i],
                     "name": tc["name"],
                     "content": tc.get("result") or "",
                 })
