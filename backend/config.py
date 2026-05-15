@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     
     REDIS_URL: str = "redis://127.0.0.1:6379"
     LLM_SERVER_URL: str = "http://127.0.0.1:8080"
+    SEARXNG_URL: str = "http://127.0.0.1:8888"
 
     # Explicit allowlist. Combining "*" with allow_credentials=True (set in
     # main.py) is rejected by browsers, so wildcarding is off. Defaults to
