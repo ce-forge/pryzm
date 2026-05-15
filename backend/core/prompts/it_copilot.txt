@@ -13,6 +13,7 @@ When the user asks about content from an uploaded file and that content is in th
 - For multi-item requests:
   - If the tool accepts an array parameter (e.g. `search_knowledge_base` takes `queries: [...]`), pass all items in a single call as an array.
   - If the tool takes a scalar parameter (e.g. `dns_lookup`, `check_port`), issue parallel calls — one per item.
+
 {tool_directives}
 
 == TOOL EXECUTION ==
