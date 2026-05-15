@@ -30,7 +30,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from db import database, models
-from services import image_describe, image_storage, ingest_broker, knowledge, ocr_extract, pdf_extract
+from services import image_describe, image_storage, ingest_broker, knowledge, pdf_extract
 
 _logger = logging.getLogger(__name__)
 
@@ -104,48 +104,23 @@ async def _caption_image(
     content: bytes,
     mime: str,
 ) -> str:
-    """Build the stored caption by running OCR and VLM in parallel and
-    merging their outputs. Each engine owns one section:
+    """Single VLM call. The captioning model (currently Qwen2-VL-2B
+    via the `vision` tag in llama-swap-config.yaml) produces both the
+    verbatim text extraction and the structural description in one
+    response.
 
-      EXTRACTED TEXT (OCR): canonical verbatim text. No language-prior
-      pattern completion — OCR reads pixels into characters.
-
-      CONTEXT (VLM): structure, layout, what kind of screen, what
-      fields are visible by role and position. The VLM is prompted to
-      AVOID transcribing text content; OCR handles that.
-
-    There is exactly one source of verbatim text in the caption, so
-    the chat-time LLM cannot surface ambiguous "X or Y" readings.
-
-    Fallback: if OCR returns nothing meaningful (rare on screen photos
-    but real for hand-drawn diagrams, photos without legible text), we
-    re-run the VLM with the original verbatim-extraction prompt so we
-    never store an empty caption.
+    Previously a hybrid pipeline ran RapidOCR + a structure-only VLM
+    in parallel and merged their outputs, but that approach had a
+    fundamental flaw: RapidOCR flattened multi-column form layouts
+    into a 1D text stream, breaking value-label relationships
+    (sidebar items at the same Y as form values got mashed into the
+    same output position). A single VLM with full spatial awareness
+    handles both concerns without the layout-collapse failure mode.
     """
     try:
-        ocr_task = asyncio.to_thread(ocr_extract.extract_text, content, mime)
-        vlm_task = image_describe.describe(http_client, content, mime=mime)
-        ocr_text, vlm_text = await asyncio.gather(ocr_task, vlm_task)
+        return await image_describe.describe(http_client, content, mime=mime)
     except image_describe.InvalidImage as e:
         raise _IngestionError(str(e))
-
-    if ocr_text and ocr_text.strip():
-        sections = [f"EXTRACTED TEXT (OCR):\n{ocr_text.strip()}"]
-        if vlm_text and vlm_text.strip():
-            sections.append(f"CONTEXT:\n{vlm_text.strip()}")
-        return "\n\n".join(sections)
-
-    # OCR found nothing — fall back to VLM with the verbatim prompt so
-    # text-light images (hardware photos, diagrams) still get useful
-    # captions.
-    _logger.info("ingest: OCR empty, falling back to VLM-with-verbatim-prompt")
-    try:
-        fallback_text = await image_describe.describe(
-            http_client, content, mime=mime, verbatim_fallback=True,
-        )
-    except image_describe.InvalidImage as e:
-        raise _IngestionError(str(e))
-    return (fallback_text or "").strip()
 
 
 async def _extract_text(
