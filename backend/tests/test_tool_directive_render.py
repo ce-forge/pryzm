@@ -192,31 +192,3 @@ def test_inject_empty_rendered_mid_prompt_placeholder():
     prompt = "SECTION_A_END\n\n{tool_directives}\n\nSECTION_B_START"
     result = _inject_tool_directives(prompt, "")
     assert result == "SECTION_A_END\n\nSECTION_B_START"
-
-
-def test_strip_tool_mimicry_removes_lookalike_blocks():
-    """LLM-generated mimicry of the engine's > **Tool:** + ```text``` blocks
-    is stripped from the model's content before reaching the chat surface."""
-    from core.ai_engine import _strip_tool_mimicry
-    raw = (
-        "> **Tool:** `dns_lookup` → `\"discord.com\"`\n\n"
-        "```text\n"
-        "DNS Lookup successful: The IP address for discord.com is 1.2.3.4\n"
-        "```\n\n"
-        "The discord.com server is online and reachable."
-    )
-    out = _strip_tool_mimicry(raw)
-    assert "> **Tool:**" not in out
-    assert "```text" not in out
-    assert "discord.com server is online" in out
-
-
-def test_strip_tool_mimicry_preserves_other_code_blocks():
-    """Legitimate fenced code blocks (python, bash, etc.) are not affected —
-    only ```text``` blocks (which the engine reserves for tool output) are
-    stripped."""
-    from core.ai_engine import _strip_tool_mimicry
-    raw = "Here:\n```python\nprint('ok')\n```\nDone."
-    out = _strip_tool_mimicry(raw)
-    assert "```python" in out
-    assert "print('ok')" in out
