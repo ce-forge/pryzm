@@ -3,13 +3,15 @@ import { CheckIcon, CancelIcon, RerunIcon } from "./Icons";
 import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import MessageActions from "./MessageActions";
+import ToolCallsBlock from "./ToolCallsBlock";
+import type { ToolCall } from "@/types/chat";
 
 interface ChatBubbleProps {
   // stable identity (parent passes `m` directly, no spread). The shape
   // here is the message row from useSession's messageCache — we leave
   // it loosely typed to avoid coupling this component to the entire
   // server-message schema.
-  message: { id?: string; role: string; content: string; timestamp?: string };
+  message: { id?: string; role: string; content: string; timestamp?: string; toolCalls?: ToolCall[] };
   displayContent: string; // streamed text; updates per token without changing `message`
   index: number;
   searchQuery: string;
@@ -105,6 +107,13 @@ function ChatBubbleImpl({
               <AssistantMessage content={displayContent} searchQuery={searchQuery} />
             )}
           </div>
+
+          {/* Structured tool calls — engine-emitted, persisted on the
+              messages.tool_calls JSONB column. Only renders on assistant
+              turns that actually executed tools. */}
+          {message.role !== "user" && message.toolCalls && message.toolCalls.length > 0 && (
+            <ToolCallsBlock calls={message.toolCalls} />
+          )}
 
           {!isStreaming && (
             <MessageActions

@@ -17,6 +17,7 @@ import SearchBar from "./SearchBar";
 import ChatTimestamp from "./ChatTimestamp";
 import ChatBubble from "./ChatBubble";
 import ConfirmModal from "./ConfirmModal";
+import { Message } from "@/types/chat";
 
 interface ActiveSessionProps {
   isSidebarOpen: boolean;
@@ -148,8 +149,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
             <QuickActions setPrompt={promptState.setPrompt} inputRef={textareaRef} />
           )}
 
-          {messages.map((m: { id?: string; role: string; content: string; timestamp?: string }, i: number) => {
+          {messages.map((m: Message, i: number) => {
             const isLastStreaming = currentIsProcessing && i === messages.length - 1 && m.role === "assistant";
+            const liveToolCalls = isLastStreaming ? ai.streamingToolCalls[session.currentSession ?? ""] : undefined;
+            const displayToolCalls = liveToolCalls ?? m.toolCalls;
             const displayContent = isLastStreaming && myStreamingText ? myStreamingText : m.content;
             const stableKey = m.id ?? `idx-${i}`;
             return (
@@ -160,7 +163,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
                   isFirstMessage={i === 0}
                 />
                 <ChatBubble
-                  message={m}
+                  message={{ ...m, toolCalls: displayToolCalls }}
                   displayContent={displayContent}
                   index={i}
                   searchQuery={search.searchQuery}
