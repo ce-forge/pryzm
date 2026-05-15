@@ -80,7 +80,12 @@ class Settings(BaseSettings):
     # truncated mid-extraction. The caption is the SOLE record of the
     # image's content (no re-attach at chat time), so missed text
     # cannot be recovered short of re-uploading.
-    IMAGE_CAPTION_MAX_TOKENS: int = 2500
+    # Capped at 1200 — captioning generation time scales linearly with
+    # this. Most captions finish well before the cap via EOS; only very
+    # text-heavy IT screenshots brush against it. Was 2500; reducing
+    # closes the felt latency gap on uploads. Raise back if truncation
+    # becomes a real issue on real screenshots.
+    IMAGE_CAPTION_MAX_TOKENS: int = 1200
     IMAGE_CAPTION_TEMPERATURE: float = 0.15
 
     # PDF ingest knob (services/pdf_extract.py). Caps the per-upload page

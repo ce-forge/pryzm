@@ -81,15 +81,13 @@ export default function ChatInput({
     }
   }, [prompt, inputRef]);
 
-  // Block send while any attached file is still being prepared. Without
-  // this gate the prompt goes out with an [Attached_File:foo.jpg] marker
-  // but the chunks aren't in the DB yet, the auto-RAG path misses them,
-  // and the user gets a worse answer than if they'd waited. Covers:
-  // - 'pending' (queued client-side, not started),
-  // - 'uploading' (XHR in flight),
-  // - 'processing' (bytes on server, captioning/embedding in progress).
+  // Block send while bytes still haven't reached the server — the
+  // backend can't reason about a doc it doesn't have a row for. Once
+  // the upload XHR returns 202 the row exists in 'processing' state;
+  // /analyze waits on the broker for it to flip to 'ready' before
+  // firing auto-RAG. So 'processing' is no longer a UI-blocking state.
   const uploadsInProgress = uploads.some(
-    (u) => u.status === "pending" || u.status === "uploading" || u.status === "processing",
+    (u) => u.status === "pending" || u.status === "uploading",
   );
 
   const guardedSubmit = (e?: React.FormEvent) => {

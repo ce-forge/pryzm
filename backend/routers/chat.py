@@ -48,6 +48,67 @@ def _error_envelope(exc: Exception) -> dict:
 router = APIRouter(tags=["AI Chat"])
 
 
+# Bound on how long /analyze will wait for in-flight attachments to
+# finish ingestion. Larger than typical captioning (~10-15s) so we
+# don't bail prematurely; smaller than a runaway "stuck task" so we
+# can degrade gracefully to "no RAG context for that doc" instead.
+_ATTACHMENT_WAIT_TIMEOUT_SECONDS = 60.0
+
+
+async def _wait_for_processing_attachments(
+    attachment_ids: list[str],
+    workspace_id: str,
+    db: Session,
+) -> None:
+    """Wait for any 'processing' attachments to reach terminal state.
+
+    Subscribes to the ingest broker for each in-flight doc and awaits
+    the first terminal event (or the global timeout). Already-terminal
+    docs are skipped. Reads status fresh from DB after subscribing —
+    if it flipped between the check and subscribe, we won't block.
+    """
+    if not attachment_ids:
+        return
+    docs = (
+        db.query(models.Document)
+        .filter(
+            models.Document.id.in_(attachment_ids),
+            models.Document.workspace_id == workspace_id,
+        )
+        .all()
+    )
+    processing_ids = [d.id for d in docs if d.status == "processing"]
+    if not processing_ids:
+        return
+
+    broker = ingest_broker.broker()
+    queues: dict[str, asyncio.Queue] = {
+        doc_id: broker.subscribe(doc_id) for doc_id in processing_ids
+    }
+    deadline = asyncio.get_event_loop().time() + _ATTACHMENT_WAIT_TIMEOUT_SECONDS
+    try:
+        for doc_id, queue in queues.items():
+            # Re-check status — task may have finished between subscribe
+            # call above and now. Avoids waiting on an already-terminal
+            # row that never publishes again.
+            db.expire_all()
+            doc = db.query(models.Document).filter(models.Document.id == doc_id).first()
+            if doc is None or doc.status in ("ready", "error"):
+                continue
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                break
+            try:
+                await asyncio.wait_for(queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                # Bail out of the wait; the auto-RAG path will still run,
+                # just without context from the still-processing doc.
+                break
+    finally:
+        for doc_id, queue in queues.items():
+            broker.unsubscribe(doc_id, queue)
+
+
 def _resolve_workspace_or_404(slug: str, db: Session) -> models.Workspace:
     """Resolve a workspace slug to its ORM object; 404 if not found."""
     workspace = db.query(models.Workspace).filter(models.Workspace.slug == slug).first()
@@ -243,6 +304,14 @@ async def analyze_data(
                 synchronize_session=False,
             )
             db.commit()
+
+            # Frontend may have submitted before all attached docs finished
+            # processing. Wait for terminal status on each via the broker
+            # so auto-RAG sees the captions when we hit knowledge.retrieve_*.
+            # Bounded so a stuck ingestion doesn't deadlock the chat call.
+            await _wait_for_processing_attachments(
+                request.attachments, workspace.id, db,
+            )
 
         user_message_id: Optional[str] = None
         if not request.skip_db_save:

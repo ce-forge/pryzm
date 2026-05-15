@@ -14,13 +14,17 @@ tune temperature without touching the router. See
 from __future__ import annotations
 
 import base64
+import logging
 import os
+import time
 
 import httpx
 
 from config import settings
 from core import llm_server
 from core.llm_router import get_router
+
+_logger = logging.getLogger(__name__)
 
 
 # Test-only stub gate. When `PRYZM_TEST_STUB_VLM=1` is set in the
@@ -139,6 +143,7 @@ async def describe(
         "temperature": settings.IMAGE_CAPTION_TEMPERATURE,
         "max_tokens": settings.IMAGE_CAPTION_MAX_TOKENS,
     }
+    started = time.perf_counter()
     response = await llm_server.chat(
         client,
         messages=messages,
@@ -146,6 +151,7 @@ async def describe(
         model=model,
         options=options,
     )
+    elapsed = time.perf_counter() - started
 
     message = response.get("message") or {}
     content = (message.get("content") or "").strip()
@@ -155,4 +161,8 @@ async def describe(
         # field so we don't surface an empty caption for what was
         # actually a successful generation.
         content = (message.get("reasoning_content") or "").strip()
+    _logger.info(
+        "image_describe: model=%s elapsed=%.2fs caption_chars=%d",
+        model, elapsed, len(content),
+    )
     return content
