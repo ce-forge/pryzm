@@ -30,12 +30,21 @@ class SessionUpdate(BaseModel):
 class FolderUpdate(BaseModel):
     name: str
 
+class ReferencedFile(BaseModel):
+    id: str
+    filename: str
+    mime: str
+
+
 class MessageHistory(BaseModel):
     id: str
     role: str
     content: str
     status: str = "complete"
     timestamp: Optional[str] = None
+    # Image documents retrieved alongside this turn — surfaced as inline
+    # previews in the chat UI. NULL/empty for turns that referenced none.
+    referenced_files: Optional[List[ReferencedFile]] = None
 
 class FolderCreate(BaseModel):
     id: str

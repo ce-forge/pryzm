@@ -219,6 +219,7 @@ def get_session_history(
             "content": m.content,
             "status": m.status,
             "timestamp": m.created_at.isoformat() if m.created_at else None,
+            "referenced_files": m.referenced_docs or None,
             }
             for m in messages
     ]
@@ -350,6 +351,7 @@ async def analyze_data(
         disconnected = False
         assistant_message_id: Optional[str] = None
 
+        referenced_docs: list[dict] | None = None
         try:
             async for item in ai_engine.stream_chat(
                 http_client,
@@ -371,6 +373,23 @@ async def analyze_data(
                 # AND appended to the response buffer so the saved
                 # assistant message reflects the full markdown.
                 if isinstance(item, dict):
+                    # Capture files_referenced so we can persist them
+                    # onto the assistant message row below — that's what
+                    # makes inline previews survive page reload (without
+                    # this, the refs only existed in volatile frontend
+                    # state until the user refreshed).
+                    if item.get("type") == "files_referenced":
+                        files = item.get("files") or []
+                        # Multiple emissions in one turn (e.g. one from
+                        # auto-RAG, one from a follow-up tool call):
+                        # accumulate, dedup by doc id.
+                        merged = list(referenced_docs or [])
+                        seen = {f["id"] for f in merged}
+                        for f in files:
+                            if f.get("id") and f["id"] not in seen:
+                                merged.append(f)
+                                seen.add(f["id"])
+                        referenced_docs = merged or None
                     yield json.dumps(item) + "\n"
                     continue
                 full_response += item
@@ -389,6 +408,7 @@ async def analyze_data(
                             role="assistant",
                             content=full_response,
                             status="complete",
+                            referenced_docs=referenced_docs,
                         )
                         save_db.add(ai_msg)
                         save_db.commit()

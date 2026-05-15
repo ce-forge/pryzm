@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
-import { Message } from "@/types/chat";
+import { Message, ReferencedFile } from "@/types/chat";
 
 // Cache key = workspace_slug:sessionId so switching workspaces doesn't bleed
 // cached history across different workspace contexts.
@@ -113,12 +113,22 @@ export function useSession() {
         const historyRes = await apiFetch(`/sessions/${currentSession}`, { cache: 'no-store' });
         if (historyRes.ok) {
           const historyData = await historyRes.json();
+          // Server returns snake_case `referenced_files`; the client
+          // Message type uses camelCase. Map at the boundary so the
+          // rest of the app stays in one naming convention.
+          const mapped: Message[] = historyData.map((m: Message & { referenced_files?: ReferencedFile[] }) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+            referencedFiles: m.referenced_files ?? undefined,
+          }));
           // Skip the overwrite if this session is mid-stream — the SSE-driven
           // path is now responsible for the optimistic→real id swap and the
           // DB snapshot would be stale relative to the in-flight optimistic
           // bubble.
           if (!streamingSessionIdsRef.current.has(currentSession)) {
-            setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: historyData }));
+            setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: mapped }));
           }
         }
       } catch (error) {
