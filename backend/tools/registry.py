@@ -50,7 +50,7 @@ def build_tool_set(workspace) -> ResolvedToolSet:
     )
 
 
-def tool(properties, required=None, workspaces=None):
+def tool(properties, required=None, workspaces=None, system_prompt_directive=""):
     """A decorator that turns a Python function into an LLM-callable tool.
 
     workspaces: list of workspace names in which the tool is exposed. Defaults
@@ -58,6 +58,12 @@ def tool(properties, required=None, workspaces=None):
     only available in the IT Copilot workspace. Pass a longer list to opt a
     tool into additional workspaces (e.g. rename_chat_session is allowed in
     "personal" too because users like that affordance everywhere).
+
+    system_prompt_directive: short text injected into the workspace's rendered
+    system prompt under the `== AVAILABLE TOOLS ==` block. Describes WHEN/HOW
+    to call the tool (NOT what it does — that's the JSON-schema description).
+    Empty string = the tool gets no per-tool line in the rendered block (it
+    still gets listed in {tool_names} as today).
     """
     if required is None:
         required = []
@@ -74,6 +80,7 @@ def tool(properties, required=None, workspaces=None):
             )
         AVAILABLE_TOOLS[name] = func
         TOOL_WORKSPACES[name] = list(workspaces)
+        func.system_prompt_directive = system_prompt_directive
 
         TOOL_DEFINITIONS.append({
             "type": "function",
