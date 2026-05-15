@@ -393,6 +393,27 @@ async def stream_chat(
                         had_tool_error = True
 
                     yield format_code_block(result)
+
+                    # When the search_knowledge_base tool returns chunks
+                    # from image documents, surface them to the frontend
+                    # as files_referenced so the inline preview renders
+                    # below the assistant response. This mirrors the
+                    # auto-RAG path's emission and closes the gap where
+                    # tool-call retrievals weren't getting inline images.
+                    if func_name == "search_knowledge_base" and isinstance(result, str):
+                        from_filenames = re.findall(r'\[from ([^\]]+)\]', result)
+                        if from_filenames:
+                            tool_db = database.SessionLocal()
+                            try:
+                                refs = _image_document_refs(
+                                    tool_db, list(set(from_filenames)),
+                                    workspace_id, session_id,
+                                )
+                            finally:
+                                tool_db.close()
+                            if refs:
+                                yield {"type": "files_referenced", "files": refs}
+
                     full_messages.append({
                         "role": "tool",
                         "content": str(result),
