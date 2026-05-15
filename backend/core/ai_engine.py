@@ -56,7 +56,6 @@ def _inject_tool_directives(prompt: str, rendered: str) -> str:
     unchanged regardless of whether the placeholder is present.
     """
     if not rendered:
-        # Strip a lonely placeholder so the prompt doesn't leak it to the LLM.
         return prompt.replace("{tool_directives}", "").rstrip()
     if "{tool_directives}" in prompt:
         return prompt.replace("{tool_directives}", rendered)
