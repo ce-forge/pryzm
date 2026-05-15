@@ -430,6 +430,7 @@ async def analyze_data(
         disconnected = False
         assistant_message_id: Optional[str] = None
         tool_calls_acc: list[dict] = []
+        referenced_docs: list[dict] | None = None
 
         try:
             async for chunk in ai_engine.stream_chat(
@@ -445,8 +446,21 @@ async def analyze_data(
                     disconnected = True
                     break
                 if isinstance(chunk, dict):
-                    if chunk.get("type") in ("tool_call", "tool_result"):
+                    ctype = chunk.get("type")
+                    if ctype in ("tool_call", "tool_result"):
                         _accumulate_tool_event(tool_calls_acc, chunk)
+                    elif ctype == "files_referenced":
+                        # Accumulate image-document refs from auto-RAG and
+                        # search_knowledge_base into the assistant row so
+                        # inline previews survive page reload. Dedupe by id.
+                        files = chunk.get("files") or []
+                        merged = list(referenced_docs or [])
+                        seen = {f["id"] for f in merged}
+                        for f in files:
+                            if f.get("id") and f["id"] not in seen:
+                                merged.append(f)
+                                seen.add(f["id"])
+                        referenced_docs = merged or None
                     yield json.dumps(chunk) + "\n"
                     continue
                 full_response += chunk
@@ -466,6 +480,7 @@ async def analyze_data(
                             content=full_response,
                             status="complete",
                             tool_calls=_finalize_tool_calls(tool_calls_acc) or None,
+                            referenced_docs=referenced_docs,
                         )
                         save_db.add(ai_msg)
                         save_db.commit()
@@ -683,6 +698,66 @@ async def upload_events(
         headers={
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
+        },
+    )
+
+
+_IMAGE_MIME_BY_EXT = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+@router.get("/documents/{document_id}/raw")
+def get_document_raw(
+    document_id: str,
+    db: Session = Depends(database.get_db),
+    _auth: None = Depends(require_token),
+):
+    """Stream the original bytes of an uploaded document.
+
+    Only image documents are supported today — they're the only type
+    that persists original bytes (Document.storage_path is non-NULL).
+    PDFs and text are stored as chunks only.
+
+    Returns:
+      200 + image bytes (Content-Type inferred from filename ext)
+      404 if doc is missing
+      410 if the doc exists but has no storage_path (PDF/text)
+      404 if the on-disk file is gone (e.g. cleanup race)
+
+    Auth: bearer header OR `?token=` URL fallback. The URL fallback
+    matters because `<img src=...>` can't set custom headers, just
+    like EventSource.
+    """
+    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.storage_path:
+        raise HTTPException(
+            status_code=410,
+            detail="Original bytes not available for this document type.",
+        )
+    import os as _os
+    if not _os.path.exists(doc.storage_path):
+        raise HTTPException(status_code=404, detail="Document file is missing on disk.")
+
+    ext = _os.path.splitext(doc.filename.lower())[1]
+    mime = _IMAGE_MIME_BY_EXT.get(ext, "application/octet-stream")
+
+    def _stream():
+        with open(doc.storage_path, "rb") as f:
+            while chunk := f.read(64 * 1024):
+                yield chunk
+
+    return StreamingResponse(
+        _stream(),
+        media_type=mime,
+        headers={
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Disposition": f'inline; filename="{doc.filename}"',
         },
     )
 

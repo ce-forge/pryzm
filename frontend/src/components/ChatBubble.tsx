@@ -4,14 +4,15 @@ import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import MessageActions from "./MessageActions";
 import ToolCallsBlock from "./ToolCallsBlock";
-import type { ToolCall } from "@/types/chat";
+import ReferencedFilesPreview from "./ReferencedFilesPreview";
+import type { ToolCall, ReferencedFile } from "@/types/chat";
 
 interface ChatBubbleProps {
   // stable identity (parent passes `m` directly, no spread). The shape
   // here is the message row from useSession's messageCache — we leave
   // it loosely typed to avoid coupling this component to the entire
   // server-message schema.
-  message: { id?: string; role: string; content: string; timestamp?: string };
+  message: { id?: string; role: string; content: string; timestamp?: string; referencedFiles?: ReferencedFile[] };
   displayContent: string; // streamed text; updates per token without changing `message`
   toolCalls?: ToolCall[]; // passed separately so message reference stays stable
   index: number;
@@ -115,6 +116,13 @@ function ChatBubbleImpl({
               turns that actually executed tools. */}
           {message.role !== "user" && toolCalls && toolCalls.length > 0 && (
             <ToolCallsBlock calls={toolCalls} />
+          )}
+
+          {/* Inline image previews for any image documents the auto-RAG
+              or search_knowledge_base path surfaced this turn. Persisted
+              on messages.referenced_docs so they survive page reload. */}
+          {message.role !== "user" && message.referencedFiles && message.referencedFiles.length > 0 && (
+            <ReferencedFilesPreview files={message.referencedFiles} />
           )}
 
           {!isStreaming && (
