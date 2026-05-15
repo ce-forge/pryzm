@@ -9,7 +9,7 @@ interface ChatBubbleProps {
   // here is the message row from useSession's messageCache — we leave
   // it loosely typed to avoid coupling this component to the entire
   // server-message schema.
-  message: { id?: string; role: string; content: string };
+  message: { id?: string; role: string; content: string; timestamp?: string };
   displayContent: string; // streamed text; updates per token without changing `message`
   index: number;
   searchQuery: string;
@@ -111,9 +111,9 @@ function ChatBubbleImpl({
               content={displayContent}
               timestamp={message.timestamp}
               isUser={message.role === 'user'}
-              onDelete={() => onDeleteRequest(message.id, index)}
+              onDelete={() => onDeleteRequest(message.id!, index)}
               onEdit={() => { setIsEditing(true); setEditValue(message.content); }}
-              onBranch={() => branchSession(message.id)}
+              onBranch={() => branchSession(message.id!)}
               onRerun={() => message.role === 'user'
                 ? saveEdit(message.id, index, message.content, true)
                 : rerunAssistant(index)

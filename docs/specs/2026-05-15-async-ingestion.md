@@ -315,12 +315,12 @@ Existing rows get `status='ready'`, which is correct — they're all already ing
 
 Four PRs, each independently shippable:
 
-| # | PR | Scope |
-|---|---|---|
-| 1 | **Migration + Document.status field** | Alembic revision, `db/models.Document` gains the column, no behavior change. Forward-compatible: old `/upload` still works, new column defaults to 'ready'. |
-| 2 | **Backend pipeline extraction + broker** | New `services/ingest_broker.py` + `services/ingest_pipeline.py`. Refactor existing `/upload` to call `ingest_doc` synchronously (await it inside the handler) as a no-op preservation of current behavior. Tests pin the same green outcomes. |
-| 3 | **Async `/upload` + SSE endpoint** | Flip `/upload` to spawn `asyncio.create_task` and return 202. Add `GET /uploads/{doc_id}/events`. Frontend `useUploader` opens the EventSource. Pill gains `'processing'` state. Smoke harness gets a new probe that verifies the 202-then-SSE-then-ready flow. |
-| 4 | **Cleanup + manual verification** | Drop the auth-via-URL-query approach once we're confident, update docs, update spec follow-ups. |
+| # | PR | Scope | Status |
+|---|---|---|---|
+| 1 | **Migration + Document.status field** | Alembic revision, `db/models.Document` gains the column, no behavior change. Forward-compatible: old `/upload` still works, new column defaults to 'ready'. | Shipped (#57) |
+| 2 | **Backend pipeline extraction + broker** | New `services/ingest_broker.py` + `services/ingest_pipeline.py`. Refactor existing `/upload` to call `ingest_doc` synchronously (await it inside the handler) as a no-op preservation of current behavior. Tests pin the same green outcomes. | Shipped (#58) |
+| 3 | **Async `/upload` + SSE endpoint** | Flip `/upload` to spawn `asyncio.create_task` and return 202. Add `GET /uploads/{doc_id}/events`. Frontend `useUploader` opens the EventSource. Pill gains `'processing'` state. | Shipped (#59) |
+| 4 | **Smoke harness + spec close-out** | New Playwright probe for the 202-then-SSE-then-ready flow with a backend-side VLM stub for fast runs. Spec close-out. The URL-query auth lands as the permanent fallback for EventSource until cookie auth ships — it can't be dropped without also dropping SSE. | This PR |
 
 PR 2 is the safety net: it changes the code path internally without changing the user-visible behavior, so PR 3's flip is a single localised change.
 
