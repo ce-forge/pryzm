@@ -46,6 +46,23 @@ _FILENAME_MENTION_RE = re.compile(
 )
 
 
+def _inject_tool_directives(prompt: str, rendered: str) -> str:
+    """Substitute {tool_directives} in the prompt with the rendered block.
+
+    If the placeholder is missing, append the block after the prompt with a
+    blank line separator — keeps hand-edited workspace prompts (that forgot the
+    placeholder) functional. If the rendered block is empty (no tool has any
+    directive AND no module has a MODULE_DIRECTIVE), the prompt is returned
+    unchanged regardless of whether the placeholder is present.
+    """
+    if not rendered:
+        # Strip a lonely placeholder so the prompt doesn't leak it to the LLM.
+        return prompt.replace("{tool_directives}", "").rstrip()
+    if "{tool_directives}" in prompt:
+        return prompt.replace("{tool_directives}", rendered)
+    return f"{prompt}\n\n{rendered}"
+
+
 def _match_session_filename_mentions(
     text: str,
     *,
@@ -159,8 +176,11 @@ async def stream_chat(
     finally:
         db.close()
 
+    from tools.registry import render_tool_directives
     tool_names = ", ".join(workspace_tools.keys())
     system_content = system_prompt_raw.replace("{tool_names}", tool_names)
+    rendered_directives = render_tool_directives(tool_set)
+    system_content = _inject_tool_directives(system_content, rendered_directives)
 
     tools_payload = tool_set.definitions if workspace_tools else None
     system_msg = {"role": "system", "content": system_content}

@@ -156,3 +156,37 @@ def test_render_module_import_error_does_not_raise():
         ResolvedToolSet(callables={"orphan_tool": fn}, definitions=[], per_tool_config={})
     )
     assert "orphan_tool: x" in result
+
+
+def test_placeholder_substitution_inline():
+    """When {tool_directives} is present in the prompt, the rendered block lands there."""
+    mod = _make_module_with_directive("test_pkg.sub1", None)
+    fn = _make_callable("x_tool", mod, "Use for X.")
+    rendered = render_tool_directives(
+        ResolvedToolSet(callables={"x_tool": fn}, definitions=[], per_tool_config={})
+    )
+    prompt = "BEFORE\n\n{tool_directives}\n\nAFTER"
+    assert "{tool_directives}" in prompt
+    substituted = prompt.replace("{tool_directives}", rendered)
+    assert substituted == f"BEFORE\n\n{rendered}\n\nAFTER"
+
+
+def test_missing_placeholder_appends():
+    """When {tool_directives} is missing, ai_engine's fallback appends the rendered block.
+    (Behavior tested at the engine level in Task 3's wiring; this test pins the contract.)"""
+    mod = _make_module_with_directive("test_pkg.sub2", None)
+    fn = _make_callable("y_tool", mod, "Use for Y.")
+    rendered = render_tool_directives(
+        ResolvedToolSet(callables={"y_tool": fn}, definitions=[], per_tool_config={})
+    )
+
+    from core.ai_engine import _inject_tool_directives  # introduced in this task
+
+    out = _inject_tool_directives("PROMPT BODY", rendered)
+    assert out == "PROMPT BODY\n\n" + rendered
+
+    inline = _inject_tool_directives("BEFORE {tool_directives} AFTER", rendered)
+    assert inline == f"BEFORE {rendered} AFTER"
+
+    empty = _inject_tool_directives("PROMPT BODY", "")
+    assert empty == "PROMPT BODY"
