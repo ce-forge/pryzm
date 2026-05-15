@@ -17,15 +17,12 @@ from __future__ import annotations
 import os
 import uuid
 
-# Module-level constant: where the uploads live. Computed once at import,
-# absolute path, so the same value is used regardless of which directory
-# the FastAPI worker process was launched from.
+# Absolute path so the value is stable regardless of cwd at process start.
 _UPLOADS_DIR = os.path.abspath(
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "uploads")
 )
 
-# Map supported MIME -> extension. The /upload router enforces the same
-# set; if a new image type lands later it gets added in both places.
+# Mirror the supported set in the /upload router — add new types in both.
 _MIME_TO_EXT = {
     "image/jpeg": ".jpg",
     "image/png": ".png",

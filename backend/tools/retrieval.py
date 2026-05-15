@@ -1,7 +1,6 @@
 from tools.registry import tool
 from db.database import SessionLocal
 from services.knowledge import search_chunks_sync, _label_chunk
-from utils.formatters import format_tool_results
 
 
 @tool(

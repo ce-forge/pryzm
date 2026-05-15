@@ -1,15 +1,7 @@
-"""VLM-based image description.
-
-Replaces the rapidocr-based seam from PR #21. The captioning step now runs
-through the existing llama-server (`llm_server.chat`) using a
-vision-capable model. The function signature is intentionally identical
-to the old `ocr.extract_text` so call sites (today: `/upload`) didn't
-need to change shape; only the import.
-
-Why a separate module: keeps the upload endpoint thin and gives a single
-location to revise the captioning prompt, change the captioning model, or
-tune temperature without touching the router. See
-`docs/specs/2026-05-15-image-upload-vlm.md` for the broader design.
+"""VLM-based image description — runs through llama-server using whichever
+chat model carries the `vision` tag. Owns the captioning prompt, model
+selection, and temperature. See `docs/specs/2026-05-15-image-upload-vlm.md`
+for the broader design.
 """
 from __future__ import annotations
 

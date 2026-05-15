@@ -57,7 +57,7 @@ def test_owns_404s_when_resource_missing(db_session):
 
 def test_message_in_workspace_via_session(db_session):
     """Verify the Message helper resolves through Session.workspace_id."""
-    from routers.chat import _message_in_workspace_or_404
+    from routers.sessions import _message_in_workspace_or_404
     ws_a, ws_b, msg = _seed_two_workspaces_with_one_message(db_session)
     # Owner workspace → returns the message.
     result = _message_in_workspace_or_404("msg-a", "ws-a", db_session)
@@ -66,7 +66,7 @@ def test_message_in_workspace_via_session(db_session):
 
 def test_message_cross_workspace_404(db_session):
     """Cross-workspace message lookup returns 404."""
-    from routers.chat import _message_in_workspace_or_404
+    from routers.sessions import _message_in_workspace_or_404
     ws_a, ws_b, msg = _seed_two_workspaces_with_one_message(db_session)
     with pytest.raises(HTTPException) as exc:
         _message_in_workspace_or_404("msg-a", "ws-b", db_session)
@@ -75,7 +75,7 @@ def test_message_cross_workspace_404(db_session):
 
 def test_message_missing_404(db_session):
     """Missing message returns 404 regardless of workspace."""
-    from routers.chat import _message_in_workspace_or_404
+    from routers.sessions import _message_in_workspace_or_404
     ws_a, ws_b, msg = _seed_two_workspaces_with_one_message(db_session)
     with pytest.raises(HTTPException) as exc:
         _message_in_workspace_or_404("nonexistent", "ws-a", db_session)

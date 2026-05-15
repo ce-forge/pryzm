@@ -53,9 +53,7 @@ async def warm_model(
         payload: dict = {"model": model_id, "input": "."}
     else:
         url = f"{base}/v1/chat/completions"
-        # max_tokens=1 keeps the response cheap. The model still has
-        # to be loaded into VRAM either way; the load cost is what
-        # we're paying for here.
+        # max_tokens=1: load cost is what we pay for; output size is irrelevant.
         payload = {
             "model": model_id,
             "messages": [{"role": "user", "content": "."}],

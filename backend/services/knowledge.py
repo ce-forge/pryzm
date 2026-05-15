@@ -65,12 +65,9 @@ async def add_chunks_to_document(
 
     chunks = splitter.split_text(content)
 
-    # Store the raw chunk text and embed it as-is. The filename is already
-    # carried on the parent Document; injecting it into every chunk's content
-    # AND its embedding vector (the previous behaviour) polluted the
-    # vector space — every query had to compete against "Source Document: ..."
-    # boilerplate. Filename gets re-attached at retrieval time so the model
-    # still sees provenance per chunk.
+    # Store raw chunk text only; filename is re-attached at retrieval time.
+    # (Previously the filename was injected into chunk content + embedded,
+    # which polluted the vector space with "Source Document: ..." boilerplate.)
     for chunk_text in chunks:
         vector = await get_embedding(client, chunk_text)
         db.add(models.DocumentChunk(
@@ -282,7 +279,7 @@ async def retrieve_relevant_chunks(
                 .all()
             )
             if chunks:
-                context_blocks = [f"[from {recent_doc.filename}]\n{c.content}" for c in chunks]
+                context_blocks = [_label_chunk(c) for c in chunks]
                 formatted_context = "\n\n=== FILE EXCERPTS ===\n"
                 formatted_context += "\n\n---\n\n".join(context_blocks)
                 return {

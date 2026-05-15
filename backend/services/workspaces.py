@@ -8,13 +8,12 @@ at request time.
 """
 import os
 import re
-from typing import Optional, Tuple
+from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from db import models
-from tools.registry import AVAILABLE_TOOLS, TOOL_DEFINITIONS
 
 
 PROMPTS_DIR = os.path.join(
@@ -52,40 +51,6 @@ def get_or_default(db: Session, slug: Optional[str]) -> models.Workspace:
     if not ws:
         raise HTTPException(status_code=500, detail="No workspaces exist. Database is empty.")
     return ws
-
-
-def resolve_tools_for_workspace(workspace: models.Workspace) -> Tuple[dict, list]:
-    """Given a workspace, return (callable_map, definitions_list) filtered to
-    just the tools the workspace has enabled AND that exist in the live
-    AVAILABLE_TOOLS registry. Stale names in enabled_tools (e.g. for tools
-    that were removed in a later code change) are silently ignored — the
-    workspace works with whatever the engineer kept."""
-    enabled = set(workspace.enabled_tools or [])
-    callables = {name: fn for name, fn in AVAILABLE_TOOLS.items() if name in enabled}
-    definitions = [d for d in TOOL_DEFINITIONS if d["function"]["name"] in enabled]
-    return callables, definitions
-
-
-def resolve_model_for_request(workspace: models.Workspace) -> str:
-    """Pick the model name to send to Ollama for this chat call.
-
-    Resolution order, most specific first:
-      1. workspace.engine_config["model"] (if set)
-      2. hardcoded fallback "gemma4:e4b"
-
-    NOTE: this function does NOT verify the chosen model is currently
-    installed in Ollama. Validation happens at PATCH /workspaces time so
-    the pin is known-good when it's stored. If the model is later
-    uninstalled, the Ollama call itself will fail and the request
-    logger middleware (main.py) will record the error — we'd rather pay
-    that cost on a broken-but-rare configuration than a /api/tags
-    round-trip on every chat call.
-    """
-    if workspace and workspace.engine_config:
-        model = workspace.engine_config.get("model")
-        if model:
-            return model
-    return "gemma4:e4b"
 
 
 def slugify(display_name: str) -> str:

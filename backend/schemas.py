@@ -18,10 +18,6 @@ class SessionResponse(BaseModel):
     is_pinned: Optional[bool] = False
     created_at: datetime
 
-class SessionInfo(BaseModel):
-    id: str
-    title: str
-
 class SessionUpdate(BaseModel):
     folder_id: Optional[str] = None
     title: Optional[str] = None

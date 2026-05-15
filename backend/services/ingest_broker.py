@@ -53,10 +53,7 @@ class IngestBroker:
             await q.put(event)
 
 
-# Module-level singleton. The instance is intentionally not held in
-# app.state — there's only one uvicorn worker in this deployment, and
-# tests want to be able to swap it via monkeypatch without reaching
-# into FastAPI's app fixture.
+# Module-level singleton — single worker; tests monkeypatch directly.
 _broker = IngestBroker()
 
 
@@ -64,20 +61,15 @@ def broker() -> IngestBroker:
     return _broker
 
 
-# ---------------------------------------------------------------------------
-# Background-task lifecycle. asyncio.create_task returns a Task whose
-# strong reference must be held externally — Python may otherwise GC
-# the task while it's still running. We keep a module-level set and
-# the task removes itself on completion via add_done_callback.
-# ---------------------------------------------------------------------------
+# asyncio.create_task returns a Task that gets GC'd if its reference is
+# dropped — losing background work mid-run. We hold every spawned task
+# in a module-level set; each task removes itself via add_done_callback.
 
 _active_tasks: set[asyncio.Task] = set()
 
 
 def add_task(coro: Awaitable[None]) -> asyncio.Task:
-    """asyncio.create_task wrapper that keeps a strong reference to
-    the resulting Task in a module-level set. Callers use this instead
-    of bare create_task to avoid the GC-mid-run hazard."""
+    """create_task wrapper that holds a strong reference until completion."""
     task = asyncio.create_task(coro)
     _active_tasks.add(task)
     task.add_done_callback(_on_task_done)
@@ -86,9 +78,8 @@ def add_task(coro: Awaitable[None]) -> asyncio.Task:
 
 def _on_task_done(task: asyncio.Task) -> None:
     _active_tasks.discard(task)
-    # Surface unhandled exceptions to the log. ingest_pipeline.ingest_doc
-    # is supposed to catch its own; this is a belt-and-braces guard so
-    # crashes in the broker layer itself don't disappear silently.
+    # Belt-and-braces — pipeline catches its own exceptions; this catches
+    # crashes in the broker layer itself so they don't vanish.
     if not task.cancelled():
         exc = task.exception()
         if exc is not None:
