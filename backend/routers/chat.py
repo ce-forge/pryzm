@@ -9,7 +9,7 @@ from db import database, models
 from core import ai_engine
 from core.prompt_manager import MICRO_PROMPTS
 from core.engine_config import engine_config_for
-from services import knowledge, image_describe, image_storage, pdf_extract
+from services import ingest_pipeline
 from services.workspaces import get_or_default
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
@@ -414,33 +414,6 @@ async def upload_document(
             )
     content = bytes(buf)
     content_type = (file.content_type or "").lower()
-    storage_path: Optional[str] = None
-    if content_type.startswith("image/"):
-        try:
-            text_content = await image_describe.describe(http_client, content, mime=content_type)
-        except image_describe.InvalidImage as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        if not text_content.strip():
-            raise HTTPException(status_code=422, detail="The model returned no description for this image.")
-        # Persist the original bytes. Done after captioning so a failed
-        # caption doesn't leak files on disk; done before ingest_document
-        # so the Document row carries the path from the moment it exists.
-        storage_path = image_storage.save_image(content, mime=content_type)
-    elif content_type == "application/pdf" or (file.filename or "").lower().endswith(".pdf"):
-        try:
-            text_content = await asyncio.to_thread(pdf_extract.extract_text, content)
-        except pdf_extract.InvalidPdf as e:
-            raise HTTPException(status_code=400, detail=f"Could not parse PDF: {e}")
-        if not text_content.strip():
-            raise HTTPException(
-                status_code=422,
-                detail="No extractable text in this PDF. Scanned/image-only PDFs aren't supported yet.",
-            )
-    else:
-        try:
-            text_content = content.decode("utf-8")
-        except UnicodeDecodeError:
-            raise HTTPException(status_code=400, detail="Only UTF-8 text files are currently supported.")
 
     active_session_id = None
     if session_id and session_id not in ["null", "undefined", "temp_new_chat", ""]:
@@ -448,15 +421,15 @@ async def upload_document(
         if existing_session:
             active_session_id = session_id
 
-    result = await knowledge.ingest_document(
-        http_client,
+    result = await ingest_pipeline.ingest_doc(
+        http_client=http_client,
         db=db,
+        content=content,
+        mime=content_type,
         filename=file.filename,
-        content=text_content,
         workspace_id=ws.id,
         session_id=active_session_id,
         is_global=is_global,
-        storage_path=storage_path,
     )
 
     return {
