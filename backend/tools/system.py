@@ -11,6 +11,10 @@ from db.models import Session
     },
     required=["new_title"],
     workspaces=["it_copilot", "personal"],
+    system_prompt_directive=(
+        "If the user asks to rename the chat but doesn't supply a title, "
+        "invent a concise, context-aware one rather than asking back."
+    ),
 )
 def rename_chat_session(new_title: str, session_id: str = None) -> str:
     """Renames the current chat session to the requested title."""
