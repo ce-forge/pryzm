@@ -76,7 +76,8 @@ def validate_target(host: str) -> tuple[bool, str]:
 
 @tool(
     properties={"hostname": {"type": "string", "description": "The hostname or IP. Append '.com' if it's a known web brand."}},
-    required=["hostname"]
+    required=["hostname"],
+    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first so the ping targets the resolved IP.",
 )
 def execute_ping(hostname: str) -> str:
     """Ping an IP address or hostname to check network connectivity and latency."""
