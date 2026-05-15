@@ -163,8 +163,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
                   isFirstMessage={i === 0}
                 />
                 <ChatBubble
-                  message={{ ...m, toolCalls: displayToolCalls }}
+                  message={m}
                   displayContent={displayContent}
+                  toolCalls={displayToolCalls}
                   index={i}
                   searchQuery={search.searchQuery}
                   isStreaming={isLastStreaming}
