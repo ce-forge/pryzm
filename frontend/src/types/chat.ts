@@ -1,7 +1,7 @@
 export interface ReferencedFile {
-  document_id: string;
+  id: string;
   filename: string;
-  preview_url?: string;
+  mime: string;
 }
 
 export interface ToolCall {
