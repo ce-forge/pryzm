@@ -126,6 +126,27 @@ def build_catalog_from_yaml(path: str | pathlib.Path) -> dict[str, set[str]]:
     }
 
 
+def always_on_models_from_yaml(
+    path: str | pathlib.Path,
+) -> list[tuple[str, set[str]]]:
+    """Return `[(model_id, tags), ...]` for every model in the `always-on`
+    group. Used by the startup pre-warmer to know which models to load
+    before the first user request arrives.
+
+    The `always-on` group in llama-swap means "don't unload once loaded"
+    — it doesn't mean "load at startup". Pairing this list with a
+    background pre-warm closes that gap.
+    """
+    with open(path) as f:
+        cfg = yaml.safe_load(f) or {}
+    result: list[tuple[str, set[str]]] = []
+    for model_id, model_cfg in (cfg.get("models") or {}).items():
+        groups = model_cfg.get("groups") or []
+        if "always-on" in groups:
+            result.append((model_id, set(model_cfg.get("tags") or [])))
+    return result
+
+
 _router_singleton: Optional[HeuristicRouter] = None
 
 

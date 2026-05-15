@@ -11,6 +11,7 @@ from db import database
 from routers import health, chat, workspaces, admin
 from core.auth import require_token
 from core import llm_router
+from services import model_prewarm
 from services.tasks import garbage_collection_task
 
 # llama-swap config lives at the repo root (one level above backend/).
@@ -89,9 +90,25 @@ async def lifespan(app: FastAPI):
     catalog = llm_router.build_catalog_from_yaml(_LLAMA_SWAP_CONFIG_PATH)
     llm_router.init_router(catalog)
 
+    # Pre-warm always-on models in the background. The server is ready
+    # for traffic immediately; the warmup completes in ~10-30s. Without
+    # this the first user request after a restart pays the cold-load
+    # cost (and llama-swap's `persistent: true` doesn't help — it
+    # prevents eviction, not initial load).
+    always_on = llm_router.always_on_models_from_yaml(_LLAMA_SWAP_CONFIG_PATH)
+    prewarm_task = asyncio.create_task(
+        model_prewarm.warm_always_on(
+            app.state.http_client, settings.LLM_SERVER_URL, always_on,
+        )
+    )
+
     try:
         yield
     finally:
+        # Cancel the warmup if it's still running. We don't wait on it —
+        # if it hasn't finished by shutdown time, the user wasn't going
+        # to see the benefit anyway.
+        prewarm_task.cancel()
         await app.state.http_client.aclose()
         # Shutdown
         gc_task.cancel()
