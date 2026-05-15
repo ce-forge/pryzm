@@ -92,6 +92,17 @@ class Document(Base):
     # are reconstructable from chunks. The file at this path is cleaned up
     # by the after_delete listener at the bottom of this module.
     storage_path = Column(String(512), nullable=True)
+    # Async-ingestion state (docs/specs/2026-05-15-async-ingestion.md).
+    # 'processing' from the moment /upload commits the row through the
+    # end of the background task; flips to 'ready' when chunks + embeds
+    # are persisted, or 'error' if the pipeline raises. Existing rows
+    # (pre-migration) are backfilled to 'ready' since they all completed
+    # under the old synchronous path.
+    status = Column(String(16), nullable=False, server_default="ready")
+    # Populated only when status='error'. Surfaces the upstream
+    # exception message back to the frontend so the pill can show a
+    # specific reason rather than a generic "processing failed".
+    error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     session = relationship("Session", back_populates="documents")
     workspace = relationship("Workspace", back_populates="documents")
