@@ -13,7 +13,7 @@ interface SessionItemProps {
   workspace: string;
   currentSessionId: string | null;
   isStreaming?: boolean;
-  setSessions: React.Dispatch<React.SetStateAction<any[]>>;
+  setSessions: React.Dispatch<React.SetStateAction<{ id: string; title: string; folder_id?: string | null; is_pinned?: boolean }[]>>;
 }
 
 export default function SessionItem({

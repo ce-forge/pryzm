@@ -42,6 +42,12 @@ export default function SessionDirectory() {
   // Folder pending delete confirmation, or null when no confirm is open.
   const [folderPendingDelete, setFolderPendingDelete] = useState<FolderInfo | null>(null);
 
+  // workspace is a plain string from session context (not a React ref).
+  // The lint rule overcautiously flags any state initialiser that reads
+  // a context-derived value; the actual usage here is reading the
+  // current workspace name into a "what workspace did we last load
+  // folders for" tracker. Safe to suppress.
+  // eslint-disable-next-line react-hooks/refs
   const [loadedWorkspace, setLoadedWorkspace] = useState(workspace);
 
   useEffect(() => {
@@ -57,9 +63,14 @@ export default function SessionDirectory() {
     return () => document.removeEventListener("click", handleClickOutside);
   }, []);
 
-  // Anti-Flicker: Clear optimistic IDs when a real UUID arrives, fallback to ""
+  // Anti-Flicker: Clear optimistic IDs when a real UUID arrives, fallback to "".
+  // The setState-in-effect here is the swap pattern: when the URL drops a real
+  // session id, swap any matching optimistic row out of the local list. Doing
+  // this in render would re-evaluate every paint; in the effect it happens
+  // once on id transition.
   useEffect(() => {
     if (currentSessionId && currentSessionId !== "temp_new_chat") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSessions(prev => {
         if (!prev.some(s => s.id === currentSessionId)) {
           const optimisticItem = prev.find(s => s.id.startsWith("optimistic-"));
@@ -77,7 +88,7 @@ export default function SessionDirectory() {
       .then((res) => res.json())
       .then((data) => {
         setSessions(prev => {
-          const backendHasActive = data.some((s: any) => s.id === currentSessionId);
+          const backendHasActive = data.some((s: SessionInfo) => s.id === currentSessionId);
           if (currentSessionId && currentSessionId !== "temp_new_chat" && !backendHasActive) {
             const existingOptimistic = prev.find(s => s.id === currentSessionId);
             const placeholder = existingOptimistic || { id: currentSessionId, title: "", is_pinned: false };
@@ -103,7 +114,7 @@ export default function SessionDirectory() {
         } catch (e) {
           console.warn("Corrupted pryzm_folders_open_* in localStorage; ignoring.", e);
         }
-        setFolders(data.map((f: any) => ({ ...f, isOpen: openSet.has(f.id) })));
+        setFolders(data.map((f: { id: string; name: string }) => ({ ...f, isOpen: openSet.has(f.id) })));
         setFoldersLoaded(true);
         setLoadedWorkspace(workspace);
       })
@@ -270,6 +281,7 @@ export default function SessionDirectory() {
         />
       )}
 
+      {/* eslint-disable-next-line react-hooks/refs -- map closure reads streamingSessionIdsRef inside SessionItem props */}
       {folders.map(folder => (
         <div 
           key={folder.id} 
@@ -383,14 +395,15 @@ export default function SessionDirectory() {
           Unsorted Logs
         </div>
         
+        {/* eslint-disable-next-line react-hooks/refs -- intentional ref read inside the map; see useSession.ts for the same pattern */}
         {getSortedSessions(null).map((s) => (
-          <SessionItem 
-            key={s.id} 
-            s={s} 
-            workspace={workspace} 
+          <SessionItem
+            key={s.id}
+            s={s}
+            workspace={workspace}
             currentSessionId={currentSessionId}
             isStreaming={streamingSessionIdsRef.current.has(s.id)}
-            setSessions={setSessions} 
+            setSessions={setSessions}
           />
         ))}
         

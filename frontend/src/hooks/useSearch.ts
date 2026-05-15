@@ -1,6 +1,8 @@
 import { useState, useEffect, RefObject } from "react";
 
-export function useSearch(messages: any[], containerRef: RefObject<HTMLElement | null>) { 
+// The hook only reads `.length` from messages to invalidate matches when
+// new messages arrive — full row shape isn't relevant here.
+export function useSearch(messages: { id?: string }[], containerRef: RefObject<HTMLElement | null>) {
   const [searchQuery, setSearchQuery] = useState("");
   const [totalMatches, setTotalMatches] = useState(0);
   const [searchIndex, setSearchIndex] = useState(0);

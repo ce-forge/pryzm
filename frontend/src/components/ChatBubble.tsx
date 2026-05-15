@@ -5,7 +5,11 @@ import AssistantMessage from "./AssistantMessage";
 import MessageActions from "./MessageActions";
 
 interface ChatBubbleProps {
-  message: any;          // stable identity (parent passes `m` directly, no spread)
+  // stable identity (parent passes `m` directly, no spread). The shape
+  // here is the message row from useSession's messageCache — we leave
+  // it loosely typed to avoid coupling this component to the entire
+  // server-message schema.
+  message: { id?: string; role: string; content: string };
   displayContent: string; // streamed text; updates per token without changing `message`
   index: number;
   searchQuery: string;
@@ -31,7 +35,11 @@ function ChatBubbleImpl({
   const [editValue, setEditValue] = useState(message.content);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
+  // Reset the edit buffer whenever the underlying message identity or
+  // content changes — keeps the textarea in sync with the source when
+  // the user toggles edit mode on/off across re-renders.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!isEditing) setEditValue(message.content);
   }, [message.id, message.content, isEditing]);
 

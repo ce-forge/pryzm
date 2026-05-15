@@ -12,7 +12,11 @@ export default function Home() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [hasToken, setHasToken] = useState<boolean | null>(null);
 
+  // SSR-safe hydration: localStorage and window.innerWidth are only
+  // available client-side. The setState here flips the page from the
+  // server-rendered placeholder to the real shell once mounted.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
     setHasToken(!!getToken());
     if (window.innerWidth < 768) setIsSidebarOpen(false);

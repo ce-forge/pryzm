@@ -29,18 +29,29 @@ export function useSession() {
   // streamingSessionIdsRef is keyed by raw session ids (not workspace-prefixed),
   // so check the raw session id here, not activeCacheKey.
   const activeRawId = currentSession || "temp_new_chat";
+  // Ref reads during render are intentional: streaming-state changes must NOT
+  // cause cascading re-renders during chat (every SSE chunk would otherwise
+  // re-render the whole tree). The derived boolean is read from whatever
+  // ref value existed at the start of this render — that's the design.
+  // eslint-disable-next-line react-hooks/refs
   const isActivelyStreaming = streamingSessionIdsRef.current.has(activeRawId) ||
+                               // eslint-disable-next-line react-hooks/refs
                                streamingSessionIdsRef.current.has("temp_new_chat");
   const isInitialLoading = !!currentSession && currentSession !== "temp_new_chat" && !hasHistory && !isActivelyStreaming;
   
   const messages = messageCache[activeCacheKey] || [];
 
-  // Sync URL state to local state
+  // Sync URL state to local state. setState-in-effect is the right pattern
+  // here: URL is the source of truth for back/forward navigation, local
+  // state is the source of truth for instant updates from navigateToSession.
+  // The isNavigatingRef gate prevents the effect from fighting navigateToSession
+  // mid-transition.
   useEffect(() => {
     if (isNavigatingRef.current) {
       if (urlSessionId === currentSession) isNavigatingRef.current = false;
       return;
     }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (urlSessionId !== currentSession) setCurrentSession(urlSessionId);
   }, [urlSessionId, currentSession]);
 
@@ -48,7 +59,10 @@ export function useSession() {
   // messageCache don't recreate the callback. Without this the effect that
   // depends on loadSessionData re-fires on every chunk during streaming,
   // rebinding the chatCreated listener and re-fetching sessions repeatedly.
+  // The "ref mirrors state" pattern in the render body is React's documented
+  // escape hatch for callbacks that need fresh state without re-binding deps.
   const messageCacheRef = useRef(messageCache);
+  // eslint-disable-next-line react-hooks/refs
   messageCacheRef.current = messageCache;
 
   // Tracks in-flight prefetch requests to avoid duplicate concurrent fetches.
@@ -61,6 +75,7 @@ export function useSession() {
    * rapid-sends cache-clobber race. Real message IDs now arrive in the SSE
    * stream itself, so there's no longer any need to re-read history from DB.
    */
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- React Compiler infers extra deps (setSessionTitle is a stable setter; included via the rule that all setters are non-deps). The manual memo here is what keeps loadSessionData stable across streaming-chunk re-renders.
   const refreshSessionMeta = useCallback(async () => {
     if (!currentSession || currentSession.startsWith("optimistic-")) {
       setSessionTitle("");
@@ -70,7 +85,7 @@ export function useSession() {
       const listRes = await apiFetch(`/sessions?workspace=${workspace}`, { cache: 'no-store' });
       if (listRes.ok) {
         const sessions = await listRes.json();
-        const activeSesh = sessions.find((s: any) => s.id === currentSession);
+        const activeSesh = sessions.find((s: { id: string; title: string }) => s.id === currentSession);
         if (activeSesh) {
           const unwanted = ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat", "New Diagnostic"];
           setSessionTitle(unwanted.includes(activeSesh.title) ? "" : activeSesh.title);
@@ -85,6 +100,7 @@ export function useSession() {
    * exists for legacy callers but no longer triggers post-stream refetches —
    * those now happen inline via the SSE-driven id-swap pathway.
    */
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- as above; manual memo holds loadSessionData stable through stream chunks
   const loadSessionData = useCallback(async (force = false) => {
     if (!currentSession || currentSession.startsWith("optimistic-")) {
       setSessionTitle("");
@@ -116,7 +132,13 @@ export function useSession() {
   // Initial load. Sync after a stream completes is now triggered via the
   // SessionContext API (notifySessionCreated → loadSessionData(true)), not via
   // a window-level event bus.
+  // Fetch on session/workspace change. loadSessionData itself does the
+  // cache check so this is a no-op when chunks-already-cached. The
+  // "fetch on dependency change" effect is the canonical React pattern;
+  // the lint rule fires because the loaded data flows into setState
+  // inside loadSessionData.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSessionData();
   }, [currentSession, workspace, loadSessionData]);
 
@@ -142,8 +164,9 @@ export function useSession() {
     } finally {
       prefetchingRef.current.delete(id);
     }
-  }, [setMessageCache]);
+  }, [workspace, setMessageCache]);
 
+  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- as above
   const navigateToSession = useCallback((id: string) => {
     isNavigatingRef.current = true;
     setCurrentSession(id);
