@@ -40,23 +40,71 @@ def search_knowledge_base(
 ) -> str:
     """Search the internal documentation and knowledge base.
 
-    Accepts a list of search terms. For each, runs an independent vector
-    search and returns a labeled section. Optionally scoped to a list of
-    filenames when the user references specific files. Single-query
-    callers can pass a one-element list — the function also tolerates a
-    bare string for backward-compat with older model calls."""
-    # Backward-compat: a model that hasn't updated may still send a string.
+    Two calling modes:
+
+    1. **Query mode** — `queries=[...]` (optionally + `filenames=[...]`
+       to scope). Runs vector + keyword hybrid search per query,
+       returns labeled sections.
+    2. **Filename-only mode** — `filenames=[...]` with no queries.
+       Returns all chunks of the matching documents, no semantic
+       filter. Natural shorthand for "show me this file." Used when
+       the LLM was given a file reference and just wants the content
+       without inventing a search term.
+
+    Tolerates bare strings for both args (older model calls)."""
     if isinstance(queries, str):
         queries = [queries]
-    if not queries:
-        return "No queries provided."
     if isinstance(filenames, str):
         filenames = [filenames]
 
     db = SessionLocal()
     try:
+        # Filename-only mode: return all chunks of matching docs.
+        if not queries and filenames:
+            from sqlalchemy import or_, func as sa_func
+            from db import models
+            scoped_docs = (
+                db.query(models.Document)
+                .filter(
+                    models.Document.workspace_id == workspace_id,
+                    sa_func.lower(models.Document.filename).in_(
+                        [f.lower() for f in filenames]
+                    ),
+                    or_(
+                        models.Document.session_id == session_id,
+                        models.Document.is_global == True,  # noqa: E712
+                    ),
+                )
+                .order_by(models.Document.created_at.desc())
+                .all()
+            )
+            if not scoped_docs:
+                return f"No documents found matching: {filenames!r}"
+            # Cap at 3 chunks per filename-only call. For most uploaded
+            # images and short docs that's all there is; for longer
+            # docs it returns the most-recent-uploaded ones (chunks
+            # ordered by id which is time-ordered with UUIDv7). Keeps
+            # the assistant turn's displayed tool-output compact rather
+            # than dumping every chunk into the chat surface.
+            chunks = (
+                db.query(models.DocumentChunk)
+                .filter(models.DocumentChunk.document_id.in_([d.id for d in scoped_docs]))
+                .order_by(models.DocumentChunk.id)
+                .limit(3)
+                .all()
+            )
+            if not chunks:
+                return f"Documents found but no chunks: {filenames!r}"
+            blocks = [_label_chunk(c) for c in chunks]
+            return f"Filename-only retrieval for {filenames!r}\n" + "\n".join(blocks)
+
+        if not queries:
+            return (
+                "No queries provided. Pass queries=[...] for semantic/keyword "
+                "search, or filenames=[...] alone to retrieve a file's contents directly."
+            )
+
         sections = []
-        all_sources = set()
         for q in queries:
             # Stricter threshold than the auto-RAG path: the LLM picked this tool
             # deliberately, so we want precision over recall.
@@ -68,8 +116,6 @@ def search_knowledge_base(
             if results:
                 blocks = [_label_chunk(chunk) for chunk in results]
                 sections.append(f"Query: {q!r}\n" + "\n".join(blocks))
-                for chunk in results:
-                    all_sources.add(chunk.document.filename)
             else:
                 sections.append(f"Query: {q!r}\nNo relevant documentation found.")
         return "\n---\n".join(sections)
