@@ -20,9 +20,7 @@ from core.llm_router import Tier, get_router
 from core.llm_metrics import emit_route, emit_escalate
 from tools.registry import ResolvedToolSet, render_tool_directives
 from utils.formatters import (
-    format_tool_execution,
     format_file_analyzed,
-    format_code_block,
     format_knowledge_reference,
     format_error
 )
@@ -362,7 +360,7 @@ async def stream_chat(
                     _hidden = {"workspace_id", "session_id"}
                     display_args = {k: v for k, v in raw_args.items()
                                     if k in valid_params and k not in _hidden}
-                    yield format_tool_execution(func_name, display_args)
+                    yield {"type": "tool_call", "name": func_name, "args": display_args}
 
                     try:
                         result = await asyncio.wait_for(
@@ -380,7 +378,7 @@ async def stream_chat(
                         result = f"Tool execution failed: {str(tool_err)}"
                         had_tool_error = True
 
-                    yield format_code_block(result)
+                    yield {"type": "tool_result", "name": func_name, "result": result}
                     full_messages.append({
                         "role": "tool",
                         "content": str(result),
