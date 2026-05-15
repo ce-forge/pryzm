@@ -1,8 +1,11 @@
 import asyncio
 import json
 import inspect
+import logging
 import re
 from typing import Awaitable, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 import httpx
 
@@ -56,9 +59,13 @@ def _inject_tool_directives(prompt: str, rendered: str) -> str:
     unchanged regardless of whether the placeholder is present.
     """
     if not rendered:
-        return prompt.replace("{tool_directives}", "").rstrip()
+        # Strip the placeholder along with any blank lines that surrounded it.
+        # Without this, removing a mid-prompt placeholder leaves a double blank
+        # line between the surrounding sections.
+        return re.sub(r"\n*\{tool_directives\}\n*", "\n\n", prompt).rstrip()
     if "{tool_directives}" in prompt:
         return prompt.replace("{tool_directives}", rendered)
+    logger.debug("Workspace prompt missing {tool_directives} placeholder; appending block at end.")
     return f"{prompt}\n\n{rendered}"
 
 

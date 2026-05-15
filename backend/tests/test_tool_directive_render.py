@@ -185,3 +185,10 @@ def test_missing_placeholder_appends():
 
     empty = _inject_tool_directives("PROMPT BODY", "")
     assert empty == "PROMPT BODY"
+
+
+def test_inject_empty_rendered_mid_prompt_placeholder():
+    """Empty rendered + mid-prompt placeholder should not leave a double blank line."""
+    prompt = "SECTION_A_END\n\n{tool_directives}\n\nSECTION_B_START"
+    result = _inject_tool_directives(prompt, "")
+    assert result == "SECTION_A_END\n\nSECTION_B_START"
