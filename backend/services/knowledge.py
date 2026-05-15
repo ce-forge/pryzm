@@ -238,7 +238,6 @@ async def retrieve_relevant_chunks(
                 return {
                     "context": formatted_context,
                     "sources": unique_sources,
-                    "reattach_images": _collect_reattach_paths(scoped_docs),
                 }
         # File was renamed / deleted between turns: fall through to the
         # broader retrieval paths so the chat doesn't dead-end.
@@ -265,7 +264,6 @@ async def retrieve_relevant_chunks(
                 return {
                     "context": formatted_context,
                     "sources": [recent_doc.filename],
-                    "reattach_images": _collect_reattach_paths([recent_doc]),
                 }
 
     results = await search_chunks(client, db, query, workspace_id=workspace_id, session_id=session_id, threshold=0.65, top_k=top_k)
@@ -278,24 +276,4 @@ async def retrieve_relevant_chunks(
     return {
         "context": formatted_context,
         "sources": unique_sources,
-        "reattach_images": _collect_reattach_paths([chunk.document for chunk in results]),
     }
-
-
-def _collect_reattach_paths(documents) -> list[str]:
-    """Pull `storage_path` off each Document, dedupe, and drop any path
-    where the file is no longer on disk (storage could have been cleaned
-    out-of-band). Order-preserving so the model sees images in retrieval
-    rank order."""
-    import os as _os
-    seen: set[str] = set()
-    out: list[str] = []
-    for doc in documents:
-        path = getattr(doc, "storage_path", None) if doc else None
-        if not path or path in seen:
-            continue
-        if not _os.path.exists(path):
-            continue
-        seen.add(path)
-        out.append(path)
-    return out

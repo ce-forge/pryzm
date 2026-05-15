@@ -19,6 +19,7 @@ import httpx
 
 from config import settings
 from core import llm_server
+from core.llm_router import get_router
 
 
 class InvalidImage(Exception):
@@ -27,14 +28,45 @@ class InvalidImage(Exception):
 
 _SUPPORTED_MIME = {"image/jpeg", "image/png", "image/webp"}
 
+# The caption is the SOLE record of the image's content once the upload
+# completes — there's no re-attach at chat time. Bias the prompt heavily
+# toward verbatim text extraction because the IT-copilot use case is
+# dominated by screenshots, error dialogs, terminal output, device
+# labels, configuration screens, and similar text-heavy content. For
+# the rarer non-text image (a photograph, a chart) the prompt still
+# falls through to a description path.
 _SYSTEM_PROMPT = (
-    "You are an image-description tool for a knowledge base. Write a "
-    "detailed paragraph (3-6 sentences) describing the image: what it "
-    "shows, any visible text verbatim, technical specifics, and anything "
-    "a later search query might match. No preamble, no thinking out loud."
+    "You analyze images for a knowledge base. Most images are screenshots, "
+    "error dialogs, terminal output, device labels, configuration screens, "
+    "and similar text-heavy content. Text accuracy is critical.\n"
+    "\n"
+    "Your output has two parts, in this exact order:\n"
+    "\n"
+    "1. EXTRACTED TEXT — every piece of visible text VERBATIM. Do not "
+    "paraphrase, summarize into prose, or skip text you consider "
+    "boring (window titles, button labels, table headers, status "
+    "indicators, version strings, timestamps, IP addresses, error "
+    "codes, file paths — ALL of it). For each block of text, note "
+    "WHERE it sits (top bar, left panel, dialog body, table row 3, "
+    "bottom status bar, etc.) and what it's grouped with (which error "
+    "code refers to which device, which value pairs with which field, "
+    "which row contains which header).\n"
+    "\n"
+    "2. CONTEXT — one short paragraph after the extracted text "
+    "covering: what the screen/image is (Windows error dialog, network "
+    "monitoring console, mobile app UI, terminal session, etc.), and "
+    "any visual details a text search wouldn't otherwise surface.\n"
+    "\n"
+    "If the image is NOT text-heavy (a photograph of a physical device, "
+    "a chart with no readable labels, a non-textual diagram), skip "
+    "section 1 and describe its visual contents in technical detail "
+    "instead: subject, layout, what's visible, identifying features.\n"
+    "\n"
+    "No preamble, no 'I see' or 'this image shows' filler. No thinking "
+    "out loud. Start directly with the extracted content."
 )
 
-_USER_TEXT = "Describe this image for our knowledge base."
+_USER_TEXT = "Analyze this image for the knowledge base."
 
 
 def _data_url(image_bytes: bytes, mime: str) -> str:
@@ -58,6 +90,17 @@ async def describe(
     if mime not in _SUPPORTED_MIME:
         raise InvalidImage(f"Unsupported image MIME: {mime}")
 
+    # Source of truth for the captioning model is the `vision` tag in
+    # llama-swap-config.yaml — pick whichever chat model carries it.
+    # If no model has the tag we can't caption; surface a clear error
+    # the upload endpoint can translate to a 503.
+    model = get_router().vision_capable_model()
+    if model is None:
+        raise InvalidImage(
+            "No vision-capable model is available — tag a chat model "
+            "with 'vision' in infra/llama-swap-config.yaml."
+        )
+
     messages = [
         {"role": "system", "content": _SYSTEM_PROMPT},
         {
@@ -76,7 +119,7 @@ async def describe(
         client,
         messages=messages,
         tools=None,
-        model=settings.IMAGE_CAPTION_MODEL,
+        model=model,
         options=options,
     )
 

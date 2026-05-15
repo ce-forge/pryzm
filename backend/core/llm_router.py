@@ -82,13 +82,18 @@ class HeuristicRouter:
         model = self.large if tier is Tier.LARGE else self.small
         return model, tier, reason
 
-    def vision_capable(self, model_id: str) -> bool:
-        """Whether the model's catalog tags include `vision`. Driven by the
-        YAML so when a new vision-capable model lands, it's a one-line
-        tag edit. ai_engine consults this before re-attaching images to a
-        chat call; calling a non-vision model with image_url content blocks
-        would either error or silently drop the image."""
-        return "vision" in self.catalog.get(model_id, set())
+    def vision_capable_model(self) -> str | None:
+        """First chat model carrying the `vision` tag, or None if no
+        catalog entry has it. The IT-copilot image-upload path uses
+        this so the captioning model is configuration-driven (tag the
+        model in YAML, the upload pipeline picks it up) rather than
+        hardcoded in config.py. Excludes embedding models so a
+        misplaced tag on the embed entry can't silently become the
+        captioner."""
+        for model_id, tags in self.catalog.items():
+            if "vision" in tags and "embedding" not in tags:
+                return model_id
+        return None
 
     def _pick_tier(
         self,
