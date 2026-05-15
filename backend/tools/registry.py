@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys as _sys
 from dataclasses import dataclass
 from typing import Callable
 
@@ -50,7 +51,57 @@ def build_tool_set(workspace) -> ResolvedToolSet:
     )
 
 
-def tool(properties, required=None, workspaces=None):
+def render_tool_directives(tool_set: "ResolvedToolSet") -> str:
+    """Produce the `== AVAILABLE TOOLS ==` block for the workspace prompt.
+
+    Walks the enabled tools, groups by `__module__`, and emits:
+      - one optional `[MODULE_DIRECTIVE]` line per module that defines one and has
+        at least one enabled tool;
+      - one `- <name>: <directive>` line per tool with a non-empty
+        `system_prompt_directive`.
+
+    Tools with neither a module rule nor a per-tool directive are omitted. If
+    the resulting block has zero content lines, returns an empty string (caller
+    treats empty as 'no section at all').
+
+    Modules render in deterministic order (by module name) separated by blank
+    lines. Within a module, per-tool bullets render in deterministic order
+    (by tool name).
+    """
+    if not tool_set.callables:
+        return ""
+
+    # Group tools by __module__.
+    by_module: dict[str, list[tuple[str, callable]]] = {}
+    for name, fn in tool_set.callables.items():
+        mod_name = getattr(fn, "__module__", "")
+        by_module.setdefault(mod_name, []).append((name, fn))
+
+    blocks: list[str] = []
+    for mod_name in sorted(by_module.keys()):
+        members = sorted(by_module[mod_name], key=lambda pair: pair[0])
+        mod = _sys.modules.get(mod_name)
+        module_directive = getattr(mod, "MODULE_DIRECTIVE", "") if mod is not None else ""
+
+        lines: list[str] = []
+        if module_directive:
+            lines.append(f"[{module_directive}]")
+        for tool_name, fn in members:
+            directive = getattr(fn, "system_prompt_directive", "") or ""
+            if directive:
+                lines.append(f"- {tool_name}: {directive}")
+
+        if lines:
+            blocks.append("\n".join(lines))
+
+    if not blocks:
+        return ""
+
+    body = "\n\n".join(blocks)
+    return f"== AVAILABLE TOOLS ==\n\n{body}"
+
+
+def tool(properties, required=None, workspaces=None, system_prompt_directive=""):
     """A decorator that turns a Python function into an LLM-callable tool.
 
     workspaces: list of workspace names in which the tool is exposed. Defaults
@@ -58,6 +109,12 @@ def tool(properties, required=None, workspaces=None):
     only available in the IT Copilot workspace. Pass a longer list to opt a
     tool into additional workspaces (e.g. rename_chat_session is allowed in
     "personal" too because users like that affordance everywhere).
+
+    system_prompt_directive: short text injected into the workspace's rendered
+    system prompt under the `== AVAILABLE TOOLS ==` block. Describes WHEN/HOW
+    to call the tool (NOT what it does — that's the JSON-schema description).
+    Empty string = the tool gets no per-tool line in the rendered block (it
+    still gets listed in {tool_names} as today).
     """
     if required is None:
         required = []
@@ -74,6 +131,7 @@ def tool(properties, required=None, workspaces=None):
             )
         AVAILABLE_TOOLS[name] = func
         TOOL_WORKSPACES[name] = list(workspaces)
+        func.system_prompt_directive = system_prompt_directive
 
         TOOL_DEFINITIONS.append({
             "type": "function",

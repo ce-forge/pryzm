@@ -1,8 +1,11 @@
 import asyncio
 import json
 import inspect
+import logging
 import re
 from typing import Awaitable, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 import httpx
 
@@ -15,7 +18,7 @@ from core import llm_server
 from core.engine_config import EngineConfig
 from core.llm_router import Tier, get_router
 from core.llm_metrics import emit_route, emit_escalate
-from tools.registry import ResolvedToolSet
+from tools.registry import ResolvedToolSet, render_tool_directives
 from utils.formatters import (
     format_tool_execution,
     format_file_analyzed,
@@ -44,6 +47,26 @@ _FILENAME_MENTION_RE = re.compile(
     r'\b([\w\-]+\.(?:jpg|jpeg|png|webp|pdf|txt|md|py|csv|json|log|yaml|yml|conf|ini))\b',
     re.IGNORECASE,
 )
+
+
+def _inject_tool_directives(prompt: str, rendered: str) -> str:
+    """Substitute {tool_directives} in the prompt with the rendered block.
+
+    If the placeholder is missing, append the block after the prompt with a
+    blank line separator — keeps hand-edited workspace prompts (that forgot the
+    placeholder) functional. If the rendered block is empty (no tool has any
+    directive AND no module has a MODULE_DIRECTIVE), the prompt is returned
+    unchanged regardless of whether the placeholder is present.
+    """
+    if not rendered:
+        # Strip the placeholder along with any blank lines that surrounded it.
+        # Without this, removing a mid-prompt placeholder leaves a double blank
+        # line between the surrounding sections.
+        return re.sub(r"\n*\{tool_directives\}\n*", "\n\n", prompt).rstrip()
+    if "{tool_directives}" in prompt:
+        return prompt.replace("{tool_directives}", rendered)
+    logger.debug("Workspace prompt missing {tool_directives} placeholder; appending block at end.")
+    return f"{prompt}\n\n{rendered}"
 
 
 def _match_session_filename_mentions(
@@ -161,6 +184,8 @@ async def stream_chat(
 
     tool_names = ", ".join(workspace_tools.keys())
     system_content = system_prompt_raw.replace("{tool_names}", tool_names)
+    rendered_directives = render_tool_directives(tool_set)
+    system_content = _inject_tool_directives(system_content, rendered_directives)
 
     tools_payload = tool_set.definitions if workspace_tools else None
     system_msg = {"role": "system", "content": system_content}

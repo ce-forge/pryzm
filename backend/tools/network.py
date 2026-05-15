@@ -10,6 +10,11 @@ from config import settings
 from .registry import tool
 
 
+MODULE_DIRECTIVE = (
+    "Network tools only run when the user provides a valid TLD "
+    "(e.g. \"reddit.com\") or an explicit IPv4/IPv6 address."
+)
+
 # Single safe-char regex for both shell-arg use and resolver input. Allows
 # dotted hostnames, IPv4 literals, IPv6 literals (digits + colons), and
 # Unicode-free ASCII labels. Anything with shell metacharacters is rejected.
@@ -96,7 +101,8 @@ def execute_ping(hostname: str) -> str:
         "hostname": {"type": "string", "description": "The hostname or IP"},
         "port": {"type": "integer", "description": "The port number to check (e.g. 80, 443, 3389)"}
     },
-    required=["hostname", "port"]
+    required=["hostname", "port"],
+    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first so the port check uses the resolved IP.",
 )
 def check_port(hostname: str, port: int) -> str:
     """Check if a specific TCP port is open on a target host."""
