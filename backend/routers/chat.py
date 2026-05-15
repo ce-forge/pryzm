@@ -58,6 +58,36 @@ def _finalize_tool_calls(acc: list) -> list:
     return [tc for tc in acc if tc.get("result") is not None]
 
 
+def build_safe_messages(history) -> list[dict]:
+    """Convert DB Message rows into the structured shape ai_engine consumes.
+
+    Legacy rows (tool_calls NULL) emit one flat {role, content}. New rows
+    with structured tool_calls emit one {role: "assistant", content,
+    tool_calls: [...]} followed by one {role: "tool", name, content: result}
+    per call, in order. Malformed tool_calls (non-list) is treated as legacy."""
+    out: list[dict] = []
+    for msg in history:
+        tcs = getattr(msg, "tool_calls", None)
+        if msg.role == "assistant" and isinstance(tcs, list) and tcs:
+            out.append({
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {"function": {"name": tc["name"], "arguments": tc.get("args") or {}}}
+                    for tc in tcs
+                ],
+            })
+            for tc in tcs:
+                out.append({
+                    "role": "tool",
+                    "name": tc["name"],
+                    "content": tc.get("result") or "",
+                })
+        else:
+            out.append({"role": msg.role, "content": msg.content})
+    return out
+
+
 def _error_envelope(exc: Exception) -> dict:
     """Map an exception to a {error, code} envelope for the SSE stream.
 
@@ -353,7 +383,7 @@ async def analyze_data(
             user_message_id = user_msg.id
 
         history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
-        safe_messages = [{"role": msg.role, "content": msg.content} for msg in history]
+        safe_messages = build_safe_messages(history)
 
         # Capture identifiers needed inside the generator so we don't reach into
         # `chat_session` after the local `db` is closed below.
