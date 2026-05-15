@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Message } from "@/types/chat";
+import { Message, ReferencedFile, ToolCall } from "@/types/chat";
 import { apiFetch } from "@/utils/apiClient";
 import { newOptimisticSessionId, newTempMessageId } from "@/utils/ids";
 import type { useSessionContext } from "@/context/SessionContext";
@@ -9,6 +9,7 @@ type SessionApi = ReturnType<typeof useSessionContext>;
 export interface InferenceApi {
   isProcessing: boolean;
   streamingContent: Record<string, string>;
+  streamingToolCalls: Record<string, ToolCall[]>;
   sendMessage: (
     text: string,
     activeSessionId: string | null,
@@ -32,6 +33,7 @@ export interface InferenceApi {
 export function useInference(workspaceSlug: string, sessionApi: SessionApi): InferenceApi {
   const [isProcessing, setIsProcessing] = useState(false);
   const [streamingContent, setStreamingContent] = useState<Record<string, string>>({});
+  const [streamingToolCalls, setStreamingToolCalls] = useState<Record<string, ToolCall[]>>({});
 
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const migratedIds = useRef<Map<string, string>>(new Map());
@@ -67,6 +69,8 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       setStreamingContent((prev) => ({ ...prev, [optimisticId]: "" }));
 
       let fullAssistantMessage = "";
+      let referencedFiles: ReferencedFile[] | undefined;
+      const pendingToolCalls: ToolCall[] = [];
       let pendingUserMessageId: string | null = null;
       let pendingAssistantMessageId: string | null = null;
 
@@ -194,6 +198,37 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                   }
                 }
 
+                if (parsed.type === "files_referenced" && parsed.files) {
+                  referencedFiles = parsed.files;
+                }
+
+                if (parsed.type === "tool_call" && parsed.name) {
+                  pendingToolCalls.push({
+                    name: parsed.name,
+                    args: parsed.args ?? {},
+                    result: "",
+                  });
+                  setStreamingToolCalls((prev) => ({ ...prev, [optimisticId]: [...pendingToolCalls] }));
+                  if (realDbId !== null) {
+                    setStreamingToolCalls((prev) => ({ ...prev, [realDbId!]: [...pendingToolCalls] }));
+                  }
+                }
+
+                if (parsed.type === "tool_result" && parsed.name) {
+                  // Pair by ORDER (back-to-front: complete the most recent
+                  // entry with empty result). Mirrors the backend pairing.
+                  for (let i = pendingToolCalls.length - 1; i >= 0; i--) {
+                    if (pendingToolCalls[i].result === "") {
+                      pendingToolCalls[i].result = parsed.result ?? "";
+                      break;
+                    }
+                  }
+                  setStreamingToolCalls((prev) => ({ ...prev, [optimisticId]: [...pendingToolCalls] }));
+                  if (realDbId !== null) {
+                    setStreamingToolCalls((prev) => ({ ...prev, [realDbId!]: [...pendingToolCalls] }));
+                  }
+                }
+
                 if (parsed.chunk) {
                   fullAssistantMessage += parsed.chunk;
                   setStreamingContent((prev) => {
@@ -214,7 +249,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
         setIsProcessing(false);
 
         const finalKeySid = realDbId ?? optimisticId;
-        sessionApi.finalizeAssistantMessage(ws, finalKeySid, fullAssistantMessage);
+        sessionApi.finalizeAssistantMessage(ws, finalKeySid, fullAssistantMessage, referencedFiles, pendingToolCalls.length > 0 ? pendingToolCalls : undefined);
         // Swap optimistic temp ids for the real DB UUIDs that came back in the
         // stream. No post-stream /sessions/{id} refetch = no race against the
         // next send.
@@ -226,6 +261,13 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
         );
 
         setStreamingContent((prev) => {
+          const next = { ...prev };
+          delete next[optimisticId];
+          if (realDbId !== null) delete next[realDbId];
+          return next;
+        });
+
+        setStreamingToolCalls((prev) => {
           const next = { ...prev };
           delete next[optimisticId];
           if (realDbId !== null) delete next[realDbId];
@@ -267,6 +309,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
   return {
     isProcessing,
     streamingContent,
+    streamingToolCalls,
     sendMessage,
     stopInference,
     migratedIds,

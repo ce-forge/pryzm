@@ -55,13 +55,14 @@ export function useMessageActions(
 
   const deleteMessage = useCallback(async (msgId: string | undefined, index: number) => {
     if (!msgId || msgId.startsWith('temp-')) return;
-    const isPair = messages[index].role === "user" && messages[index + 1]?.role === "assistant";
-    const newMessages = [...messages];
-    const assistantId = isPair ? messages[index + 1].id : null;
-    newMessages.splice(index, isPair ? 2 : 1);
+    // Truncate at this point: drop the target message AND every message that
+    // came after it. Deleting only the target leaves orphaned downstream turns
+    // whose context referenced the now-missing message — almost never what the
+    // user wants when they hit the trash icon mid-conversation.
+    const newMessages = messages.slice(0, index);
     replaceMessages(workspace, activeSessionKey, newMessages);
+    await apiFetch(`/sessions/${activeSessionKey}/truncate/${msgId}?workspace=${workspace}`, { method: "DELETE" });
     await apiFetch(`/messages/${msgId}?workspace=${workspace}`, { method: "DELETE" });
-    if (assistantId) await apiFetch(`/messages/${assistantId}?workspace=${workspace}`, { method: "DELETE" });
   }, [messages, activeSessionKey, replaceMessages, workspace]);
 
   const branchSession = useCallback(async (msgId: string) => {

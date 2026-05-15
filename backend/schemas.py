@@ -30,12 +30,29 @@ class SessionUpdate(BaseModel):
 class FolderUpdate(BaseModel):
     name: str
 
+class ReferencedFile(BaseModel):
+    id: str
+    filename: str
+    mime: str
+
+
+class ToolCall(BaseModel):
+    name: str
+    args: dict
+    result: str
+
+
 class MessageHistory(BaseModel):
     id: str
     role: str
     content: str
     status: str = "complete"
     timestamp: Optional[str] = None
+    referenced_files: Optional[List[ReferencedFile]] = None
+    # Tool calls executed during this assistant turn (NULL for user/memory
+    # rows and for legacy assistant rows). See spec
+    # docs/specs/2026-05-15-tool-call-separation.md for the shape.
+    tool_calls: Optional[List[ToolCall]] = None
 
 class FolderCreate(BaseModel):
     id: str

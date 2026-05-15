@@ -3,6 +3,8 @@ import { CheckIcon, CancelIcon, RerunIcon } from "./Icons";
 import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import MessageActions from "./MessageActions";
+import ToolCallsBlock from "./ToolCallsBlock";
+import type { ToolCall } from "@/types/chat";
 
 interface ChatBubbleProps {
   // stable identity (parent passes `m` directly, no spread). The shape
@@ -11,6 +13,7 @@ interface ChatBubbleProps {
   // server-message schema.
   message: { id?: string; role: string; content: string; timestamp?: string };
   displayContent: string; // streamed text; updates per token without changing `message`
+  toolCalls?: ToolCall[]; // passed separately so message reference stays stable
   index: number;
   searchQuery: string;
   isStreaming: boolean;
@@ -23,6 +26,7 @@ interface ChatBubbleProps {
 function ChatBubbleImpl({
   message,
   displayContent,
+  toolCalls,
   index,
   searchQuery,
   isStreaming,
@@ -106,6 +110,13 @@ function ChatBubbleImpl({
             )}
           </div>
 
+          {/* Structured tool calls — engine-emitted, persisted on the
+              messages.tool_calls JSONB column. Only renders on assistant
+              turns that actually executed tools. */}
+          {message.role !== "user" && toolCalls && toolCalls.length > 0 && (
+            <ToolCallsBlock calls={toolCalls} />
+          )}
+
           {!isStreaming && (
             <MessageActions
               content={displayContent}
@@ -133,6 +144,7 @@ const ChatBubble = React.memo(ChatBubbleImpl, (prev, next) => {
   return (
     prev.message === next.message &&
     prev.displayContent === next.displayContent &&
+    prev.toolCalls === next.toolCalls &&
     prev.searchQuery === next.searchQuery &&
     prev.isStreaming === next.isStreaming &&
     prev.index === next.index

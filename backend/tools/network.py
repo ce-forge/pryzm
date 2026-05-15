@@ -11,8 +11,9 @@ from .registry import tool
 
 
 MODULE_DIRECTIVE = (
-    "Network tools only run when the user provides a valid TLD "
-    "(e.g. \"reddit.com\") or an explicit IPv4/IPv6 address."
+    "Network tools require a valid TLD (e.g. \"reddit.com\") or an explicit "
+    "IPv4/IPv6 address. If the user names a known web brand without a TLD "
+    "(e.g. \"youtube\"), append \".com\" before calling."
 )
 
 # Single safe-char regex for both shell-arg use and resolver input. Allows
@@ -46,10 +47,22 @@ def validate_target(host: str) -> tuple[bool, str]:
     if settings.NETWORK_TOOLS_ALLOW_PRIVATE:
         return True, host
 
-    try:
-        info = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as exc:
-        return False, f"DNS resolution failed: {exc}"
+    # Tolerate bare brand names ("youtube") by retrying with ".com" appended
+    # if the input has no dot and initial resolution fails. The TLD is the
+    # only thing missing in the common case — adding it once is cheap and
+    # avoids forcing every caller (LLM included) to remember the suffix.
+    candidates = [host] if "." in host else [host, f"{host}.com"]
+    last_err: Exception | None = None
+    info = None
+    for candidate in candidates:
+        try:
+            info = socket.getaddrinfo(candidate, None, type=socket.SOCK_STREAM)
+            host = candidate
+            break
+        except socket.gaierror as exc:
+            last_err = exc
+    if info is None:
+        return False, f"DNS resolution failed: {last_err}"
 
     resolved = sorted({entry[4][0] for entry in info})
     for ip_str in resolved:
@@ -76,7 +89,8 @@ def validate_target(host: str) -> tuple[bool, str]:
 
 @tool(
     properties={"hostname": {"type": "string", "description": "The hostname or IP. Append '.com' if it's a known web brand."}},
-    required=["hostname"]
+    required=["hostname"],
+    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first, then call `execute_ping` with the resolved IP.",
 )
 def execute_ping(hostname: str) -> str:
     """Ping an IP address or hostname to check network connectivity and latency."""
@@ -102,7 +116,7 @@ def execute_ping(hostname: str) -> str:
         "port": {"type": "integer", "description": "The port number to check (e.g. 80, 443, 3389)"}
     },
     required=["hostname", "port"],
-    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first so the port check uses the resolved IP.",
+    system_prompt_directive="If given a hostname (not a bare IP), run `dns_lookup` first, then call `check_port` with the resolved IP.",
 )
 def check_port(hostname: str, port: int) -> str:
     """Check if a specific TCP port is open on a target host."""
@@ -117,7 +131,7 @@ def check_port(hostname: str, port: int) -> str:
         return f"Port {port} on {hostname} ({detail}) is CLOSED or unreachable. Details: {str(e)}"
 
 @tool(
-    properties={"domain": {"type": "string", "description": "The domain name to resolve."}},
+    properties={"domain": {"type": "string", "description": "The domain name to resolve. Append '.com' if the user gave a bare web-brand name (e.g. \"youtube\" → \"youtube.com\")."}},
     required=["domain"]
 )
 def dns_lookup(domain: str) -> str:
