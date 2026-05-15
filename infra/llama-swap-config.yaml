@@ -1,23 +1,47 @@
 # llama-swap configuration for Pryzm.
 #
-# Three model groups:
-#   - chat: chat-capable models, swapped on-demand (one in VRAM at a time)
-#   - always-on: embedding model, pinned in memory so RAG never pays swap cost
+# Two groups:
+#   - always-on: resident in VRAM, never auto-unloaded. Holds the small chat
+#                default, the embedding model, and the vision/captioning model
+#                so RAG ingestion and image captioning don't fight the chat
+#                slot.
+#   - chat: swappable, one model at a time. Used by the router-escalated
+#           large chat model (E4B). When E4B loads it stays until something
+#           else in `chat` is requested; always-on members are not affected
+#           because the always-on group is `persistent`.
 #
-# Adding a new model: append to `models:` with the same shape, optionally
-# attach a `groups` list. Reload without restart: docker compose kill -s HUP llama-swap
+# IMPORTANT: per upstream llama-swap docs (legacy-groups syntax), group
+# membership is declared via the GROUP's `members` list — NOT via a
+# model-side `groups:` field. The latter is silently ignored. This file
+# was previously using the wrong shape; result was that no group rules
+# took effect and llama-swap fell back to default "one model at a time".
+# See: https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
+#
+# Reload without restart: docker compose kill -s HUP llama-swap
 
 healthCheckTimeout: 3600   # allow first-request HuggingFace downloads to finish
 startPort: 9000            # llama-server instances bind 9000+
 
 groups:
-  "chat":
-    swap: true             # one chat model loaded at a time
-    exclusive: false       # don't unload always-on
+  # Resident-in-VRAM models. `persistent: true` blocks other groups from
+  # unloading these; `swap: false` lets every member coexist; `exclusive:
+  # false` means loading an always-on member doesn't unload `chat`.
   "always-on":
+    persistent: true
     swap: false
     exclusive: false
-    persistent: true
+    members:
+      - "gemma-4-E2B-it"
+      - "nomic-embed-text-v1.5"
+      - "qwen2-vl-2B-it"
+
+  # Swappable chat slot. Only E4B lives here today — it loads when the
+  # router escalates and unloads when llama-swap reclaims the slot.
+  "chat":
+    swap: true
+    exclusive: false
+    members:
+      - "gemma-4-E4B-it"
 
 models:
   # Tier-1 default (small). Pinned always-on per Phase C tuning — at
@@ -30,8 +54,6 @@ models:
       /app/llama-server --port ${PORT}
       -hf bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
-    groups:
-    - always-on
     tags: []
 
   # Tier-2 default (larger). Used for complex/long prompts the router
@@ -46,8 +68,6 @@ models:
       -hf bartowski/google_gemma-4-E4B-it-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
-    groups:
-    - chat
     tags:
     - code
 
@@ -67,8 +87,6 @@ models:
       /app/llama-server --port ${PORT}
       -hf bartowski/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
-    groups:
-    - chat
     tags:
     - vision
 
@@ -78,5 +96,4 @@ models:
       -hf nomic-ai/nomic-embed-text-v1.5-GGUF:Q8_0
       -ngl 99 --embeddings --batch-size 8192
       --rope-scaling yarn --rope-freq-scale 0.75
-    groups: ["always-on"]
     tags: ["embedding"]
