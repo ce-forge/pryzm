@@ -3,6 +3,18 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   timestamp?: string;
+  /** Image documents the auto-RAG path retrieved alongside this
+   *  assistant turn. The frontend fetches each via GET /documents/{id}/raw
+   *  and renders inline below the assistant prose. v1 lives only in the
+   *  live-stream session state (state-only, not persisted across reload);
+   *  a future schema change can persist this with the message row. */
+  referencedFiles?: ReferencedFile[];
+}
+
+export interface ReferencedFile {
+  id: string;
+  filename: string;
+  mime: string;
 }
 
 export interface FileUpload {

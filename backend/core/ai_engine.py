@@ -46,6 +46,55 @@ _FILENAME_MENTION_RE = re.compile(
 )
 
 
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _image_document_refs(
+    db,
+    filenames: list[str],
+    workspace_id: str,
+    session_id: Optional[str],
+) -> list[dict]:
+    """Resolve a list of filenames to {id, filename, mime} entries for
+    image documents only. Non-image sources (PDF/text) return nothing
+    because we don't persist their bytes for inline rendering.
+
+    Looks up by exact-filename + workspace + (session OR is_global)
+    scope — same scoping the auto-RAG path uses, so we never surface
+    a doc the user couldn't see via the chunks.
+    """
+    if not filenames:
+        return []
+    image_filenames = [f for f in filenames if f.lower().endswith(_IMAGE_EXTS)]
+    if not image_filenames:
+        return []
+    from sqlalchemy import or_ as sa_or
+    rows = (
+        db.query(models.Document.id, models.Document.filename)
+        .filter(
+            models.Document.workspace_id == workspace_id,
+            models.Document.filename.in_(image_filenames),
+            sa_or(
+                models.Document.session_id == session_id,
+                models.Document.is_global == True,  # noqa: E712 — SQLAlchemy column compare
+            ),
+            models.Document.storage_path.isnot(None),
+        )
+        .all()
+    )
+    refs: list[dict] = []
+    seen_ids: set[str] = set()
+    for doc_id, filename in rows:
+        if doc_id in seen_ids:
+            continue
+        seen_ids.add(doc_id)
+        ext = filename.lower().rsplit(".", 1)[-1]
+        mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "png": "image/png", "webp": "image/webp"}.get(ext, "application/octet-stream")
+        refs.append({"id": doc_id, "filename": filename, "mime": mime})
+    return refs
+
+
 def _match_session_filename_mentions(
     text: str,
     *,
@@ -244,22 +293,26 @@ async def stream_chat(
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]
                     sources_list = rag_data["sources"]
-                    # Single source of truth for image content is the
-                    # caption written at upload time (see
-                    # services/image_describe.py). We deliberately do NOT
-                    # re-attach the original bytes here — the caption is
-                    # detailed (text-extraction-first) and the duplicate
-                    # analysis was costing 700-1000 prompt tokens per
-                    # turn for no real fidelity gain on typical
-                    # follow-up questions. If a future need surfaces for
-                    # pixel-level review, that warrants its own spec
-                    # rather than always-on re-attach.
+                    # Caption is the canonical record of image content
+                    # (see services/image_describe.py). We do NOT re-
+                    # attach the original bytes for re-analysis — the
+                    # caption already covers what the model needs.
                     recent_messages[-1]["content"] = (
                         f"I have attached a file. Relevant context:\n{rag_context}\n\n"
                         f"My message: {clean_user_text}\n\n"
                         f"{MICRO_PROMPTS['rag_file_upload_instruction']}"
                     )
                     yield format_file_analyzed(sources_list)
+                    # Emit a structured event listing image docs among
+                    # the sources so the frontend can render an inline
+                    # preview below the assistant turn. Image docs are
+                    # identified by filename extension; non-image
+                    # sources (PDF/text) get no preview (no original
+                    # bytes persisted today). See routers/chat.py
+                    # GET /documents/{id}/raw for the bytes endpoint.
+                    image_refs = _image_document_refs(db, sources_list, workspace_id, session_id)
+                    if image_refs:
+                        yield {"type": "files_referenced", "files": image_refs}
             except Exception as rag_err:
                 yield format_error(str(rag_err), "File Read Error")
             finally:

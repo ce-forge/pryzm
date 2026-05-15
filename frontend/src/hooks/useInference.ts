@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { Message } from "@/types/chat";
+import { Message, ReferencedFile } from "@/types/chat";
 import { apiFetch } from "@/utils/apiClient";
 import { newOptimisticSessionId, newTempMessageId } from "@/utils/ids";
 import type { useSessionContext } from "@/context/SessionContext";
@@ -69,6 +69,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       let fullAssistantMessage = "";
       let pendingUserMessageId: string | null = null;
       let pendingAssistantMessageId: string | null = null;
+      let referencedFiles: ReferencedFile[] | undefined;
 
       const startingItems: Message[] = [];
       if (!skipUserAdd) {
@@ -202,6 +203,15 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                     return next;
                   });
                 }
+
+                // Image previews from auto-RAG. The backend emits this
+                // when it retrieves image documents alongside the chat
+                // response — we stash the refs and attach them to the
+                // assistant message at finalize time so they render
+                // inline below the prose.
+                if (parsed.type === "files_referenced" && Array.isArray(parsed.files)) {
+                  referencedFiles = parsed.files as ReferencedFile[];
+                }
               } catch {
                 /* malformed line, skip */
               }
@@ -214,7 +224,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
         setIsProcessing(false);
 
         const finalKeySid = realDbId ?? optimisticId;
-        sessionApi.finalizeAssistantMessage(ws, finalKeySid, fullAssistantMessage);
+        sessionApi.finalizeAssistantMessage(ws, finalKeySid, fullAssistantMessage, referencedFiles);
         // Swap optimistic temp ids for the real DB UUIDs that came back in the
         // stream. No post-stream /sessions/{id} refetch = no race against the
         // next send.

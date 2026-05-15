@@ -351,7 +351,7 @@ async def analyze_data(
         assistant_message_id: Optional[str] = None
 
         try:
-            async for chunk in ai_engine.stream_chat(
+            async for item in ai_engine.stream_chat(
                 http_client,
                 safe_messages,
                 workspace_id=workspace_id,
@@ -363,8 +363,18 @@ async def analyze_data(
                 if await http_request.is_disconnected():
                     disconnected = True
                     break
-                full_response += chunk
-                yield json.dumps({"chunk": chunk}) + "\n"
+                # ai_engine yields either a markdown chunk string (the
+                # common case) OR a dict structured event (e.g. the
+                # files_referenced payload for image previews). Dicts
+                # pass through to the SSE stream as-is so the frontend
+                # can dispatch on `type`. Strings get wrapped as chunks
+                # AND appended to the response buffer so the saved
+                # assistant message reflects the full markdown.
+                if isinstance(item, dict):
+                    yield json.dumps(item) + "\n"
+                    continue
+                full_response += item
+                yield json.dumps({"chunk": item}) + "\n"
 
             if not disconnected:
                 # Save the assistant message NOW so the `done` event can carry
@@ -596,6 +606,70 @@ async def upload_events(
         headers={
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
+        },
+    )
+
+
+_IMAGE_MIME_BY_EXT = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+}
+
+
+@router.get("/documents/{document_id}/raw")
+def get_document_raw(
+    document_id: str,
+    db: Session = Depends(database.get_db),
+    _auth: None = Depends(require_token),
+):
+    """Stream the original bytes of an uploaded document.
+
+    Only image documents are supported today — they're the only type
+    that persists original bytes (Document.storage_path is non-NULL).
+    PDFs and text are stored as chunks only; we'd need to add byte
+    persistence for those if we ever want to serve them here.
+
+    Returns:
+      200 + image bytes (Content-Type inferred from filename ext)
+      404 if doc is missing
+      410 if the doc exists but has no storage_path (PDF/text)
+      404 if the on-disk file is gone (e.g. cleanup race)
+
+    Auth: bearer header OR `?token=` URL fallback. The URL fallback
+    matters because `<img src=...>` can't set custom headers, just
+    like EventSource. Same shape as /uploads/{id}/events.
+    """
+    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+    if not doc.storage_path:
+        raise HTTPException(
+            status_code=410,
+            detail="Original bytes not available for this document type.",
+        )
+    import os as _os
+    if not _os.path.exists(doc.storage_path):
+        raise HTTPException(status_code=404, detail="Document file is missing on disk.")
+
+    ext = _os.path.splitext(doc.filename.lower())[1]
+    mime = _IMAGE_MIME_BY_EXT.get(ext, "application/octet-stream")
+
+    def _stream():
+        with open(doc.storage_path, "rb") as f:
+            while chunk := f.read(64 * 1024):
+                yield chunk
+
+    return StreamingResponse(
+        _stream(),
+        media_type=mime,
+        headers={
+            # Browser caches by URL — same doc id returns same bytes,
+            # safe to cache aggressively. Filename header lets a
+            # right-click-save use the original upload name.
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Disposition": f'inline; filename="{doc.filename}"',
         },
     )
 

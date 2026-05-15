@@ -2,7 +2,7 @@
 
 import React, { createContext, useCallback, useContext, useMemo, useRef } from "react";
 import { useSession } from "@/hooks/useSession";
-import { Message } from "@/types/chat";
+import { Message, ReferencedFile } from "@/types/chat";
 
 const cacheKey = (workspaceSlug: string, sessionId: string): string =>
   `${workspaceSlug}:${sessionId}`;
@@ -28,6 +28,7 @@ interface SessionContextValue {
     workspaceSlug: string,
     sessionId: string,
     content: string,
+    referencedFiles?: ReferencedFile[],
   ) => void;
   replaceMessages: (
     workspaceSlug: string,
@@ -83,13 +84,20 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const finalizeAssistantMessage = useCallback(
-    (ws: string, sid: string, content: string) => {
+    (ws: string, sid: string, content: string, referencedFiles?: ReferencedFile[]) => {
       const key = cacheKey(ws, sid);
       setMessageCache((prev) => {
         const msgs = prev[key];
         if (!msgs || msgs.length === 0) return prev;
         const next = [...msgs];
-        next[next.length - 1] = { ...next[next.length - 1], content };
+        const last = next[next.length - 1];
+        next[next.length - 1] = {
+          ...last,
+          content,
+          // Preserve any prior refs if this finalize call doesn't supply
+          // new ones (e.g., partial mid-stream finalizes from abort path).
+          referencedFiles: referencedFiles ?? last.referencedFiles,
+        };
         return { ...prev, [key]: next };
       });
     },

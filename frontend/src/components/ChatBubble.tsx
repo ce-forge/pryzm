@@ -3,13 +3,15 @@ import { CheckIcon, CancelIcon, RerunIcon } from "./Icons";
 import UserMessage from "./UserMessage";
 import AssistantMessage from "./AssistantMessage";
 import MessageActions from "./MessageActions";
+import ReferencedFilesPreview from "./ReferencedFilesPreview";
+import type { ReferencedFile } from "@/types/chat";
 
 interface ChatBubbleProps {
   // stable identity (parent passes `m` directly, no spread). The shape
   // here is the message row from useSession's messageCache — we leave
   // it loosely typed to avoid coupling this component to the entire
   // server-message schema.
-  message: { id?: string; role: string; content: string; timestamp?: string };
+  message: { id?: string; role: string; content: string; timestamp?: string; referencedFiles?: ReferencedFile[] };
   displayContent: string; // streamed text; updates per token without changing `message`
   index: number;
   searchQuery: string;
@@ -105,6 +107,12 @@ function ChatBubbleImpl({
               <AssistantMessage content={displayContent} searchQuery={searchQuery} />
             )}
           </div>
+
+          {/* Image previews from auto-RAG. Only renders on assistant
+              turns where the backend retrieved image documents. */}
+          {message.role !== "user" && message.referencedFiles && message.referencedFiles.length > 0 && (
+            <ReferencedFilesPreview files={message.referencedFiles} />
+          )}
 
           {!isStreaming && (
             <MessageActions
