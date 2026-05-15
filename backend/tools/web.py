@@ -25,6 +25,7 @@ from .registry import tool
         },
     },
     required=["query"],
+    workspaces=["it_copilot", "personal"],
     system_prompt_directive=(
         "Use `web_search` only for factual questions whose answer may have "
         "changed since training (current events, recent vendor releases, "
