@@ -18,7 +18,12 @@ import ChatTimestamp from "./ChatTimestamp";
 import ChatBubble from "./ChatBubble";
 import ConfirmModal from "./ConfirmModal";
 
-export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) {
+interface ActiveSessionProps {
+  isSidebarOpen: boolean;
+  setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: ActiveSessionProps) {
   const session = useSessionContext();
   const ai = useInferenceContext();
   const uploader = useUploaderContext();
@@ -143,7 +148,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
             <QuickActions setPrompt={promptState.setPrompt} inputRef={textareaRef} />
           )}
 
-          {messages.map((m: any, i: number) => {
+          {messages.map((m: { id?: string; role: string; content: string; timestamp?: string }, i: number) => {
             const isLastStreaming = currentIsProcessing && i === messages.length - 1 && m.role === "assistant";
             const displayContent = isLastStreaming && myStreamingText ? myStreamingText : m.content;
             const stableKey = m.id ?? `idx-${i}`;
@@ -183,9 +188,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: any) 
           isAutoTesting={currentIsTesting}
           handleInference={onSubmit}
           stopAutoTest={stopAllInference}
-          handleKeyDown={(e: any) => promptState.handleKeyDown(e, onSubmit)}
-          runTestSuite={(type: any) => tester.runTestSuite(type, session.currentSession)}
-          processUploadQueue={(files: any[]) => uploader.processUploadQueue(files)}
+          handleKeyDown={(e) => promptState.handleKeyDown(e, onSubmit)}
+          runTestSuite={(type) => tester.runTestSuite(type, session.currentSession)}
+          processUploadQueue={(files) => uploader.processUploadQueue(files)}
           totalTokens={promptState.totalTokens}
           inputRef={textareaRef}
         />

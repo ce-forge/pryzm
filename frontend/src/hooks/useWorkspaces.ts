@@ -55,6 +55,9 @@ export function useWorkspaces() {
     }
   }, []);
 
+  // Initial workspace list fetch on mount. setState happens inside
+  // `refresh`; canonical "fetch on mount" effect pattern.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh(); }, [refresh]);
 
   const create = useCallback(async (payload: CreatePayload): Promise<Workspace | null> => {

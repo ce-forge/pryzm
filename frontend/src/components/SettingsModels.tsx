@@ -43,6 +43,11 @@ export default function ModelsSection() {
     }
   }, []);
 
+  // Initial + dep-change refresh of the models list. setState happens
+  // inside `refresh`; the lint rule flags any call that ultimately
+  // sets state from an effect, but this is the canonical "fetch on
+  // mount and on dep change" pattern.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { refresh(); }, [refresh]);
 
   // Auto-scroll the log pane on every new line.
