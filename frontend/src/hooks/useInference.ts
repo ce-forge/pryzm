@@ -161,11 +161,19 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                   pendingAssistantMessageId = parsed.assistant_message_id;
                 }
 
-                // THE HANDOFF — atomic single migrate from optimistic → real id.
+                // THE HANDOFF — atomic single migrate to the backend-returned id.
+                // Fires in two cases:
+                //   (a) brand-new chat: optimisticId → realDbId (the normal path).
+                //   (b) stale-id recovery: the URL had a session id we sent up,
+                //       but the backend couldn't find it (e.g. after a DB wipe
+                //       or a manual delete) and created a fresh one. The new id
+                //       differs from optimisticId; migrate so subsequent sends
+                //       in this turn target the real session instead of orphaning
+                //       another row.
                 if (
                   parsed.status === "started" &&
                   parsed.session_id &&
-                  !activeSessionId
+                  parsed.session_id !== optimisticId
                 ) {
                   const newDbId = parsed.session_id as string;
                   realDbId = newDbId;

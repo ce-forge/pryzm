@@ -47,36 +47,56 @@ export function useTestSuite(
 
   const runTestSuite = async (type: string, targetSessionId: string | null) => {
     const initialTrackingId = targetSessionId || "temp_new_chat";
-    
+
     if (activeTestSessions.has(initialTrackingId)) return;
-    
+
     setActiveTestSessions(prev => new Set(prev).add(initialTrackingId));
     abortRefs.current[initialTrackingId] = false;
 
     const prompts = testSuitePrompts[type] || [];
     let currentId = targetSessionId;
+    let trackingId = initialTrackingId;
+
+    // Move the tracking key off "temp_new_chat" (or any prior id) onto
+    // whatever session id the run is actually running against. Without
+    // this, clicking "New Chat" while a test runs from a freshly-started
+    // session leaves "temp_new_chat" in activeTestSessions, and the
+    // new chat's input shows the stop-test button.
+    const migrateTracking = (newId: string) => {
+      if (!newId || newId === trackingId) return;
+      setActiveTestSessions(prev => {
+        const next = new Set(prev);
+        next.delete(trackingId);
+        next.add(newId);
+        return next;
+      });
+      abortRefs.current[newId] = abortRefs.current[trackingId] ?? false;
+      delete abortRefs.current[trackingId];
+      trackingId = newId;
+    };
 
     for (const prompt of prompts) {
-      const trackingId = currentId || initialTrackingId;
       if (abortRefs.current[trackingId]) break;
 
       const resultId = await sendMessage(prompt, currentId);
-      
-      // FIX: Check our translation dictionary to swap optimistic IDs for real DB UUIDs
+
+      // resultId is the optimistic id from useInference; linkSession may
+      // have already populated idMapRef with the real DB id by now.
       if (resultId) {
-        currentId = idMapRef.current[resultId] || resultId;
+        const resolved = idMapRef.current[resultId] || resultId;
+        migrateTracking(resolved);
+        currentId = resolved;
       }
 
-      const postPromptId = currentId || initialTrackingId;
       for (let i = 0; i < 30; i++) {
-        if (abortRefs.current[postPromptId]) break;
+        if (abortRefs.current[trackingId]) break;
         await new Promise(r => setTimeout(r, 100));
       }
     }
 
     setActiveTestSessions(prev => {
       const next = new Set(prev);
-      next.delete(currentId || initialTrackingId);
+      next.delete(trackingId);
       next.delete(initialTrackingId);
       return next;
     });

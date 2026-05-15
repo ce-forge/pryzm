@@ -45,6 +45,57 @@ _FILENAME_MENTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Image extensions whose original bytes we persist (Document.storage_path
+# is non-NULL) and can re-render inline in the chat surface via
+# GET /documents/{id}/raw. PDFs/text are stored as chunks only.
+_IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+def _image_document_refs(
+    db,
+    filenames: list[str],
+    workspace_id: str,
+    session_id: Optional[str],
+) -> list[dict]:
+    """Resolve a list of filenames to {id, filename, mime} entries for
+    image documents only. Non-image sources (PDF/text) return nothing
+    because we don't persist their bytes for inline rendering.
+
+    Looks up by exact-filename + workspace + (session OR is_global)
+    scope — same scoping the auto-RAG path uses, so we never surface
+    a doc the user couldn't see via the chunks.
+    """
+    if not filenames:
+        return []
+    image_filenames = [f for f in filenames if f.lower().endswith(_IMAGE_EXTS)]
+    if not image_filenames:
+        return []
+    from sqlalchemy import or_ as sa_or
+    rows = (
+        db.query(models.Document.id, models.Document.filename)
+        .filter(
+            models.Document.workspace_id == workspace_id,
+            models.Document.filename.in_(image_filenames),
+            sa_or(
+                models.Document.session_id == session_id,
+                models.Document.is_global == True,  # noqa: E712 — SQLAlchemy column compare
+            ),
+            models.Document.storage_path.isnot(None),
+        )
+        .all()
+    )
+    refs: list[dict] = []
+    seen_ids: set[str] = set()
+    for doc_id, filename in rows:
+        if doc_id in seen_ids:
+            continue
+        seen_ids.add(doc_id)
+        ext = filename.lower().rsplit(".", 1)[-1]
+        mime = {"jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "png": "image/png", "webp": "image/webp"}.get(ext, "application/octet-stream")
+        refs.append({"id": doc_id, "filename": filename, "mime": mime})
+    return refs
+
 
 def _inject_tool_directives(prompt: str, rendered: str) -> str:
     """Substitute {tool_directives} in the prompt with the rendered block.
@@ -282,6 +333,14 @@ async def stream_chat(
                         f"{MICRO_PROMPTS['rag_file_upload_instruction']}"
                     )
                     yield format_file_analyzed(sources_list)
+                    # Surface image-typed sources to the frontend so it
+                    # can render an inline preview below the assistant
+                    # turn. Non-image sources (PDF/text) are filtered out
+                    # by _image_document_refs because we don't persist
+                    # their bytes for re-rendering.
+                    image_refs = _image_document_refs(db, sources_list, workspace_id, session_id)
+                    if image_refs:
+                        yield {"type": "files_referenced", "files": image_refs}
             except Exception as rag_err:
                 yield format_error(str(rag_err), "File Read Error")
             finally:
@@ -362,6 +421,26 @@ async def stream_chat(
                         had_tool_error = True
 
                     yield {"type": "tool_result", "name": func_name, "result": result}
+
+                    # When search_knowledge_base returns chunks from image
+                    # documents, surface them as files_referenced so the
+                    # inline preview renders. Mirrors the auto-RAG path's
+                    # emission. Filenames are parsed from the result's
+                    # `[from <filename>]` markers that _label_chunk emits.
+                    if func_name == "search_knowledge_base" and isinstance(result, str):
+                        from_filenames = re.findall(r'\[from ([^\]]+)\]', result)
+                        if from_filenames:
+                            tool_db = database.SessionLocal()
+                            try:
+                                refs = _image_document_refs(
+                                    tool_db, list(set(from_filenames)),
+                                    workspace_id, session_id,
+                                )
+                            finally:
+                                tool_db.close()
+                            if refs:
+                                yield {"type": "files_referenced", "files": refs}
+
                     full_messages.append({
                         "role": "tool",
                         "content": str(result),
