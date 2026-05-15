@@ -15,7 +15,7 @@ from core import llm_server
 from core.engine_config import EngineConfig
 from core.llm_router import Tier, get_router
 from core.llm_metrics import emit_route, emit_escalate
-from tools.registry import ResolvedToolSet
+from tools.registry import ResolvedToolSet, render_tool_directives
 from utils.formatters import (
     format_tool_execution,
     format_file_analyzed,
@@ -176,7 +176,6 @@ async def stream_chat(
     finally:
         db.close()
 
-    from tools.registry import render_tool_directives
     tool_names = ", ".join(workspace_tools.keys())
     system_content = system_prompt_raw.replace("{tool_names}", tool_names)
     rendered_directives = render_tool_directives(tool_set)
