@@ -159,16 +159,15 @@ def test_render_module_import_error_does_not_raise():
 
 
 def test_placeholder_substitution_inline():
-    """When {tool_directives} is present in the prompt, the rendered block lands there."""
+    """When {tool_directives} is present in the prompt, _inject_tool_directives lands the rendered block there."""
+    from core.ai_engine import _inject_tool_directives
     mod = _make_module_with_directive("test_pkg.sub1", None)
     fn = _make_callable("x_tool", mod, "Use for X.")
     rendered = render_tool_directives(
         ResolvedToolSet(callables={"x_tool": fn}, definitions=[], per_tool_config={})
     )
-    prompt = "BEFORE\n\n{tool_directives}\n\nAFTER"
-    assert "{tool_directives}" in prompt
-    substituted = prompt.replace("{tool_directives}", rendered)
-    assert substituted == f"BEFORE\n\n{rendered}\n\nAFTER"
+    result = _inject_tool_directives("BEFORE\n\n{tool_directives}\n\nAFTER", rendered)
+    assert result == f"BEFORE\n\n{rendered}\n\nAFTER"
 
 
 def test_missing_placeholder_appends():
