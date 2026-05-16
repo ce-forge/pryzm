@@ -32,7 +32,6 @@ BUILTIN_WORKSPACES: list[BuiltinWorkspace] = [
         enabled_tools=[
             "check_port", "dns_lookup", "execute_ping", "get_public_ip",
             "rename_chat_session", "search_knowledge_base", "ssl_inspect", "traceroute",
-            "web_search",
         ],
         engine_config={"backend": "llama_cpp"},
     ),
@@ -41,7 +40,7 @@ BUILTIN_WORKSPACES: list[BuiltinWorkspace] = [
         display_name="Personal",
         color="orange",
         system_prompt_file="personal.txt",
-        enabled_tools=["rename_chat_session", "search_knowledge_base", "web_search"],
+        enabled_tools=["rename_chat_session", "search_knowledge_base"],
         engine_config={"backend": "llama_cpp"},
     ),
 ]

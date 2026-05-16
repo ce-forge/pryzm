@@ -58,6 +58,7 @@ interface ChatInputProps {
   processUploadQueue: (files: FileUpload[]) => void;
   totalTokens: number;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
+  webSearchAvailable: boolean;
   webSearchEnabled: boolean;
   setWebSearchEnabled: React.Dispatch<React.SetStateAction<boolean>>;
 }
@@ -66,7 +67,7 @@ export default function ChatInput({
   prompt, setPrompt, uploads, setUploads, isProcessing, isAutoTesting,
   handleInference, stopAutoTest, handleKeyDown, runTestSuite,
   processUploadQueue, totalTokens, inputRef,
-  webSearchEnabled, setWebSearchEnabled,
+  webSearchAvailable, webSearchEnabled, setWebSearchEnabled,
 }: ChatInputProps) {
   
   const [isDragging, setIsDragging] = useState(false);
@@ -262,18 +263,20 @@ export default function ChatInput({
                       <PlusIcon className="w-5 h-5" />
                     </button>
 
-                    <button type="button"
-                      onClick={() => setWebSearchEnabled((v) => !v)}
-                      aria-label={webSearchEnabled ? "Web search on" : "Web search off"}
-                      title={webSearchEnabled ? "Web search: on" : "Web search: off"}
-                      aria-pressed={webSearchEnabled}
-                      className={`p-2.5 rounded-full transition-all ${
-                        webSearchEnabled
-                          ? "bg-blue-500/20 text-blue-300 hover:bg-blue-500/30"
-                          : "text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537]"
-                      }`}>
-                      <GlobeIcon className="w-4 h-4" />
-                    </button>
+                    {webSearchAvailable && (
+                      <button type="button"
+                        onClick={() => setWebSearchEnabled((v) => !v)}
+                        aria-label={webSearchEnabled ? "Web search on" : "Web search off"}
+                        title={webSearchEnabled ? "Web search: on" : "Web search: off"}
+                        aria-pressed={webSearchEnabled}
+                        className={`p-2.5 rounded-full transition-all ${
+                          webSearchEnabled
+                            ? "bg-blue-500/20 text-blue-300 hover:bg-blue-500/30"
+                            : "text-gray-500 hover:text-[#e3e3e3] hover:bg-[#333537]"
+                        }`}>
+                        <GlobeIcon className="w-4 h-4" />
+                      </button>
+                    )}
 
                     <button type="button" onClick={(e) => {
                         e.stopPropagation();
