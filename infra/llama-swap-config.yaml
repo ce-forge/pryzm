@@ -33,7 +33,6 @@ groups:
     members:
       - "gemma-4-E2B-it"
       - "nomic-embed-text-v1.5"
-      - "qwen2-vl-2B-it"
 
   # Swappable chat slot. Only E4B lives here today — it loads when the
   # router escalates and unloads when llama-swap reclaims the slot.
@@ -66,7 +65,7 @@ models:
     cmd: |-
       /app/llama-server --port ${PORT}
       -hf bartowski/google_gemma-4-E4B-it-GGUF:Q4_K_M
-      -ngl 99 --ctx-size 8192 --jinja --flash-attn on
+      -ngl 99 --ctx-size 32768 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
     tags:
     - code
@@ -88,6 +87,12 @@ models:
       -hf bartowski/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --repeat-penalty 1.15
+    # Captioning runs only on image upload, not on chat turns. Leaving
+    # the model resident wastes ~3GB VRAM between uploads. With ttl=60
+    # it loads on first /v1/chat/completions for this model id and
+    # unloads 60s after the last call — covers a burst of uploads
+    # without paying cold-load again, and frees VRAM once you stop.
+    ttl: 60
     tags:
     - vision
 
