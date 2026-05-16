@@ -4,14 +4,12 @@
 #   - Bot-detection limiter off (we hit it from the backend, not browsers)
 #   - English default language
 #
-# `secret_key` is required by upstream. The value here is per-deployment and
-# not sensitive in a localhost-only setup, but rotate it if SearxNG ever gets
-# exposed beyond loopback.
+# `secret_key` is required by upstream and is supplied via the SEARXNG_SECRET
+# env var (see .env). Never hard-code the value here — this file is in git.
 
 use_default_settings: true
 
 server:
-  secret_key: "bf4f19ae08f70d19584112c88376468e9d0745de37624d16e9224b60728b3fe8"
   limiter: false
   image_proxy: false
   port: 8080

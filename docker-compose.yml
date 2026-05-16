@@ -24,6 +24,11 @@ services:
     container_name: pryzm_searxng
     ports:
       - "127.0.0.1:8888:8080"
+    environment:
+      # SearxNG reads SEARXNG_SECRET at startup and uses it as `server.secret_key`
+      # for CSRF / session integrity. Sourced from .env (gitignored) so the
+      # value never lands in the repo.
+      SEARXNG_SECRET: ${SEARXNG_SECRET}
     volumes:
       - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
     restart: always
