@@ -330,6 +330,36 @@ def _label_chunk(chunk) -> str:
     return f"[from {filename}]\n{chunk.content}"
 
 
+def _stitch_chunks_dedup(chunk_texts: list[str], max_overlap: int = 250) -> str:
+    """Concatenate ordered chunks, removing the overlap each consecutive pair
+    shares due to RecursiveCharacterTextSplitter's chunk_overlap setting.
+
+    RAG retrieval benefits from overlap (queries near a chunk boundary still
+    surface the right neighbour), but full-file retrieval (the
+    `restrict_to_filenames` path) sees the duplicated 200 chars twice and the
+    model treats them as repetition — leading to speaker drift and token-
+    substitution hallucinations on transcripts.
+
+    For each adjacent pair we find the longest suffix of `prev` that matches a
+    prefix of `next`, capped at `max_overlap`, and drop that prefix from `next`.
+    O(N * max_overlap) total; max_overlap defaults a touch above the splitter's
+    200-char setting to absorb minor cleanup.
+    """
+    if not chunk_texts:
+        return ""
+    out: list[str] = [chunk_texts[0]]
+    for nxt in chunk_texts[1:]:
+        prev = out[-1]
+        bound = min(len(prev), len(nxt), max_overlap)
+        overlap = 0
+        for n in range(bound, 0, -1):
+            if prev.endswith(nxt[:n]):
+                overlap = n
+                break
+        out.append(nxt[overlap:])
+    return "".join(out)
+
+
 async def retrieve_relevant_chunks(
     client: httpx.AsyncClient,
     db: Session,
@@ -385,7 +415,17 @@ async def retrieve_relevant_chunks(
             )
             if chunks:
                 unique_sources = list({c.document.filename for c in chunks})
-                context_blocks = [_label_chunk(c) for c in chunks]
+                # Group by document, stitch each doc's chunks with overlap
+                # removed, then label once per doc — avoids the chunk_overlap=200
+                # duplication the splitter intentionally bakes in.
+                chunks_by_doc: dict[str, list] = {}
+                for c in chunks:
+                    chunks_by_doc.setdefault(c.document_id, []).append(c)
+                context_blocks = []
+                for doc_chunks in chunks_by_doc.values():
+                    filename = doc_chunks[0].document.filename if doc_chunks[0].document else "unknown"
+                    stitched = _stitch_chunks_dedup([c.content for c in doc_chunks])
+                    context_blocks.append(f"[from {filename}]\n{stitched}")
                 formatted_context = format_rag_context(context_blocks)
                 return {
                     "context": formatted_context,
