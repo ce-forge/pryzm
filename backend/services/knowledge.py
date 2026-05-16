@@ -2,6 +2,7 @@ import httpx
 from db import models
 from sqlalchemy import or_, func as sa_func
 from sqlalchemy.orm import Session
+import uuid_utils
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from config import settings
 from utils.formatters import format_rag_context
@@ -77,9 +78,16 @@ async def add_chunks_to_document(
     # vector space — every query had to compete against "Source Document: ..."
     # boilerplate. Filename gets re-attached at retrieval time so the model
     # still sees provenance per chunk.
+    # UUIDv7 ids encode a millisecond timestamp in the leading 48 bits, so
+    # `ORDER BY id` recovers chunk insertion order — the order the splitter
+    # produced them, which IS the order they appear in the source document.
+    # This unblocks the attached-file retrieval path (below) from having to
+    # return a relevance-ranked top-K; for explicit attachments we want
+    # completeness + correct order, not relevance.
     for chunk_text in chunks:
         vector = await get_embedding(client, chunk_text)
         db.add(models.DocumentChunk(
+            id=str(uuid_utils.uuid7()),
             document_id=document.id,
             workspace_id=document.workspace_id,
             content=chunk_text,
@@ -363,10 +371,16 @@ async def retrieve_relevant_chunks(
             .all()
         )
         if scoped_docs:
+            # Explicit attachment ⇒ return ALL chunks of the scoped doc(s)
+            # in insertion order. UUIDv7 ids make `ORDER BY id` equivalent
+            # to "the order the splitter produced them". Relevance ranking
+            # would be the wrong operation here — the user wants the whole
+            # document. Context-window overflow on huge files surfaces via
+            # the upstream error message (core/llm_server._raise_for_status_with_body).
             chunks = (
                 db.query(models.DocumentChunk)
                 .filter(models.DocumentChunk.document_id.in_([d.id for d in scoped_docs]))
-                .limit(max(top_k * 4, 8))
+                .order_by(models.DocumentChunk.id)
                 .all()
             )
             if chunks:
