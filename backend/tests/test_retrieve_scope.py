@@ -311,7 +311,7 @@ async def test_restrict_to_filenames_dedupes_chunk_overlap(db_session):
     db_session.commit()
 
     # Mimic two consecutive splitter chunks with a deliberate shared tail/head.
-    boundary = "Sam: Like who Disney? Daanish: Disney."
+    boundary = "Speaker A: example question? Speaker B: answer."
     db_session.add(models.DocumentChunk(
         id=str(uuid_utils.uuid7()),
         document_id="doc-dedup", workspace_id="ws-dedup",
