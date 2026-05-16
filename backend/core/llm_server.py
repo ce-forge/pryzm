@@ -34,6 +34,35 @@ DEFAULT_SMALL_CHAT_MODEL = "gemma-4-E2B-it"
 DEFAULT_EMBED_MODEL = "nomic-embed-text-v1.5"
 
 
+def _raise_for_status_with_body(resp) -> None:
+    """Call resp.raise_for_status(); on HTTPStatusError, augment the message
+    with the upstream body so users see *why* llama-server returned 4xx/5xx
+    (e.g. "exceeds the available context size") instead of just the status.
+
+    llama-server returns JSON of shape `{"error": {"message": "...", ...}}` —
+    we surface `error.message`. For non-JSON bodies we fall back to the raw
+    text, truncated to keep the message readable.
+    """
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        try:
+            body = resp.json()
+            detail = (body.get("error") or {}).get("message") or body.get("detail")
+        except Exception:
+            detail = None
+        if not detail:
+            text = (resp.text or "").strip()
+            detail = text[:400] + ("…" if len(text) > 400 else "")
+        if detail:
+            raise httpx.HTTPStatusError(
+                f"{exc} — {detail}",
+                request=exc.request,
+                response=exc.response,
+            ) from None
+        raise
+
+
 def _adapt_chat_response(data: dict) -> dict:
     """Translate OpenAI chat-completion response shape into the legacy
     Ollama shape ai_engine consumes.
@@ -96,7 +125,7 @@ async def chat(
     url = f"{BASE_URL}/v1/chat/completions"
     t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=settings.LLM_TIMEOUT_SECONDS)
-    resp.raise_for_status()
+    _raise_for_status_with_body(resp)
     duration_s = time.perf_counter() - t0
     adapted = _adapt_chat_response(resp.json())
     emit_chat_metric(model=model, response=adapted, fallback_duration_s=duration_s)
@@ -127,7 +156,7 @@ async def generate(
     url = f"{BASE_URL}/v1/chat/completions"
     t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=settings.LLM_TIMEOUT_SECONDS)
-    resp.raise_for_status()
+    _raise_for_status_with_body(resp)
     duration_s = time.perf_counter() - t0
     data = resp.json()
     adapted = _adapt_chat_response(data)
@@ -142,7 +171,7 @@ async def embed(client: httpx.AsyncClient, text: str, model: str) -> list[float]
     payload = {"model": model, "input": text}
     t0 = time.perf_counter()
     resp = await client.post(url, json=payload, timeout=30.0)
-    resp.raise_for_status()
+    _raise_for_status_with_body(resp)
     duration_s = time.perf_counter() - t0
     emit_embed_metric(model=model, char_count=len(text), duration_s=duration_s)
     data = resp.json()
@@ -154,5 +183,5 @@ async def list_models(client: httpx.AsyncClient) -> list[str]:
     configured models here; the order matches infra/llama-swap-config.yaml."""
     url = f"{BASE_URL}/v1/models"
     resp = await client.get(url, timeout=5.0)
-    resp.raise_for_status()
+    _raise_for_status_with_body(resp)
     return [m["id"] for m in resp.json().get("data", [])]
