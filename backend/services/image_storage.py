@@ -15,7 +15,7 @@ Path scheme: backend/data/uploads/<uuid>.<ext>.
 from __future__ import annotations
 
 import os
-import uuid
+import uuid_utils
 
 # Module-level constant: where the uploads live. Computed once at import,
 # absolute path, so the same value is used regardless of which directory
@@ -44,7 +44,7 @@ def save_image(image_bytes: bytes, mime: str) -> str:
         raise ValueError(f"Unsupported image MIME for storage: {mime}")
 
     os.makedirs(_UPLOADS_DIR, exist_ok=True)
-    name = f"{uuid.uuid4().hex}{_MIME_TO_EXT[mime]}"
+    name = f"{uuid_utils.uuid7().hex}{_MIME_TO_EXT[mime]}"
     path = os.path.join(_UPLOADS_DIR, name)
     with open(path, "wb") as f:
         f.write(image_bytes)

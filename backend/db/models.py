@@ -4,13 +4,19 @@ from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from pgvector.sqlalchemy import Vector
-import uuid
+import uuid_utils
 
 Base = declarative_base()
 
 
 def generate_uuid():
-    return str(uuid.uuid4())
+    # UUIDv7: 48 bits Unix-ms timestamp + random bits. Time-ordered IDs
+    # give B-tree indexes better insert locality than v4's pure random
+    # (new rows append near the index's right edge instead of scattering
+    # and fragmenting it). Behavior is unchanged for application code:
+    # we still sort/query by `created_at` (not by id), and existing
+    # v4 IDs keep working alongside new v7 ones — both are valid UUIDs.
+    return str(uuid_utils.uuid7())
 
 
 class Workspace(Base):
