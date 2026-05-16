@@ -66,7 +66,7 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
         const parts = child.split(new RegExp(`(${escapedQuery})`, 'gi'));
         return parts.map((part, i) =>
           part.toLowerCase() === query.toLowerCase() ? (
-            <mark key={i} className="bg-blue-500/30 text-blue-200 rounded-sm px-0.5">{part}</mark>
+            <mark key={i} className="search-match bg-blue-500/30 text-blue-200 rounded-sm px-0.5 text-inherit transition-colors duration-200">{part}</mark>
           ) : part
         );
       }
