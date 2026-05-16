@@ -19,6 +19,15 @@ services:
       - ./pgdata:/var/lib/postgresql/data
     restart: always
 
+  searxng:
+    image: searxng/searxng:latest
+    container_name: pryzm_searxng
+    ports:
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./infra/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    restart: always
+
   llama-swap:
     # Pinned by digest so SIGHUP semantics, /api/events shape, and /running
     # endpoint stay deterministic across `docker compose pull` cycles. To

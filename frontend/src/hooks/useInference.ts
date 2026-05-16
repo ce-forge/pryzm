@@ -15,6 +15,7 @@ export interface InferenceApi {
     activeSessionId: string | null,
     attachments?: string[],
     skipUserAdd?: boolean,
+    modes?: string[],
   ) => Promise<string>;
   stopInference: (id?: string | null) => void;
   /**
@@ -52,6 +53,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       activeSessionId: string | null,
       attachments: string[] = [],
       skipUserAdd: boolean = false,
+      modes: string[] = [],
     ): Promise<string> => {
       setIsProcessing(true);
 
@@ -120,6 +122,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                   : activeSessionId,
               attachments,
               skip_db_save: skipUserAdd,
+              modes,
             }),
             signal: controller.signal,
           },

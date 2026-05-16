@@ -7,6 +7,9 @@ class InferenceRequest(BaseModel):
     prompt: str = Field(..., max_length=100000)
     attachments: Optional[List[str]] = None
     skip_db_save: Optional[bool] = False
+    # Per-turn behavior modes (see backend/core/modes.py). Unknown names are
+    # dropped server-side, so FE/BE deploys can drift without breaking.
+    modes: List[str] = Field(default_factory=list)
 
 class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)

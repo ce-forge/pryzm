@@ -441,6 +441,7 @@ async def analyze_data(
                 tool_set=tool_set,
                 session_id=session_id,
                 is_disconnected=http_request.is_disconnected,
+                modes=request.modes,
             ):
                 if await http_request.is_disconnected():
                     disconnected = True

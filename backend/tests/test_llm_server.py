@@ -163,6 +163,82 @@ async def test_embed_returns_vector():
     assert out == [0.1, 0.2, 0.3]
 
 
+def _make_error_response(status: int, body: dict | str):
+    """Build a Response-shaped mock that simulates an HTTP error.
+
+    raise_for_status() raises httpx.HTTPStatusError carrying a request + response;
+    .text returns the body; .json() works only if `body` is a dict.
+    """
+    request = httpx.Request("POST", "http://127.0.0.1:8080/v1/chat/completions")
+    text_body = json.dumps(body) if isinstance(body, dict) else body
+    mock_resp = MagicMock()
+    mock_resp.status_code = status
+    mock_resp.text = text_body
+    mock_resp.json = MagicMock(return_value=body if isinstance(body, dict) else {})
+    mock_resp.raise_for_status = MagicMock(
+        side_effect=httpx.HTTPStatusError(
+            f"{status} error", request=request, response=mock_resp,
+        )
+    )
+    return mock_resp
+
+
+@pytest.mark.asyncio
+async def test_chat_400_surfaces_llama_server_error_message():
+    """When llama-server returns a 400 with an `error.message` JSON body
+    (e.g. exceed_context_size_error), the raised exception's str() includes
+    that message so users see what's actually wrong."""
+    body = {
+        "error": {
+            "code": 400,
+            "message": "request (12016 tokens) exceeds the available context size (8192 tokens), try increasing it",
+            "type": "exceed_context_size_error",
+        }
+    }
+    mock_resp = _make_error_response(400, body)
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_resp)
+    with pytest.raises(httpx.HTTPStatusError) as ei:
+        await llm_server.chat(
+            client,
+            messages=[{"role": "user", "content": "x"}],
+            tools=None,
+            model="gemma-4-E4B-it",
+        )
+    msg = str(ei.value)
+    assert "exceeds the available context size" in msg
+    assert "8192" in msg
+
+
+@pytest.mark.asyncio
+async def test_chat_400_with_non_json_body_falls_back_to_raw_text():
+    """If the upstream error body isn't JSON, the raw text is still surfaced
+    (truncated if very long)."""
+    mock_resp = _make_error_response(503, "upstream timeout")
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_resp)
+    with pytest.raises(httpx.HTTPStatusError) as ei:
+        await llm_server.chat(
+            client,
+            messages=[{"role": "user", "content": "x"}],
+            tools=None,
+            model="gemma-4-E4B-it",
+        )
+    assert "upstream timeout" in str(ei.value)
+
+
+@pytest.mark.asyncio
+async def test_embed_400_surfaces_body():
+    """Same surfacing applied to the embed path (used by RAG ingest)."""
+    body = {"error": {"message": "model not loaded", "code": 400}}
+    mock_resp = _make_error_response(400, body)
+    client = MagicMock()
+    client.post = AsyncMock(return_value=mock_resp)
+    with pytest.raises(httpx.HTTPStatusError) as ei:
+        await llm_server.embed(client, text="hi", model="nomic-embed-text-v1.5")
+    assert "model not loaded" in str(ei.value)
+
+
 @pytest.mark.asyncio
 async def test_list_models_returns_ids():
     """list_models() returns the `id` strings from /v1/models."""

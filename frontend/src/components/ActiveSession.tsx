@@ -5,6 +5,7 @@ import { useSessionContext } from "@/context/SessionContext";
 import { useInferenceContext } from "@/context/InferenceContext";
 import { useUploaderContext } from "@/context/UploaderContext";
 import { useTestSuiteContext } from "@/context/TestSuiteContext";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { useMessageActions } from "@/hooks/useMessageActions";
 import { useAutoScroll } from "@/hooks/useAutoScroll";
 import { useSearch } from "@/hooks/useSearch";
@@ -29,6 +30,12 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const ai = useInferenceContext();
   const uploader = useUploaderContext();
   const tester = useTestSuiteContext();
+  const { activeWorkspace } = useWorkspaceContext();
+
+  // Globe toggle is gated on the workspace having web_search in its
+  // enabled_tools — Settings is the permission gate, the toggle is the
+  // per-turn override.
+  const webSearchAvailable = !!activeWorkspace?.enabled_tools?.includes("web_search");
 
   const messages = session.messages;
   const activeSessionKey = session.currentSession || "temp_new_chat";
@@ -47,6 +54,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     isProcessing: currentIsProcessing,
   });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
   useEffect(() => {
     const isDesktopPointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
@@ -81,9 +89,12 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
 
       const textToSend = attachedPrefix + rawPrompt;
       uploader.clearQueue();
-      await ai.sendMessage(textToSend, activeIdToUse, documentIds);
+      // Only ship the mode if the workspace permits it — defensive against
+      // stale toggle state across workspace switches.
+      const modes = (webSearchAvailable && webSearchEnabled) ? ["web_search"] : [];
+      await ai.sendMessage(textToSend, activeIdToUse, documentIds, false, modes);
     },
-    [currentIsProcessing, session.currentSession, uploader, ai],
+    [currentIsProcessing, session.currentSession, uploader, ai, webSearchAvailable, webSearchEnabled],
   );
 
   const stopAllInference = useCallback(() => {
@@ -197,6 +208,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
           processUploadQueue={(files) => uploader.processUploadQueue(files)}
           totalTokens={promptState.totalTokens}
           inputRef={textareaRef}
+          webSearchAvailable={webSearchAvailable}
+          webSearchEnabled={webSearchEnabled}
+          setWebSearchEnabled={setWebSearchEnabled}
         />
       </div>
 
