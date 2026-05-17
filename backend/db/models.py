@@ -108,6 +108,16 @@ class User(Base):
     last_login_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class Document(Base):
     __tablename__ = "documents"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
