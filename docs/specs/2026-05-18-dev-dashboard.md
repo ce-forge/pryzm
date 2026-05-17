@@ -54,7 +54,8 @@ Tabs lazy-mount (especially the Engine iframe). Inactive tabs stay unmounted to 
 | `user_display_name` | text | snapshot at submit time for resilience after user delete |
 | `workspace_id` | UUID FK workspaces, ON DELETE SET NULL, nullable | context where reported |
 | `session_id` | UUID FK sessions, ON DELETE SET NULL, nullable | context where reported |
-| `message` | text | user's description |
+| `category` | text | one of a fixed set: `'incorrect_info'`, `'vision_wrong'`, `'tool_error'`, `'slow'`, `'ui_bug'`, `'other'` |
+| `message` | text | user's free-form description (expands on the category) |
 | `payload` | JSONB | browser, OS, current URL, recent console errors if captured |
 | `status` | text | `'open'`, `'acknowledged'`, `'resolved'`, `'dismissed'` |
 | `resolved_at` | timestamptz, nullable | set when status moves to `'resolved'` |
@@ -118,6 +119,15 @@ Index: `(user_id, seen_at)` so the unseen-count query (`WHERE user_id = ? AND se
 - Per-row actions: edit settings, delete, toggle owner_can_edit
 - Click row → workspace detail page showing settings, attached chats, attached folders, attached documents
 
+### Read-only chat-thread view (admin)
+
+New route at `/admin/sessions/{session_id}`. Renders the full chat thread for any session in the system, regardless of which user owns it. Pure read-only: no Send button, no Edit buttons, no Stop button. Admin can scroll the conversation, copy text, and follow attachment links. Linkable from:
+
+- Bug-report detail modal (when a bug references a `session_id`)
+- Audit tab event detail (when an audit event has a `session_id` — e.g., `chat.message_sent`)
+
+This is NOT impersonation — admin can't send messages or trigger actions as the user. It's just chat-history reading, the same way an audit log lets you see what happened.
+
 ### Audit tab
 
 **Default view:** paginated table of recent audit_events.
@@ -150,14 +160,15 @@ The iframe path is gated by `require_admin` on the backend, so direct navigation
 
 **Default view:** table of bug reports filtered to `status IN ('open', 'acknowledged')`.
 
-**Filters:** status (all/open/acknowledged/resolved/dismissed), user (dropdown).
+**Filters:** status (all/open/acknowledged/resolved/dismissed), user (dropdown), category (dropdown).
 
-**Table columns:** created_at, user, status, message preview (first 100 chars), context (workspace/session shortcut).
+**Table columns:** created_at, user, status, category, message preview (first 100 chars), context (workspace/session shortcut).
 
 **Per-row click → bug detail modal:**
-- Full message
+- Category badge + full message
 - Payload context (browser, OS, URL, recent console errors if captured)
-- Linked workspace/session (clickable to admin views)
+- Linked workspace (clickable to admin workspace view)
+- Linked chat session — clickable to a **read-only chat-thread view** at `/admin/sessions/{session_id}` that renders the full message thread. Admin can scroll the conversation the user was in when they submitted the bug, without impersonating the user.
 - Audit timeline for this bug (queries audit_events filtered by `source_id = bug_report.id`)
 - Action buttons: Acknowledge, Resolve, Dismiss, Delete
 
@@ -177,12 +188,13 @@ A small UI element in the user's chat surface lets them submit bug reports.
 **Placement:** sidebar footer, next to the avatar / logout area. A small icon button labeled "Report a bug" or similar.
 
 **Submit modal:**
-- Text area for the bug description
-- Optional checkbox: "Include current chat session" (captures session_id so admin can see the conversation)
-- Submit button
+- **Category dropdown** (required) — pick one of: *Incorrect information*, *Image analysis wrong*, *Tool didn't work*, *Slow response*, *UI bug*, *Other*. Each maps to one of the category enum values stored in `bug_reports.category`.
+- Text area for free-form description — the user expands on what the category alone can't capture
+- Checkbox **defaulted on**: "Include current chat session" (captures session_id so admin can read the conversation). Defaulting on because admin usually needs the context; user can uncheck for cases where the session isn't relevant.
+- Submit button (disabled until both category and a non-empty description are filled)
 
 **On submit:**
-- `POST /api/bug-reports` with `{message, include_session: bool}`
+- `POST /api/bug-reports` with `{category, message, include_session: bool}`
 - Backend inserts the `bug_reports` row (with current workspace_id, session_id if opted-in, current URL, user-agent in payload)
 - Inserts an `audit_events` row with `event_type='bugreport.submitted'`
 - Returns 200; UI shows a brief "Thanks — we'll look into it" toast
@@ -271,6 +283,9 @@ All resolved during brainstorm:
 
 1. **Six tabs:** Users, Workspaces, Audit, Engine, System, Bug Reports.
 2. **Bug reports separate from audit_events:** `bug_reports` is its own mutable table; lifecycle events recorded in `audit_events`.
+12. **Bug-report submission has a required category dropdown** plus a free-form text field. Categories are a fixed enum (`incorrect_info`, `vision_wrong`, `tool_error`, `slow`, `ui_bug`, `other`).
+13. **"Include current chat session" defaults on** in the submit modal. Admin almost always needs the chat context.
+14. **Admin can read any user's chat thread** at `/admin/sessions/{session_id}` (read-only view). Linkable from bug reports and audit events. Not impersonation — no send/edit/stop affordances.
 3. **Notifications as a generic primitive:** `notifications` table, used by the bug-resolve hook in v1, reusable for admin broadcasts and system messages later.
 4. **Notification delivery:** polling for v1; migrates to WebSocket subscription when the planned WS transport lands (Item 4 in `docs/internal/2026-05-14-future-features.md`). Data model unchanged across the migration.
 5. **Notification auto-dismiss:** popover closes after 5 seconds of no interaction; DB row stays with `seen_at` set.
