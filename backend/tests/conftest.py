@@ -20,6 +20,13 @@ from config import settings
 TEST_DB_NAME = "pryzm_test"
 
 
+@pytest.fixture(autouse=True)
+def _bootstrap_password_for_tests(monkeypatch):
+    """Ensure FastAPI lifespan-driven tests (TestClient context manager)
+    don't trip the bootstrap admin's missing-password fail-fast guard."""
+    monkeypatch.setattr(settings, "PRYZM_BOOTSTRAP_ADMIN_PASSWORD", "test-bootstrap-pw")
+
+
 def _test_database_url() -> str:
     """Build a DATABASE_URL for the test DB, reusing dev credentials."""
     safe_password = urllib.parse.quote_plus(settings.DB_PASSWORD)

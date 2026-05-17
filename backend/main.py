@@ -90,6 +90,18 @@ class RequestLogger:
 async def lifespan(app: FastAPI):
     # Startup
     database.init_db()
+
+    # Bootstrap admin on first boot. If users table is empty and the env var
+    # isn't set, this raises and startup fails — by design, points the operator
+    # at the missing env var.
+    from db import database as _db
+    from core.bootstrap import ensure_bootstrap_admin
+    _bootstrap_db = _db.SessionLocal()
+    try:
+        ensure_bootstrap_admin(_bootstrap_db)
+    finally:
+        _bootstrap_db.close()
+
     gc_task = asyncio.create_task(garbage_collection_task())
 
     # Shared httpx client — one connection pool for the process lifetime.

@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     # for a required secret.
     PRYZM_API_TOKEN: str
 
+    # First-boot bootstrap admin. If the users table is empty at startup,
+    # core.bootstrap.ensure_bootstrap_admin creates an admin from these env
+    # vars. PASSWORD has no default: when unset and users is empty, startup
+    # fails with a clear message pointing at this var.
+    PRYZM_BOOTSTRAP_ADMIN_USERNAME: str = "admin"
+    PRYZM_BOOTSTRAP_ADMIN_PASSWORD: str | None = None
+
     @computed_field
     @property
     def DATABASE_URL(self) -> str:
