@@ -230,7 +230,8 @@ def get_document_raw(
         _stream(),
         media_type=mime,
         headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
+            "Cache-Control": "private, max-age=2592000",
+            "ETag": f'"{doc.id}"',
             "Content-Disposition": f'inline; filename="{doc.filename}"',
         },
     )
