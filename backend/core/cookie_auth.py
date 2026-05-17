@@ -3,18 +3,19 @@
 Separate from core/auth.py (bearer-token) so the eventual Phase E removal
 is a clean file delete + import-replace rather than function-level surgery.
 
-This module covers password hashing/verification. Subsequent additions
-will include session helpers, the current_user FastAPI dependency,
-and the login rate limiter.
+This module covers password hashing/verification, session helpers, the
+current_user FastAPI dependency, and the login rate limiter.
 """
 import secrets
 from datetime import datetime, timedelta, timezone
+from typing import Annotated, Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError, VerificationError
+from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session as DbSession
 
-from db import models
+from db import database, models
 
 
 _ph = PasswordHasher()
@@ -81,3 +82,28 @@ def invalidate_session(db: DbSession, sid: str) -> None:
 def invalidate_user_sessions(db: DbSession, user_id: str) -> None:
     db.query(models.AuthSession).filter_by(user_id=user_id).delete()
     db.commit()
+
+
+COOKIE_NAME = "pryzm_session"
+
+
+def current_user(
+    pryzm_session: Annotated[Optional[str], Cookie()] = None,
+    db: DbSession = Depends(database.get_db),
+) -> models.User:
+    user = get_session_user(db, pryzm_session) if pryzm_session else None
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated.",
+        )
+    return user
+
+
+def require_admin(user: models.User = Depends(current_user)) -> models.User:
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin only.",
+        )
+    return user
