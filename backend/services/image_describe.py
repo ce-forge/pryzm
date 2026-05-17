@@ -51,7 +51,7 @@ _SYSTEM_PROMPT = (
     "in this order:\n"
     "\n"
     "1. EXTRACTED TEXT — every visible character, verbatim, layout "
-    "preserved. Reproduce identifiers, numbers, dates, and names "
+    "preserved. Reproduce identifiers, numbers, dates, passwords and names "
     "exactly as shown.\n"
     "\n"
     "2. CONTEXT — one short paragraph: what the image is, plus any "
