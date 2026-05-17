@@ -215,7 +215,7 @@ folder belonging to another workspace, creating a dangling reference.
 
 **Handler:** when `payload.folder_id` is present and not `None`, call
 `verify_workspace_owns(payload.folder_id, models.Folder, workspace.id,
-db)` before applying. Returns 403 on mismatch.
+db)` before applying. Returns 404 on mismatch (matches the existing `verify_workspace_owns` convention, which uses 404 to avoid leaking workspace existence).
 
 **Schema:** add `ForeignKey("folders.id", ondelete="SET NULL")` to
 `Session.folder_id`. The handler check enforces workspace scoping
