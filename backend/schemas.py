@@ -57,7 +57,6 @@ class MessageHistory(BaseModel):
     tool_calls: Optional[List[ToolCall]] = None
 
 class FolderCreate(BaseModel):
-    id: str
     name: str
     workspace: str
 

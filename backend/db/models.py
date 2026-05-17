@@ -93,7 +93,7 @@ class Message(Base):
 
 class Folder(Base):
     __tablename__ = "folders"
-    id = Column(String, primary_key=True)
+    id = Column(String, primary_key=True, default=generate_uuid, index=True)
     name = Column(String)
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String, nullable=True, index=True)

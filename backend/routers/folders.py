@@ -29,18 +29,10 @@ def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.ge
 @router.post("/folders")
 def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
     ws = get_or_default(db, folder.workspace)
-    if db.query(models.Folder).filter(models.Folder.id == folder.id).first():
-        raise HTTPException(status_code=409, detail="Folder with that id already exists.")
-    new_folder = models.Folder(id=folder.id, name=folder.name, workspace_id=ws.id)
+    new_folder = models.Folder(name=folder.name, workspace_id=ws.id)
     db.add(new_folder)
-    try:
-        db.commit()
-    except IntegrityError:
-        # Defensive — covers the rare race where two requests pass the SELECT
-        # check before either commits.
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Folder with that id already exists.")
-    return {"status": "success", "id": folder.id}
+    db.commit()
+    return {"status": "success", "id": new_folder.id}
 
 
 @router.patch("/folders/{folder_id}")
