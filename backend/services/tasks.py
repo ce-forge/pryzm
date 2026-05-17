@@ -2,28 +2,37 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from db import database, models
 
+
+def _gc_pass(db) -> int:
+    """Run one garbage-collection pass. Returns the number of rows deleted.
+
+    Uses ORM-style iteration so SQLAlchemy's after_delete hook on Document
+    fires per row and removes the file on disk via storage_path.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    docs = db.query(models.Document).filter(
+        models.Document.session_id == None,
+        models.Document.is_global == False,
+        models.Document.created_at < cutoff,
+    ).all()
+    for d in docs:
+        db.delete(d)
+    db.commit()
+    return len(docs)
+
+
 async def garbage_collection_task():
-    """Background task to clear orphaned documents from the loading bay."""
+    """Background task: hourly sweep of orphaned documents in the loading bay."""
     while True:
         db = None
         try:
             db = database.SessionLocal()
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
-
-            deleted_count = db.query(models.Document).filter(
-                models.Document.session_id == None,
-                models.Document.is_global == False,
-                models.Document.created_at < cutoff
-            ).delete(synchronize_session=False)
-
-            db.commit()
-            if deleted_count > 0:
-                print(f"[Garbage Collector] Purged {deleted_count} orphaned documents from loading bay.")
-
+            deleted = _gc_pass(db)
+            if deleted > 0:
+                print(f"[Garbage Collector] Purged {deleted} orphaned documents.")
         except Exception as e:
             print(f"[Garbage Collector] Error: {e}")
         finally:
             if db is not None:
                 db.close()
-
-        await asyncio.sleep(3600) # Sleep for 1 hour
+        await asyncio.sleep(3600)
