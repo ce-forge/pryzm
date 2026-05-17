@@ -104,11 +104,10 @@ async def test_retrieve_relevant_chunks_falls_back_when_attached_filename_missin
 
 @pytest.mark.asyncio
 async def test_restrict_to_filenames_returns_all_chunks_not_capped(db_session):
-    """When the user attaches a multi-chunk file, ALL its chunks come back —
-    the previous LIMIT max(top_k*4, 8) capped at 12 even for 44-chunk files,
-    which silently truncated transcription/summary requests. With the cap
-    gone the model gets the whole document (subject to ctx limit at request
-    time, which now surfaces the upstream error message clearly)."""
+    """When the user attaches a multi-chunk file, ALL its chunks come back.
+    No retrieval cap is applied on the filename-restricted path; the model
+    receives the whole document, bounded only by the LLM context limit
+    (which surfaces a clear upstream error if exceeded)."""
     import uuid_utils
     ws = models.Workspace(
         id="ws-allchunks", slug="ac", display_name="A",

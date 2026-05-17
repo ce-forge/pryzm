@@ -1,4 +1,4 @@
-"""UI smoke tests for Phase 2: auth gate + token UX.
+"""UI smoke tests for the auth gate + token UX.
 
 Each test starts from a fresh BrowserContext (cookies/localStorage cleared).
 Screenshots are saved to _artifacts/ for human review.
@@ -70,8 +70,7 @@ def test_settings_token_status_does_not_expose_value(
     for i in range(inputs.count()):
         value = inputs.nth(i).input_value()
         assert value != api_token, (
-            f"input #{i} has the stored token as its value attribute "
-            "— Phase 2 hardening regression"
+            f"input #{i} has the stored token as its value attribute"
         )
     screenshot("settings-token-configured")
 

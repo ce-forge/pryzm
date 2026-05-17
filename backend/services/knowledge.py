@@ -72,12 +72,10 @@ async def add_chunks_to_document(
 
     chunks = splitter.split_text(content)
 
-    # Store the raw chunk text and embed it as-is. The filename is already
-    # carried on the parent Document; injecting it into every chunk's content
-    # AND its embedding vector (the previous behaviour) polluted the
-    # vector space — every query had to compete against "Source Document: ..."
-    # boilerplate. Filename gets re-attached at retrieval time so the model
-    # still sees provenance per chunk.
+    # Store the raw chunk text and embed it as-is. The filename lives on
+    # the parent Document and is re-attached at retrieval time, so the
+    # model still sees provenance per chunk without filename boilerplate
+    # polluting every embedding vector.
     # UUIDv7 ids encode a millisecond timestamp in the leading 48 bits, so
     # `ORDER BY id` recovers chunk insertion order — the order the splitter
     # produced them, which IS the order they appear in the source document.

@@ -1,4 +1,4 @@
-"""Phase B3 — admin endpoints for model management.
+"""Admin endpoints for model management.
 
 CRUD over `infra/llama-swap-config.yaml`. Mutations go through `ruamel.yaml`
 in round-trip mode so the file stays readable (comments and key order are

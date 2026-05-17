@@ -1,22 +1,48 @@
 """Workspace boundary verification.
 
-A reusable dependency that looks up an id-keyed resource and 404s if it
-belongs to another workspace. Returning 404 rather than 403 avoids leaking
-whether the resource exists in another workspace.
+Reusable helpers + a FastAPI dependency that look up resources scoped to
+a workspace. Returning 404 (not 403) on cross-workspace access avoids
+leaking whether the resource exists in another workspace.
 
-Only works for models that have a `workspace_id` column directly (Session,
-Folder, Document, DocumentChunk). Message is scoped via Session.workspace_id
-and uses a separate helper in routers/chat.py (Phase 2 Task 2).
+`verify_workspace_owns` works for any model with a direct `workspace_id`
+column (Session, Folder, Document, DocumentChunk). Message is scoped via
+Session.workspace_id and uses a separate helper in routers/chat.py.
 """
-from typing import Type, TypeVar
+from typing import Optional, Type, TypeVar
 
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session as SqlSession
 
+from db import database, models
 from db.models import Base
 
 
 T = TypeVar("T", bound=Base)
+
+
+def resolve_workspace_or_404(slug: str, db: SqlSession) -> models.Workspace:
+    """Resolve a workspace slug to its ORM row; 404 if not found."""
+    ws = db.query(models.Workspace).filter(models.Workspace.slug == slug).first()
+    if ws is None:
+        raise HTTPException(status_code=404, detail=f"Workspace not found: {slug}")
+    return ws
+
+
+def workspace_query_dep(
+    workspace: Optional[str] = Query(
+        None, description="Slug of the workspace the resource belongs to"
+    ),
+    db: SqlSession = Depends(database.get_db),
+) -> models.Workspace:
+    """FastAPI dep: read `?workspace={slug}` and resolve to a Workspace row.
+
+    422 if the query param is missing, 404 if the slug does not exist. This
+    is the single boundary where slug → id resolution happens for routes
+    that need workspace context.
+    """
+    if not workspace:
+        raise HTTPException(status_code=422, detail="workspace query parameter is required")
+    return resolve_workspace_or_404(workspace, db)
 
 
 def verify_workspace_owns(

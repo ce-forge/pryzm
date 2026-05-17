@@ -1,4 +1,4 @@
-"""UI smoke tests for Phase 3: async streaming, concurrency, error envelope.
+"""UI smoke tests for async streaming, concurrency, error envelope.
 
 Each test starts from a fresh BrowserContext (cookies/localStorage cleared).
 Screenshots saved to _artifacts/ for human review.
@@ -62,8 +62,8 @@ _ASSISTANT_HAS_CONTENT = """
 
 def test_chat_streams_in_personal_workspace(page: Page, api_token: str, screenshot):
     """Send a message in the personal workspace and verify the assistant bubble
-    appears with streamed content.  This exercises the full async Ollama path
-    introduced in Phase 3."""
+    appears with streamed content. Exercises the full async streaming path
+    end-to-end."""
     _open_app_with_token(page, api_token)
 
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
@@ -71,9 +71,9 @@ def test_chat_streams_in_personal_workspace(page: Page, api_token: str, screensh
 
     _send_chat_message(page, "Say hi.")
 
-    # Phase 3 path: wait for a <p> tag with real content to appear inside the
-    # scrollable chat container. Timeout is generous because cold model load
-    # can be slow on the dev machine.
+    # Wait for a <p> tag with real content to appear inside the scrollable
+    # chat container. Timeout is generous because cold model load can be
+    # slow on the dev machine.
     page.wait_for_function(_ASSISTANT_HAS_CONTENT, timeout=60_000)
 
     screenshot("chat-streamed")
@@ -86,13 +86,10 @@ def test_chat_streams_in_personal_workspace(page: Page, api_token: str, screensh
 def test_concurrent_chats_overlap(browser: Browser, api_token: str):
     """Fire chats in two browser contexts simultaneously and verify BOTH complete.
 
-    Pre-Phase-3 the backend used a blocking sync call to Ollama, so the two
-    requests serialised and total time ~= 2 * single.  After Phase 3 they run
-    concurrently and total time should be roughly equal to a single request.
-
-    We don't assert a strict timing threshold (too sensitive to cold-load
-    variance) but we DO assert that both contexts reach a non-empty assistant
-    response, which proves neither request starved the other.
+    The backend serves chat requests concurrently — two requests should not
+    serialise. We don't assert a strict timing threshold (too sensitive to
+    cold-load variance) but we DO assert that both contexts reach a non-empty
+    assistant response, which proves neither request starved the other.
     """
     ctx_a = browser.new_context()
     ctx_b = browser.new_context()
@@ -138,10 +135,10 @@ def test_concurrent_chats_overlap(browser: Browser, api_token: str):
 
 def test_error_envelope_shows_clean_error_ui(page: Page, api_token: str, screenshot):
     """When the backend emits an error envelope the frontend must render the
-    message as '⚠ <reason>' rather than the legacy '[Engine Error: ...]' shape.
+    message as '⚠ <reason>'. Bare engine-error strings must not surface.
 
     Uses Playwright route interception to inject a synthetic NDJSON response so
-    this test runs without stopping Ollama.
+    this test runs without touching the live LLM backend.
     """
     _open_app_with_token(page, api_token)
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
@@ -159,7 +156,7 @@ def test_error_envelope_shows_clean_error_ui(page: Page, api_token: str, screens
             body=body,
         )
 
-    # Phase 4 appended ?workspace= to /analyze; use ** suffix so the glob
+    # /analyze takes a ?workspace= query param; use ** suffix so the glob
     # matches the full URL including query parameters.
     page.route("**/analyze**", _handle_route)
     _send_chat_message(page, "Trigger an error.")
@@ -178,14 +175,14 @@ def test_error_envelope_shows_clean_error_ui(page: Page, api_token: str, screens
 
     body_text = page.evaluate("() => document.body.textContent || ''")
 
-    # Must contain the ⚠ prefix introduced by Phase 3's error envelope handling.
+    # The frontend error-envelope handler renders failures with a ⚠ prefix.
     assert "⚠" in body_text, (
         "⚠ prefix not found — frontend error-envelope handler may not be active"
     )
 
-    # Must NOT contain the old [Engine Error: ...] format.
+    # Bare engine-error strings must not leak through to the user.
     assert "[Engine Error:" not in body_text, (
-        "Legacy [Engine Error:] format detected — Phase 3 error envelope regression"
+        "Raw [Engine Error:] string surfaced to the user"
     )
 
     screenshot("error-envelope")

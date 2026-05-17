@@ -61,10 +61,12 @@ function uploadWithProgress(
 function subscribeToIngestionStatus(
   documentId: string,
   pillId: string,
+  workspace: string,
   setUploads: Dispatch<SetStateAction<FileUpload[]>>,
 ): void {
   const token = getToken();
   const url = new URL(`${APP_CONFIG.API_URL}/uploads/${documentId}/events`);
+  url.searchParams.set("workspace", workspace);
   if (token) url.searchParams.set("token", token);
   const es = new EventSource(url.toString());
 
@@ -163,7 +165,7 @@ export function useUploader(workspace: string) {
             ),
           );
           if (documentId) {
-            subscribeToIngestionStatus(documentId, item.id, setUploads);
+            subscribeToIngestionStatus(documentId, item.id, workspace, setUploads);
           }
         } else {
           // Try to surface the server's detail message rather than a

@@ -468,9 +468,8 @@ async def stream_chat(
 
                 # Catch the model stalling out: a one-or-two-word "thought"
                 # emission, or echoing the tool-loop instruction back at us.
-                # Tightened from the old "starts with 'thought'" check, which
-                # false-positived on any legitimate answer beginning with
-                # "Thoughts on …".
+                # Match the exact stall phrases only — a prefix check would
+                # false-positive on legitimate answers starting "Thoughts on …".
                 stripped = content.strip().lower()
                 is_thought_stall = (
                     stripped in {"thought", "thoughts", "thought.", "thought:"}

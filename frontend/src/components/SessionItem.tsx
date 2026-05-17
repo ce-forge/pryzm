@@ -58,7 +58,7 @@ export default function SessionItem({
     setIsEditing(false);
 
     try {
-      await apiFetch(`/sessions/${s.id}`, {
+      await apiFetch(`/sessions/${s.id}?workspace=${workspace}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: editTitle })
@@ -74,7 +74,7 @@ export default function SessionItem({
     setIsDropdownOpen(false);
 
     try {
-      await apiFetch(`/sessions/${s.id}`, {
+      await apiFetch(`/sessions/${s.id}?workspace=${workspace}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_pinned: newStatus })
@@ -97,7 +97,7 @@ export default function SessionItem({
     if (currentSessionId === s.id) router.push(`/?workspace=${workspace}`);
 
     try {
-      await apiFetch(`/sessions/${s.id}`, { method: "DELETE" });
+      await apiFetch(`/sessions/${s.id}?workspace=${workspace}`, { method: "DELETE" });
     } catch (err) { console.error("Delete failed", err); }
   };
 

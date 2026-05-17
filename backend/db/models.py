@@ -77,12 +77,11 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     # JSON list of image-document references surfaced by this turn
     # ({id, filename, mime}). NULL for user/memory rows and for assistant
-    # turns that referenced no files. Added by migration a4e0c1d83f29.
+    # turns that referenced no files.
     referenced_docs = Column(JSONB, nullable=True)
     # JSON list of tool calls executed during this assistant turn
-    # ([{name, args, result}, ...]). NULL for user/memory rows and for
-    # legacy assistant rows written before this column existed (those keep
-    # using the single-content shape; history-rebuild handles both).
+    # ([{name, args, result}, ...]). NULL on rows with no tool use;
+    # history-rebuild treats a NULL value as "no tool calls".
     tool_calls = Column(JSONB, nullable=True)
     session = relationship("Session", back_populates="messages")
 
@@ -103,16 +102,13 @@ class Document(Base):
     session_id = Column(String, ForeignKey("sessions.id", ondelete="CASCADE"), index=True)
     is_global = Column(Boolean, default=False, server_default=sa.text("false"), nullable=False)
     # Filesystem path to the original uploaded bytes. Populated for image
-    # uploads (Milestone 2 of the VLM spec); NULL for text uploads, which
-    # are reconstructable from chunks. The file at this path is cleaned up
-    # by the after_delete listener at the bottom of this module.
+    # uploads; NULL for text uploads, which are reconstructable from chunks.
+    # The file at this path is cleaned up by the after_delete listener at
+    # the bottom of this module.
     storage_path = Column(String(512), nullable=True)
-    # Async-ingestion state (docs/specs/2026-05-15-async-ingestion.md).
-    # 'processing' from the moment /upload commits the row through the
-    # end of the background task; flips to 'ready' when chunks + embeds
-    # are persisted, or 'error' if the pipeline raises. Existing rows
-    # (pre-migration) are backfilled to 'ready' since they all completed
-    # under the old synchronous path.
+    # Async-ingestion state. 'processing' from the moment /upload commits
+    # the row through the end of the background task; flips to 'ready'
+    # when chunks + embeds are persisted, or 'error' if the pipeline fails.
     status = Column(String(16), nullable=False, server_default="ready")
     # Populated only when status='error'. Surfaces the upstream
     # exception message back to the frontend so the pill can show a

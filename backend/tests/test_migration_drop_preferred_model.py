@@ -1,6 +1,6 @@
-"""Verifies migration F: drop workspaces.preferred_model.
+"""Verifies migration bf317b5870ef: drop workspaces.preferred_model.
 
-Phase 4 T5 — all consumers migrated to engine_config.model before this ran.
+engine_config.model is the single source of truth for the model id.
 """
 from alembic import command
 from alembic.config import Config
@@ -53,16 +53,16 @@ def test_downgrade_restores_preferred_model_column(reset_test_db, alembic_cfg):
 def test_downgrade_backfills_preferred_model_from_engine_config(reset_test_db, alembic_cfg):
     """Downgrade restores preferred_model to the canonical default (gemma4:e4b).
 
-    Phase B1 (de5dfc455310) drops the per-row 'model' key from engine_config,
-    so the downgrade of that migration resets every row to the old default
-    shape: {"backend": "ollama", "model": "gemma4:e4b"}. As a result,
-    preferred_model is always backfilled to "gemma4:e4b" — per-workspace model
-    picks are not preserved across this migration pair.
+    The earlier migration that drops the per-row 'model' key from
+    engine_config resets every row to a fixed default shape on downgrade
+    ({"backend": "ollama", "model": "gemma4:e4b"}). As a result,
+    preferred_model is always backfilled to "gemma4:e4b" — per-workspace
+    model picks are not preserved across this migration pair.
     """
     command.downgrade(alembic_cfg, "base")
     command.upgrade(alembic_cfg, "head")
 
-    # Seed a workspace at head (engine_config has no 'model' key in Phase B1+).
+    # Seed a workspace at head (engine_config has no 'model' key in the current schema).
     seed_engine = create_engine(reset_test_db, poolclass=NullPool)
     with seed_engine.begin() as conn:
         conn.execute(text("""

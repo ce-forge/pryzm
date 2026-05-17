@@ -150,7 +150,7 @@ export default function SessionDirectory() {
         () => setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, folder_id: folderId } : s)),
         () => setSessions((prev) => prev.map((s) => s.id === sessionId ? { ...s, folder_id: previousFolderId } : s)),
         async () => {
-          const r = await apiFetch(`/sessions/${sessionId}`, {
+          const r = await apiFetch(`/sessions/${sessionId}?workspace=${workspace}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ folder_id: folderId }),
@@ -196,7 +196,7 @@ export default function SessionDirectory() {
         () => setFolders((prev) => prev.map((f) => f.id === id ? { ...f, name: cleaned } : f)),
         () => setFolders((prev) => prev.map((f) => f.id === id ? { ...f, name: previous.name } : f)),
         async () => {
-          const r = await apiFetch(`/folders/${id}`, {
+          const r = await apiFetch(`/folders/${id}?workspace=${workspace}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: cleaned }),
@@ -226,7 +226,7 @@ export default function SessionDirectory() {
         () => setFolders((prev) => prev.filter((f) => f.id !== folderId)),
         () => setFolders((prev) => [snapshot, ...prev.filter((f) => f.id !== folderId)]),
         async () => {
-          const r = await apiFetch(`/folders/${folderId}`, { method: "DELETE" });
+          const r = await apiFetch(`/folders/${folderId}?workspace=${workspace}`, { method: "DELETE" });
           if (!r.ok) throw new Error("delete failed");
         },
       );

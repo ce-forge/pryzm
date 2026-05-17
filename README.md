@@ -1,6 +1,6 @@
 # Pryzm
 
-Local AI copilot for IT work. Runs on your own machine — chat, RAG over your docs, image captioning, network diagnostics, web search. Nothing leaves the box.
+Local AI copilot for various workspaces — IT, research, personal, whatever you set up. Runs on your own machine — chat, RAG over your docs, image captioning, web search, and per-workspace tools (e.g. network diagnostics in the IT workspace). Nothing leaves the box.
 
 The model serving is llama.cpp under llama-swap, so swapping models is a config edit. Default lineup is the Gemma-4 family for chat, Qwen2-VL-2B for image captioning, and `nomic-embed-text` for embeddings. The router picks a small or large model per turn based on the prompt.
 

@@ -1,6 +1,6 @@
-"""UI smoke tests for Phase 5: frontend state ownership.
+"""UI smoke tests for frontend state ownership.
 
-Probes verify the spec's success criteria for Phase 5:
+Probes:
 
   1. Send 3 messages within ~200 ms — all 3 land with distinct IDs and
      ordered. Exercises crypto.randomUUID() optimistic IDs.
@@ -48,9 +48,8 @@ _ASSISTANT_HAS_CONTENT = """
     const paragraphs = chatEl.querySelectorAll('p');
     for (const p of paragraphs) {
         // Any non-empty <p> in the chat scroll area means the assistant has
-        // rendered a response. See test_phase4_smoke.py for the threshold
-        // history — Gemma 4 produces literal one-word replies to "say one
-        // word" so the old > 5 char threshold rejected them.
+        // rendered a response. Any character counts — Gemma-4 can produce
+        // literal one-word replies, so we don't impose a length threshold.
         if ((p.textContent || '').trim().length > 0) return true;
     }
     return false;
@@ -102,13 +101,11 @@ def test_rapid_sends_distinct_ids_and_ordered(page: Page, api_token: str, screen
         # Wait for `isProcessing` to flip back to false. ChatInput swaps the
         # submit button for a Stop button while a stream is in flight; the
         # submit button reappearing is the reliable "stream truly done" signal.
-        # The prior heuristic — wait for the last <p>'s text length to stop
-        # changing — was unsound because (a) assistant messages render as bare
-        # markdown without a per-turn bubble container, so the "last <p>" is
-        # the last paragraph of the last assistant turn that completed, and
-        # (b) when a send is silently dropped, no new <p> is added, the
-        # length stays stable from the previous turn, and stability is
-        # detected on stale state, causing phantom out-of-order failures.
+        # Wait for the submit button to be visible — that's the stable
+        # stream-done signal. Watching <p> length is unsound here because
+        # assistant messages render as bare markdown without per-turn
+        # containers, so the "last <p>" can belong to a prior turn and
+        # length-stability fires on stale state.
         page.wait_for_selector(
             'button[type="submit"]', state='visible', timeout=120_000,
         )
@@ -144,9 +141,8 @@ def test_navigate_during_stream_no_orphan_bubble(page: Page, api_token: str, scr
 
     Spec criterion: 'navigate away from a streaming session and back; no
     orphan empty bubbles.' We let the stream complete first to isolate the
-    test from Phase 3's mid-stream cancellation behavior — what we're
-    verifying here is the cache-bucket-survives-navigation property, which
-    is the Phase 5 atomic-migrate guarantee.
+    cache-bucket-survives-navigation property from mid-stream cancellation
+    behavior, which is a separate concern.
     """
     _open_app_with_token(page, api_token)
     page.goto(f"{FRONTEND_URL}/?workspace=personal")

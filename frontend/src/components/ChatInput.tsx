@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { FileUpload } from "@/types/chat";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { APP_CONFIG } from "@/utils/constants";
@@ -75,6 +76,8 @@ export default function ChatInput({
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuWrapperRef = useRef<HTMLDivElement>(null);
+  const searchParams = useSearchParams();
+  const workspace = searchParams.get("workspace") || APP_CONFIG.DEFAULT_WORKSPACE;
 
   useOnClickOutside(menuWrapperRef, () => setShowTestMenu(false));
 
@@ -151,7 +154,7 @@ export default function ChatInput({
     // pre-send uploads stay orphaned in the workspace forever.
     // Fire-and-forget; if the request fails the orphan is non-fatal.
     if (removed?.document_id) {
-      apiFetch(`/documents/${removed.document_id}`, { method: "DELETE" })
+      apiFetch(`/documents/${removed.document_id}?workspace=${workspace}`, { method: "DELETE" })
         .catch(() => {});
     }
     return prev.filter(up => up.id !== id);

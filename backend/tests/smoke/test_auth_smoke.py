@@ -1,8 +1,8 @@
-"""HTTP-level smoke probes for Phase 2 auth + workspace boundary.
+"""HTTP-level smoke probes for auth + workspace boundary.
 
-These exercise the full request path via FastAPI's TestClient. The unit tests
-in tests/test_auth.py and tests/test_workspace_boundary.py are tighter; this
-file confirms the wire protocol matches expectations.
+Exercises the full request path via FastAPI's TestClient. The unit tests
+in tests/test_auth.py and tests/test_workspace_boundary.py are tighter;
+this file confirms the wire protocol matches expectations.
 """
 import pytest
 from fastapi.testclient import TestClient

@@ -12,9 +12,8 @@ export function TestSuiteProvider({ children }: { children: React.ReactNode }) {
   const inference = useInferenceContext();
   const tester = useTestSuite((text, sId) => inference.sendMessage(text, sId));
 
-  // Wire the runner's linkSession into Inference so the runner gets notified
-  // synchronously the moment an optimistic→real handoff happens. Replaces the
-  // direct prop-drilling that used to live in ChatContext.
+  // Wire the runner's linkSession into Inference so it's notified
+  // synchronously when an optimistic→real id handoff happens.
   useEffect(() => {
     inference.setLinkSessionCallback(tester.linkSession);
     return () => inference.setLinkSessionCallback(null);

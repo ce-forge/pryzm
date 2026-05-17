@@ -15,10 +15,6 @@ def test_missing_backend_raises():
         EngineConfig.model_validate({})
 
 
-# test_missing_model_raises removed — Phase B1 dropped the `model` field;
-# a config without 'model' is now valid by design.
-
-
 def test_unsupported_backend_raises():
     """Only llama_cpp is accepted; any other string must fail validation."""
     with pytest.raises(ValidationError):

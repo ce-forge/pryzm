@@ -1,8 +1,8 @@
 """Per-request LLM router.
 
-Phase B2 of the LLM swap. Heuristic two-tier picker: short, simple, single-turn
-prompts route to the smaller chat model; long, code-bearing, multi-turn, or
-complex-verb prompts route to the larger model.
+Heuristic two-tier picker: short, simple, single-turn prompts route to the
+smaller chat model; long, code-bearing, multi-turn, or complex-verb prompts
+route to the larger model.
 
 The router holds the model catalog parsed from `infra/llama-swap-config.yaml`
 on startup. Capability tags filter chat candidates (today, only `"embedding"`

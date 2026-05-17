@@ -2,11 +2,9 @@
 /**
  * Renders the structured tool_calls list on an assistant turn.
  *
- * Visual style mirrors AssistantMessage's blockquote renderer (the same look
- * that previously came from ReactMarkdown parsing the `> **Tool:**` markdown
- * the engine used to emit). Now driven by structured props rather than
- * markdown-in-content. The result block uses a `<pre>` for monospace display
- * matching the inline `<code>` styling elsewhere in the chat surface.
+ * Visual style mirrors AssistantMessage's blockquote renderer; the result
+ * block uses `<pre>` for monospace display matching the inline `<code>`
+ * styling elsewhere in the chat surface.
  */
 import type { ToolCall } from "@/types/chat";
 import { TerminalIcon } from "./Icons";

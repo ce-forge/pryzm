@@ -83,7 +83,7 @@ def test_message_missing_404(db_session):
 
 
 def test_reset_rejects_non_builtin(db_session):
-    """Per Phase 2: reset endpoint must reject non-builtin workspaces with 400."""
+    """Reset endpoint must reject non-builtin workspaces with 400."""
     from routers.workspaces import _validate_resettable
     ws_a, _ws_b, _msg = _seed_two_workspaces_with_one_message(db_session)
     # ws_a is is_builtin=False per the seed → reject.
@@ -123,4 +123,4 @@ def test_builtin_record_has_required_fields():
         assert b.system_prompt_file
         assert isinstance(b.enabled_tools, list)
         assert b.engine_config["backend"] == "llama_cpp"
-        # Phase B1: 'model' field dropped from engine_config
+        # engine_config has no 'model' key — model id is set elsewhere.

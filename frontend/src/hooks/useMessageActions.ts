@@ -69,7 +69,7 @@ export function useMessageActions(
     if (!msgId || msgId.startsWith('temp-')) return;
 
     try {
-      const res = await apiFetch(`/sessions/${activeSessionKey}/branch`, {
+      const res = await apiFetch(`/sessions/${activeSessionKey}/branch?workspace=${workspace}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ up_to_message_id: msgId }),
