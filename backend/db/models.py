@@ -46,7 +46,7 @@ class Session(Base):
     title = Column(String, default="New Diagnostic Session")
     is_pinned = Column(Boolean, default=False)
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
-    folder_id = Column(String, nullable=True)
+    folder_id = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     workspace = relationship("Workspace", back_populates="sessions")
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")

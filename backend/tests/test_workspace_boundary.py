@@ -124,3 +124,48 @@ def test_builtin_record_has_required_fields():
         assert isinstance(b.enabled_tools, list)
         assert b.engine_config["backend"] == "llama_cpp"
         # engine_config has no 'model' key — model id is set elsewhere.
+
+
+def test_session_patch_rejects_cross_workspace_folder_id(db_session, monkeypatch):
+    """PATCH /sessions/{id} must reject a folder_id from a different workspace."""
+    from fastapi.testclient import TestClient
+    from config import settings
+    from db import database
+    from main import app
+
+    ws_a = models.Workspace(
+        id="ws-pa", slug="ws-pa", display_name="A",
+        system_prompt="", enabled_tools=[], is_builtin=False,
+        engine_config={"backend": "llama_cpp"},
+    )
+    ws_b = models.Workspace(
+        id="ws-pb", slug="ws-pb", display_name="B",
+        system_prompt="", enabled_tools=[], is_builtin=False,
+        engine_config={"backend": "llama_cpp"},
+    )
+    sess_a = models.Session(id="sess-pa", workspace_id="ws-pa", title="t")
+    folder_b = models.Folder(id="f-pb", workspace_id="ws-pb", name="B folder")
+    db_session.add_all([ws_a, ws_b, sess_a, folder_b])
+    db_session.commit()
+
+    def _get_db_override():
+        yield db_session
+
+    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
+    monkeypatch.setattr(database, "init_db", lambda: None)
+    app.dependency_overrides[database.get_db] = _get_db_override
+    try:
+        with TestClient(app) as c:
+            c.headers.update({"Authorization": "Bearer test-token"})
+            resp = c.patch(
+                "/sessions/sess-pa?workspace=ws-pa",
+                json={"folder_id": "f-pb"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code in (403, 404), f"got {resp.status_code} body={resp.text}"
+
+    db_session.expire_all()
+    sess = db_session.query(models.Session).filter_by(id="sess-pa").one()
+    assert sess.folder_id is None
