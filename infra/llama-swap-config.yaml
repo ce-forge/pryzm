@@ -12,9 +12,7 @@
 #
 # IMPORTANT: per upstream llama-swap docs (legacy-groups syntax), group
 # membership is declared via the GROUP's `members` list — NOT via a
-# model-side `groups:` field. The latter is silently ignored. This file
-# was previously using the wrong shape; result was that no group rules
-# took effect and llama-swap fell back to default "one model at a time".
+# model-side `groups:` field. The latter is silently ignored.
 # See: https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
 #
 # Reload without restart: docker compose kill -s HUP llama-swap
@@ -70,28 +68,18 @@ models:
     tags:
     - code
 
-  # Captioning model. Replaces the hybrid Gemma-4-vision + RapidOCR
-  # pipeline. Qwen2-VL-2B is specifically benchmarked on UI screenshots
-  # (VCR 81.45%) and documents (DocVQA 90.1, OCRBench 794), reads
-  # verbatim text without language-prior pattern completion, and
-  # preserves multi-column form layout — closes the value-label
-  # ambiguity that broke "what is the user and pass" extraction on
-  # password-manager screenshots.
-  #
-  # Drops in via llama-server's -hf flag; the bartowski quant ships
-  # mmproj alongside the GGUF and llama-server picks it up
-  # automatically. ~1 GB at Q4_K_M.
+  # Captioning model. Vision projector is loaded explicitly via
+  # --mmproj-url; auto-detect is unreliable on on-demand TTL loads.
+  # URL form leverages HF cache. ~1 GB Q4_K_M + ~600MB mmproj-f16.
   "qwen2-vl-2B-it":
     cmd: |-
       /app/llama-server --port ${PORT}
       -hf bartowski/Qwen2-VL-2B-Instruct-GGUF:Q4_K_M
+      --mmproj-url https://huggingface.co/bartowski/Qwen2-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen2-VL-2B-Instruct-f16.gguf
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --repeat-penalty 1.15
-    # Captioning runs only on image upload, not on chat turns. Leaving
-    # the model resident wastes ~3GB VRAM between uploads. With ttl=60
-    # it loads on first /v1/chat/completions for this model id and
-    # unloads 60s after the last call — covers a burst of uploads
-    # without paying cold-load again, and frees VRAM once you stop.
+    # Captioning runs only on image upload. ttl=60 unloads the model
+    # 60s after the last call so idle workspaces don't hold ~3GB VRAM.
     ttl: 60
     tags:
     - vision
