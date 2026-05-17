@@ -69,11 +69,9 @@ export function useSession() {
   const prefetchingRef = useRef<Set<string>>(new Set());
 
   /**
-   * Title-only refresh. Used by SessionContext.notifySessionCreated after a
-   * stream completes, replacing the old `loadSessionData(true)` which also
-   * refetched the message list — that refetch was the source of the
-   * rapid-sends cache-clobber race. Real message IDs now arrive in the SSE
-   * stream itself, so there's no longer any need to re-read history from DB.
+   * Title-only refresh. Called by SessionContext.notifySessionCreated after a
+   * stream completes. Message IDs arrive inside the SSE stream itself — no
+   * history refetch is needed here.
    */
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- React Compiler infers extra deps (setSessionTitle is a stable setter; included via the rule that all setters are non-deps). The manual memo here is what keeps loadSessionData stable across streaming-chunk re-renders.
   const refreshSessionMeta = useCallback(async () => {
@@ -96,9 +94,7 @@ export function useSession() {
 
   /**
    * Loads session history for the currently-active session if not cached.
-   * Called on session navigation (the initial load). The `force` parameter
-   * exists for legacy callers but no longer triggers post-stream refetches —
-   * those now happen inline via the SSE-driven id-swap pathway.
+   * Called on session navigation. `force=true` bypasses the cache check.
    */
   // eslint-disable-next-line react-hooks/preserve-manual-memoization -- as above; manual memo holds loadSessionData stable through stream chunks
   const loadSessionData = useCallback(async (force = false) => {
@@ -110,7 +106,7 @@ export function useSession() {
     const cacheLen = messageCacheRef.current[cacheKey(workspace, currentSession)]?.length || 0;
     if (force || cacheLen === 0) {
       try {
-        const historyRes = await apiFetch(`/sessions/${currentSession}`, { cache: 'no-store' });
+        const historyRes = await apiFetch(`/sessions/${currentSession}?workspace=${workspace}`, { cache: 'no-store' });
         if (historyRes.ok) {
           const historyData = await historyRes.json();
           // Skip the overwrite if this session is mid-stream — the SSE-driven
@@ -165,7 +161,7 @@ export function useSession() {
 
     prefetchingRef.current.add(id);
     try {
-      const res = await apiFetch(`/sessions/${id}`, { cache: 'no-store' });
+      const res = await apiFetch(`/sessions/${id}?workspace=${workspace}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         const mapped: Message[] = data.map((m: Message & {

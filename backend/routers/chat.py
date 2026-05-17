@@ -1,30 +1,24 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, UploadFile, File, Form, Request
-from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from typing import Dict, Optional, List
 import asyncio
 import json
 import logging
+from typing import Optional, List
 
-from db import database, models
-from core import ai_engine
-from core.auth import require_token
-from core.prompt_manager import MICRO_PROMPTS
-from core.engine_config import engine_config_for
-from services import ingest_broker, ingest_pipeline
-from services.workspaces import get_or_default
-from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
-                     FolderUpdate, MessageHistory, FolderCreate, BranchRequest,
-                     MessageUpdate)
-from sqlalchemy import tuple_, func as sqlfunc
-from sqlalchemy.exc import IntegrityError
-from config import settings
-from utils.formatters import format_error
 import httpx
-from core import llm_server
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
+from sqlalchemy import tuple_, func as sqlfunc
+from sqlalchemy.orm import Session
+
+from core import ai_engine
 from core.deps import get_http_client
+from core.engine_config import engine_config_for
 from core.llm_metrics import get_last_chat_snapshot as _last_chat_metric_snapshot
-from services import condense
+from core.workspace_access import verify_workspace_owns, workspace_query_dep
+from db import database, models
+from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
+                     MessageHistory, BranchRequest, MessageUpdate)
+from services import condense, ingest_broker
+from services.workspaces import get_or_default
 from tools.registry import build_tool_set
 
 _log = logging.getLogger(__name__)
@@ -185,31 +179,6 @@ async def _wait_for_processing_attachments(
             broker.unsubscribe(doc_id, queue)
 
 
-def _resolve_workspace_or_404(slug: str, db: Session) -> models.Workspace:
-    """Resolve a workspace slug to its ORM object; 404 if not found."""
-    workspace = db.query(models.Workspace).filter(models.Workspace.slug == slug).first()
-    if workspace is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-    return workspace
-
-
-def workspace_dep(
-    workspace: Optional[str] = None,
-    db: Session = Depends(database.get_db),
-) -> models.Workspace:
-    """Resolve a workspace slug (from query param) to its ORM row.
-
-    422 if missing, 404 if the slug does not exist. This is the single
-    boundary where slug → id resolution happens for the /analyze route.
-    """
-    if not workspace:
-        raise HTTPException(status_code=422, detail="workspace query parameter is required")
-    ws = db.query(models.Workspace).filter(models.Workspace.slug == workspace).first()
-    if not ws:
-        raise HTTPException(status_code=404, detail=f"Workspace not found: {workspace}")
-    return ws
-
-
 def _message_in_workspace_or_404(
     message_id: str,
     workspace_id: str,
@@ -269,16 +238,15 @@ def get_session_history(
     session_id: str,
     limit: Optional[int] = None,
     offset: int = 0,
+    workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
 ):
     """Return user/assistant messages in chronological order.
 
-    limit/offset (optional) — pagination. Defaults preserve the existing
-    'load everything' behaviour so the chat UI keeps working unchanged.
+    Scoped to workspace — cross-workspace 404s. limit/offset (optional)
+    paginate; defaults preserve the existing 'load everything' behaviour.
     """
-    session = db.query(models.Session).filter(models.Session.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+    verify_workspace_owns(session_id, models.Session, workspace.id, db)
 
     q = db.query(models.Message).filter(
         models.Message.session_id == session_id,
@@ -304,30 +272,30 @@ def get_session_history(
     ]
 
 @router.patch("/sessions/{session_id}")
-def update_session(session_id: str, payload: SessionUpdate, db: Session = Depends(database.get_db)):
-    db_session = db.query(models.Session).filter(models.Session.id == session_id).first()
-    if db_session:
-        update_data = payload.model_dump(exclude_unset=True)
-        for key, value in update_data.items():
-            setattr(db_session, key, value)
-        db.commit()
-        return {"status": "success"}
-    return {"status": "error", "message": "Session not found"}
-
-@router.patch("/folders/{folder_id}")
-def update_folder(folder_id: str, payload: FolderUpdate, db: Session = Depends(database.get_db)):
-    db_folder = db.query(models.Folder).filter(models.Folder.id == folder_id).first()
-    if db_folder:
-        db_folder.name = payload.name
-        db.commit()
-        return {"status": "success"}
-    return {"status": "error", "message": "Folder not found"}
+def update_session(
+    session_id: str,
+    payload: SessionUpdate,
+    workspace: models.Workspace = Depends(workspace_query_dep),
+    db: Session = Depends(database.get_db),
+):
+    """Update session metadata (title, folder_id, ...). Scoped to workspace
+    — cross-workspace 404s."""
+    db_session = verify_workspace_owns(session_id, models.Session, workspace.id, db)
+    update_data = payload.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_session, key, value)
+    db.commit()
+    return {"status": "success"}
 
 @router.delete("/sessions/{session_id}")
-def delete_session(session_id: str, db: Session = Depends(database.get_db)):
-    session = db.query(models.Session).filter(models.Session.id == session_id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
+def delete_session(
+    session_id: str,
+    workspace: models.Workspace = Depends(workspace_query_dep),
+    db: Session = Depends(database.get_db),
+):
+    """Delete a session and its messages. Scoped to workspace —
+    cross-workspace 404s."""
+    session = verify_workspace_owns(session_id, models.Session, workspace.id, db)
     db.delete(session)
     db.commit()
     return {"status": "deleted"}
@@ -337,7 +305,7 @@ async def analyze_data(
     http_request: Request,
     request: InferenceRequest,
     background_tasks: BackgroundTasks,
-    workspace: models.Workspace = Depends(workspace_dep),
+    workspace: models.Workspace = Depends(workspace_query_dep),
     http_client: httpx.AsyncClient = Depends(get_http_client),
 ):
     # Resolve engine config and tool set once at the boundary.
@@ -468,10 +436,9 @@ async def analyze_data(
                 yield json.dumps({"chunk": chunk}) + "\n"
 
             if not disconnected:
-                # Save the assistant message NOW so the `done` event can carry
-                # its real DB id. Previously we saved in the finally block and
-                # the client had to refetch the session history to learn the
-                # id — that refetch was the source of the rapid-sends race.
+                # Persist the assistant message inline so the terminating
+                # `done` event can carry its real DB id; clients use that
+                # id to swap their optimistic placeholder without refetching.
                 if full_response.strip():
                     save_db = database.SessionLocal()
                     try:
@@ -559,317 +526,16 @@ async def analyze_data(
         background=background_tasks,
     )
 
-@router.post("/upload", status_code=202)
-async def upload_document(
-    request: Request,
-    file: UploadFile = File(...),
-    workspace: str = Form("it_copilot"),
-    session_id: Optional[str] = Form(None),
-    is_global: bool = Form(False),
-    db: Session = Depends(database.get_db),
-    http_client: httpx.AsyncClient = Depends(get_http_client),
-):
-    """Accept an upload, persist a `Document(status='processing')` row,
-    and spawn the ingestion pipeline as a background task.
-
-    Returns 202 immediately with `{document_id, status: 'processing',
-    session_id, filename}`. The client opens an SSE connection at
-    `/uploads/{document_id}/events` to learn when the doc flips to
-    `ready` or `error`.
-    """
-    ws = get_or_default(db, workspace)
-    # Stream the upload in 8KB chunks and bail as soon as we cross the
-    # configured ceiling. Reading the whole body unbounded (await file.read())
-    # would let a single request balloon the worker's memory.
-    max_bytes = settings.UPLOAD_MAX_BYTES
-    buf = bytearray()
-    while True:
-        chunk = await file.read(8192)
-        if not chunk:
-            break
-        buf.extend(chunk)
-        if len(buf) > max_bytes:
-            raise HTTPException(
-                status_code=413,
-                detail=f"File exceeds upload limit of {max_bytes} bytes.",
-            )
-    content = bytes(buf)
-    content_type = (file.content_type or "").lower()
-
-    active_session_id = None
-    if session_id and session_id not in ["null", "undefined", "temp_new_chat", ""]:
-        existing_session = db.query(models.Session).filter(models.Session.id == session_id).first()
-        if existing_session:
-            active_session_id = session_id
-
-    doc = models.Document(
-        filename=file.filename,
-        workspace_id=ws.id,
-        session_id=active_session_id,
-        is_global=is_global,
-        status="processing",
-    )
-    db.add(doc)
-    db.commit()
-    db.refresh(doc)
-    document_id = doc.id
-
-    ingest_broker.add_task(ingest_pipeline.ingest_doc(
-        document_id=document_id,
-        http_client=http_client,
-        content=content,
-        mime=content_type,
-        filename=file.filename,
-    ))
-
-    return {
-        "document_id": document_id,
-        "status": "processing",
-        "filename": file.filename,
-        "session_id": active_session_id,
-    }
-
-
-@router.get("/uploads/{document_id}/events")
-async def upload_events(
-    document_id: str,
-    request: Request,
-    db: Session = Depends(database.get_db),
-    _auth: None = Depends(require_token),
-):
-    """Server-Sent Events stream for one document's ingestion lifecycle.
-
-    The handler:
-
-    1. Subscribes to the broker FIRST (so we can't miss a publish that
-       races us between the DB read and the subscribe).
-    2. Reads the current Document.status. If it's already terminal
-       (`ready` or `error`), replays it as a single event and returns —
-       no point holding a connection open for a row that's done.
-    3. Otherwise loops on the queue, forwarding events until a terminal
-       one arrives or the client disconnects.
-
-    Authenticates via `Authorization: Bearer` or `?token=` (EventSource
-    can't set custom headers; the URL fallback is the SSE-friendly
-    concession documented in core/auth.py).
-    """
-    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    broker = ingest_broker.broker()
-    queue = broker.subscribe(document_id)
-
-    # Snapshot terminal state after subscribing. Order matters: if the
-    # task finishes between the snapshot and the subscribe call we'd
-    # never wake up; subscribing first means the publish queues into
-    # `queue` even if status is still 'processing' below.
-    db.refresh(doc)
-    initial_status = doc.status
-    initial_error = doc.error_message
-
-    async def event_stream():
-        try:
-            if initial_status in ("ready", "error"):
-                payload = {"status": initial_status}
-                if initial_status == "error" and initial_error:
-                    payload["error"] = initial_error
-                yield f"data: {json.dumps(payload)}\n\n"
-                return
-
-            while True:
-                if await request.is_disconnected():
-                    return
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15.0)
-                except asyncio.TimeoutError:
-                    # SSE keepalive — browsers and proxies time out idle
-                    # connections silently otherwise.
-                    yield ": keepalive\n\n"
-                    continue
-                yield f"data: {json.dumps(event)}\n\n"
-                if event.get("status") in ("ready", "error"):
-                    return
-        finally:
-            broker.unsubscribe(document_id, queue)
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache, no-transform",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-_IMAGE_MIME_BY_EXT = {
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".png": "image/png",
-    ".webp": "image/webp",
-}
-
-
-@router.get("/documents/{document_id}/raw")
-def get_document_raw(
-    document_id: str,
-    db: Session = Depends(database.get_db),
-    _auth: None = Depends(require_token),
-):
-    """Stream the original bytes of an uploaded document.
-
-    Only image documents are supported today — they're the only type
-    that persists original bytes (Document.storage_path is non-NULL).
-    PDFs and text are stored as chunks only.
-
-    Returns:
-      200 + image bytes (Content-Type inferred from filename ext)
-      404 if doc is missing
-      410 if the doc exists but has no storage_path (PDF/text)
-      404 if the on-disk file is gone (e.g. cleanup race)
-
-    Auth: bearer header OR `?token=` URL fallback. The URL fallback
-    matters because `<img src=...>` can't set custom headers, just
-    like EventSource.
-    """
-    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
-    if doc is None:
-        raise HTTPException(status_code=404, detail="Document not found")
-    if not doc.storage_path:
-        raise HTTPException(
-            status_code=410,
-            detail="Original bytes not available for this document type.",
-        )
-    import os as _os
-    if not _os.path.exists(doc.storage_path):
-        raise HTTPException(status_code=404, detail="Document file is missing on disk.")
-
-    ext = _os.path.splitext(doc.filename.lower())[1]
-    mime = _IMAGE_MIME_BY_EXT.get(ext, "application/octet-stream")
-
-    def _stream():
-        with open(doc.storage_path, "rb") as f:
-            while chunk := f.read(64 * 1024):
-                yield chunk
-
-    return StreamingResponse(
-        _stream(),
-        media_type=mime,
-        headers={
-            "Cache-Control": "public, max-age=31536000, immutable",
-            "Content-Disposition": f'inline; filename="{doc.filename}"',
-        },
-    )
-
-
-@router.delete("/documents/{document_id}")
-def delete_document(document_id: str, db: Session = Depends(database.get_db)):
-    """Hard-delete a Document + its chunks + its on-disk file.
-
-    Called by the frontend when the user removes an upload pill before
-    sending the prompt. Without this the Document, its embeddings, and
-    the saved bytes would sit orphaned in the workspace forever.
-
-    Chunks cascade via the FK; the on-disk file is unlinked by the
-    after_delete event listener on Document (db/models.py).
-    """
-    doc = db.query(models.Document).filter(models.Document.id == document_id).first()
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    db.delete(doc)
-    db.commit()
-    return {"status": "deleted"}
-
-
-@router.get("/folders")
-def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
-    ws = get_or_default(db, workspace)
-    return db.query(models.Folder).filter(models.Folder.workspace_id == ws.id).all()
-
-
-@router.post("/folders")
-def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
-    ws = get_or_default(db, folder.workspace)
-    if db.query(models.Folder).filter(models.Folder.id == folder.id).first():
-        raise HTTPException(status_code=409, detail="Folder with that id already exists.")
-    new_folder = models.Folder(id=folder.id, name=folder.name, workspace_id=ws.id)
-    db.add(new_folder)
-    try:
-        db.commit()
-    except IntegrityError:
-        # Defensive — covers the rare race where two requests pass the SELECT
-        # check before either commits.
-        db.rollback()
-        raise HTTPException(status_code=409, detail="Folder with that id already exists.")
-    return {"status": "success", "id": folder.id}
-
-@router.delete("/folders/{folder_id}")
-def delete_folder(folder_id: str, db: Session = Depends(database.get_db)):
-    # Null out folder_id on any sessions that lived in this folder so they
-    # show up in "Unsorted Logs" rather than carrying a dangling reference.
-    db.query(models.Session).filter(models.Session.folder_id == folder_id).update(
-        {"folder_id": None}, synchronize_session=False,
-    )
-    db.query(models.Folder).filter(models.Folder.id == folder_id).delete()
-    db.commit()
-    return {"status": "success"}
-
-@router.get("/api/tools")
-def get_tools_metadata():
-    """Lists registered tools with their schemas for the workspace settings UI."""
-    from tools.registry import TOOL_DEFINITIONS
-    return [
-        {
-            "name": d["function"]["name"],
-            "description": d["function"]["description"],
-        }
-        for d in TOOL_DEFINITIONS
-    ]
-
-@router.get("/api/models")
-async def get_chat_models(http_client: httpx.AsyncClient = Depends(get_http_client)):
-    """List the chat-capable models llama-swap has configured. The list is
-    derived from infra/llama-swap-config.yaml at server start; embedding-tagged
-    models are filtered out."""
-    try:
-        all_models = await llm_server.list_models(http_client)
-        return [m for m in all_models if "embed" not in m.lower()]
-    except Exception:
-        return [llm_server.DEFAULT_CHAT_MODEL]
-
-@router.get("/api/prompts")
-def get_prompts():
-    return MICRO_PROMPTS.get_all()
-
-@router.patch("/api/prompts")
-def update_prompts(payload: Dict[str, str]):
-    """Upsert one or more prompt overrides. Values are constrained to strings
-    by the schema so callers can't smuggle non-string JSON into the file.
-    To remove an override (and fall back to the default), DELETE the key."""
-    MICRO_PROMPTS.save_prompts(payload)
-    return {"status": "success"}
-
-@router.delete("/api/prompts/{key}")
-def delete_prompt_override(key: str):
-    """Drop a single prompt override so the default takes effect again."""
-    removed = MICRO_PROMPTS.delete_prompt(key)
-    if not removed:
-        raise HTTPException(status_code=404, detail="No override exists for that key.")
-    return {"status": "deleted", "key": key}
-
 @router.patch("/messages/{message_id}")
 def update_message(
     message_id: str,
     payload: MessageUpdate,
-    workspace: str = Query(..., description="Slug of the workspace the message belongs to"),
+    workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
 ):
     """Edit the content of a message. Scoped to workspace — cross-workspace
     attempts return 404 (not 403) for info-leak protection."""
-    workspace_obj = _resolve_workspace_or_404(workspace, db)
-    msg = _message_in_workspace_or_404(message_id, workspace_obj.id, db)
-
+    msg = _message_in_workspace_or_404(message_id, workspace.id, db)
     msg.content = payload.content
     db.commit()
     return {"status": "success"}
@@ -877,22 +543,25 @@ def update_message(
 @router.delete("/messages/{message_id}")
 def delete_message(
     message_id: str,
-    workspace: str = Query(..., description="Slug of the workspace the message belongs to"),
+    workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
 ):
-    workspace_obj = _resolve_workspace_or_404(workspace, db)
-    msg = _message_in_workspace_or_404(message_id, workspace_obj.id, db)
-
+    msg = _message_in_workspace_or_404(message_id, workspace.id, db)
     session_id_resp = msg.session_id
     db.delete(msg)
     db.commit()
     return {"status": "success", "session_id": session_id_resp}
 
 @router.post("/sessions/{session_id}/branch")
-def branch_session(session_id: str, body: BranchRequest, db: Session = Depends(database.get_db)):
-    old_session = db.query(models.Session).filter(models.Session.id == session_id).first()
-    if not old_session:
-        raise HTTPException(status_code=404, detail="Source session not found")
+def branch_session(
+    session_id: str,
+    body: BranchRequest,
+    workspace: models.Workspace = Depends(workspace_query_dep),
+    db: Session = Depends(database.get_db),
+):
+    """Copy a session up to (and including) up_to_message_id into a new
+    session. Source session is scoped to workspace — cross-workspace 404s."""
+    old_session = verify_workspace_owns(session_id, models.Session, workspace.id, db)
 
     target = db.query(models.Message).filter(
         models.Message.id == body.up_to_message_id,
@@ -939,7 +608,7 @@ def branch_session(session_id: str, body: BranchRequest, db: Session = Depends(d
 def truncate_session(
     session_id: str,
     message_id: str,
-    workspace: str = Query(..., description="Slug of the workspace the session belongs to"),
+    workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
 ):
     """Delete all messages in a session that occurred AFTER the specified message_id.
@@ -950,8 +619,6 @@ def truncate_session(
 
     Scoped to workspace — cross-workspace 404s.
     """
-    workspace_obj = _resolve_workspace_or_404(workspace, db)
-
     # Look up the session AND target message in one go, both scoped by workspace.
     target_msg = (
         db.query(models.Message)
@@ -959,7 +626,7 @@ def truncate_session(
         .filter(
             models.Message.id == message_id,
             models.Message.session_id == session_id,
-            models.Session.workspace_id == workspace_obj.id,
+            models.Session.workspace_id == workspace.id,
         )
         .first()
     )
