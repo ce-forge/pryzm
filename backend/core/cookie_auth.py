@@ -7,6 +7,8 @@ This module covers password hashing/verification, session helpers, the
 current_user FastAPI dependency, and the login rate limiter.
 """
 import secrets
+import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
@@ -107,3 +109,56 @@ def require_admin(user: models.User = Depends(current_user)) -> models.User:
             detail="Admin only.",
         )
     return user
+
+
+RATE_LIMIT_FAILURES = 10
+RATE_LIMIT_WINDOW_SECONDS = 15 * 60  # 15 minutes
+LOCKOUT_SECONDS = 15 * 60            # 15-minute lockout
+
+
+class LoginRateLimiter:
+    """In-memory failed-login tracker per username.
+
+    State resets on backend restart (acceptable for v1; a determined
+    attacker can survive a restart but is unlikely to coordinate with
+    one). Stored in process memory only; for multi-worker deployments,
+    move to Redis later.
+    """
+
+    def __init__(self) -> None:
+        self._failures: dict[str, list[float]] = defaultdict(list)
+        self._locked_until: dict[str, float] = {}
+
+    def _normalize(self, username: str) -> str:
+        return username.lower()
+
+    def is_locked(self, username: str) -> bool:
+        key = self._normalize(username)
+        until = self._locked_until.get(key)
+        if until is None:
+            return False
+        if time.monotonic() < until:
+            return True
+        # Lockout expired; clear it
+        del self._locked_until[key]
+        self._failures.pop(key, None)
+        return False
+
+    def record_failure(self, username: str) -> None:
+        key = self._normalize(username)
+        now = time.monotonic()
+        cutoff = now - RATE_LIMIT_WINDOW_SECONDS
+        recent = [ts for ts in self._failures[key] if ts > cutoff]
+        recent.append(now)
+        self._failures[key] = recent
+        if len(recent) >= RATE_LIMIT_FAILURES:
+            self._locked_until[key] = now + LOCKOUT_SECONDS
+
+    def record_success(self, username: str) -> None:
+        key = self._normalize(username)
+        self._failures.pop(key, None)
+        self._locked_until.pop(key, None)
+
+
+# Module-level singleton used by the auth router
+login_rate_limiter = LoginRateLimiter()
