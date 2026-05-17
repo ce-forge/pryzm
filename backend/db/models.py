@@ -94,6 +94,20 @@ class Folder(Base):
     workspace = relationship("Workspace", back_populates="folders")
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=generate_uuid, index=True)
+    username = Column(String, nullable=False)
+    password_hash = Column(String, nullable=False)
+    email = Column(String, nullable=True)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    can_create_workspaces = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Document(Base):
     __tablename__ = "documents"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
