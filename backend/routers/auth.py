@@ -68,3 +68,14 @@ def logout(
         cookie_auth.invalidate_session(db, sid)
     response.delete_cookie(cookie_auth.COOKIE_NAME, path="/")
     return {"ok": True}
+
+
+@router.get("/me")
+def me(user: models.User = Depends(cookie_auth.current_user)):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "is_admin": user.is_admin,
+        "can_create_workspaces": user.can_create_workspaces,
+        "email": user.email,
+    }

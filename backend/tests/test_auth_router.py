@@ -125,3 +125,26 @@ def test_logout_without_cookie_returns_200_idempotent(db_session, monkeypatch):
         assert r.status_code == 200
     finally:
         app.dependency_overrides.clear()
+
+
+def test_me_returns_user_when_authenticated(db_session, monkeypatch):
+    _setup_user(db_session)
+    try:
+        c = _client(db_session, monkeypatch)
+        c.post("/api/auth/login", json={"username": "alice", "password": "hunter2hunter2"})
+        r = c.get("/api/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["username"] == "alice"
+        assert body["is_admin"] is False
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_me_returns_401_when_no_cookie(db_session, monkeypatch):
+    try:
+        c = _client(db_session, monkeypatch)
+        r = c.get("/api/auth/me")
+        assert r.status_code == 401
+    finally:
+        app.dependency_overrides.clear()
