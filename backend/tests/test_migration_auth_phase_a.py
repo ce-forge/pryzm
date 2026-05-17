@@ -39,8 +39,10 @@ def test_auth_phase_a_schema_upgrades_and_downgrades(db_at_revision, alembic_cfg
     assert "user_id" in folder_cols
     engine.dispose()
 
-    # Downgrade
-    command.downgrade(alembic_cfg, "-1")
+    # Downgrade to the revision just before our schema (explicit revision —
+    # `-1` would resolve relative to whatever the current head happens to be,
+    # which silently breaks this test every time a migration is added.)
+    command.downgrade(alembic_cfg, "eb3a1f1e91ba")
     engine = create_engine(_test_database_url(), poolclass=NullPool)
     inspector = inspect(engine)
     assert "users" not in inspector.get_table_names()

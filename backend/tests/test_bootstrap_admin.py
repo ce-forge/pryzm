@@ -65,6 +65,9 @@ def test_bootstrap_instantiates_builtin_templates_for_admin(db_session, monkeypa
     ).all()
     assert len(instances) == 1
     assert instances[0].is_template is False
+    # Partial unique indexes let the instance reuse the template's literal
+    # slug — no user-id suffix needed.
+    assert instances[0].slug == "it_copilot"
 
 
 def test_bootstrap_backfills_orphan_chats_and_folders(db_session, monkeypatch):

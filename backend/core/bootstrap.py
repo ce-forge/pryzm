@@ -40,14 +40,14 @@ def ensure_bootstrap_admin(db: DbSession) -> models.User | None:
 
 
 def _instantiate_templates_for(db: DbSession, user: models.User) -> None:
-    # Workspace.slug is globally unique, so an instance can't reuse the
-    # template's slug. Suffix with a short user-id slice — collision-free
-    # for the single-tenant bootstrap path, and predictable in logs.
-    user_suffix = user.id.replace("-", "")[:8]
+    # Per the partial unique indexes on workspaces, a user-owned instance
+    # may share a template's slug — templates are unique only within
+    # is_template=TRUE, and per-user instances are unique within
+    # (user_id, slug). So the instance gets the template's literal slug.
     templates = db.query(models.Workspace).filter_by(is_template=True).all()
     for tmpl in templates:
         instance = models.Workspace(
-            slug=f"{tmpl.slug}-{user_suffix}",
+            slug=tmpl.slug,
             display_name=tmpl.display_name,
             system_prompt=tmpl.system_prompt,
             enabled_tools=list(tmpl.enabled_tools or []),

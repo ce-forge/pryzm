@@ -22,7 +22,10 @@ def generate_uuid():
 class Workspace(Base):
     __tablename__ = "workspaces"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
-    slug = Column(String, nullable=False, unique=True, index=True)
+    # Uniqueness is enforced by two partial indexes (see migration
+    # a65df9990a35): UNIQUE(slug) WHERE is_template, and
+    # UNIQUE(user_id, slug) WHERE NOT is_template AND user_id IS NOT NULL.
+    slug = Column(String, nullable=False, index=True)
     display_name = Column(String, nullable=False)
     system_prompt = Column(Text, nullable=False, default="")
     enabled_tools = Column(JSONB, nullable=False, server_default="[]")
