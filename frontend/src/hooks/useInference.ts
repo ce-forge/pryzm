@@ -36,6 +36,11 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
   const [streamingContent, setStreamingContent] = useState<Record<string, string>>({});
   const [streamingToolCalls, setStreamingToolCalls] = useState<Record<string, ToolCall[]>>({});
 
+  // Mirror isProcessing into a ref so sendMessage can early-return on a
+  // rapid second call. The state value is stale inside the useCallback
+  // closure (dep array intentionally excludes isProcessing), so we guard
+  // off the ref.
+  const isProcessingRef = useRef(false);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const migratedIds = useRef<Map<string, string>>(new Map());
   const linkSessionRef = useRef<((oldId: string, newId: string) => void) | null>(null);
@@ -55,6 +60,10 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       skipUserAdd: boolean = false,
       modes: string[] = [],
     ): Promise<string> => {
+      if (isProcessingRef.current) {
+        return activeSessionId || "";
+      }
+      isProcessingRef.current = true;
       setIsProcessing(true);
 
       const optimisticId = activeSessionId || newOptimisticSessionId();
@@ -257,6 +266,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       } catch {
         // AbortError, network errors — stream ended early.
       } finally {
+        isProcessingRef.current = false;
         setIsProcessing(false);
 
         const finalKeySid = realDbId ?? optimisticId;
@@ -311,9 +321,6 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       const c = abortControllersRef.current.get(mapped);
       c?.abort();
       return;
-    }
-    for (const [key, controller] of abortControllersRef.current.entries()) {
-      if (key.startsWith("optimistic-")) controller.abort();
     }
   }, []);
 

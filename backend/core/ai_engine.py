@@ -456,6 +456,7 @@ async def stream_chat(
                         "role": "tool",
                         "content": str(result),
                         "name": func_name,
+                        "tool_call_id": tool_call["id"],
                     })
                 continue
 

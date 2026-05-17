@@ -282,6 +282,9 @@ def update_session(
     — cross-workspace 404s."""
     db_session = verify_workspace_owns(session_id, models.Session, workspace.id, db)
     update_data = payload.model_dump(exclude_unset=True)
+    # Cross-workspace folder_id rejected at the boundary.
+    if "folder_id" in update_data and update_data["folder_id"] is not None:
+        verify_workspace_owns(update_data["folder_id"], models.Folder, workspace.id, db)
     for key, value in update_data.items():
         setattr(db_session, key, value)
     db.commit()

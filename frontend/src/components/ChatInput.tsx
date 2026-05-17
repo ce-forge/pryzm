@@ -98,7 +98,7 @@ export default function ChatInput({
   );
 
   const guardedSubmit = (e?: React.FormEvent) => {
-    if (uploadsInProgress) {
+    if (uploadsInProgress || isProcessing) {
       e?.preventDefault();
       return;
     }
@@ -106,7 +106,7 @@ export default function ChatInput({
   };
 
   const guardedKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (uploadsInProgress && e.key === "Enter" && !e.shiftKey) {
+    if ((uploadsInProgress || isProcessing) && e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       return;
     }

@@ -40,15 +40,17 @@ def _session_advisory_lock(db, session_id: str):
     to the pool, releasing the session-level advisory lock prematurely.
     The commit is deferred to the finally block after unlock.
     """
-    key = db.execute(
-        text("SELECT hashtextextended(:k, 0)").bindparams(k=f"condense:{session_id}")
-    ).scalar()
-
-    acquired = db.execute(
-        text("SELECT pg_try_advisory_lock(:k)").bindparams(k=key)
-    ).scalar()
-
+    acquired = False
+    key = None
     try:
+        key = db.execute(
+            text("SELECT hashtextextended(:k, 0)").bindparams(k=f"condense:{session_id}")
+        ).scalar()
+
+        acquired = db.execute(
+            text("SELECT pg_try_advisory_lock(:k)").bindparams(k=key)
+        ).scalar()
+
         yield acquired
     finally:
         if acquired:

@@ -38,7 +38,7 @@ export default function MessageActions({ content, timestamp, onEdit, onDelete, o
   const btnClass = "p-1.5 rounded-md text-gray-500 hover:bg-[#2f2f2f] hover:text-[#e3e3e3] transition-all duration-200";
 
   return (
-    <div className={`flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200 pointer-events-none group-hover:pointer-events-auto ${isUser ? 'justify-end' : 'justify-start'}`}>
+    <div className={`flex items-center gap-1 mt-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity duration-200 pointer-events-none group-hover:pointer-events-auto [@media(hover:none)]:pointer-events-auto ${isUser ? 'justify-end' : 'justify-start'}`}>
       
       {/* Claude Style Timestamp: Next to buttons */}
       {timestamp && (

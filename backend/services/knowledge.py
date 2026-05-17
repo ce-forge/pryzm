@@ -444,6 +444,7 @@ async def retrieve_relevant_chunks(
             chunks = (
                 db.query(models.DocumentChunk)
                 .filter(models.DocumentChunk.document_id == recent_doc.id)
+                .order_by(models.DocumentChunk.id)
                 .limit(top_k)
                 .all()
             )

@@ -4,6 +4,8 @@ The advisory lock test uses TWO separate SessionLocal connections to prove that
 the lock actually blocks across connections (not just within one transaction).
 """
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 from services import condense
@@ -52,3 +54,39 @@ def test_advisory_lock_different_session_ids_dont_block(db_at_head):
     finally:
         db1.close()
         db2.close()
+
+
+def test_session_advisory_lock_releases_on_acquisition_error(db_session, monkeypatch):
+    """If acquiring the advisory lock raises mid-way, the helper must not
+    leak a half-acquired lock back into the pool.
+
+    Simulates: the lock SELECT actually succeeds at the DB level (lock is now
+    held) but the call site raises before `acquired` can be assigned. Pre-fix,
+    the helper's try/finally is bypassed entirely and the lock leaks.
+    """
+    call_count = {"n": 0}
+    original_execute = db_session.execute
+
+    def flaky_execute(stmt, *args, **kwargs):
+        call_count["n"] += 1
+        result = original_execute(stmt, *args, **kwargs)
+        # Let the first call (hashtextextended) return normally so we have a
+        # key, then on the second call (pg_try_advisory_lock) actually acquire
+        # the lock but raise after — mimicking a mid-fetch failure.
+        if call_count["n"] == 2:
+            # Force materialization so the lock is genuinely taken server-side.
+            result.scalar()
+            raise OperationalError("statement", {}, Exception("simulated"))
+        return result
+
+    monkeypatch.setattr(db_session, "execute", flaky_execute)
+
+    with pytest.raises(OperationalError):
+        with condense._session_advisory_lock(db_session, "sess-x"):
+            pass
+
+    monkeypatch.setattr(db_session, "execute", original_execute)
+    held = db_session.execute(
+        text("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+    ).scalar()
+    assert held == 0

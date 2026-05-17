@@ -16,16 +16,16 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const session = useSessionContext();
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  if (!isOpen) return null;
-
   return (
     <>
-      <div 
-        className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm" 
-        onClick={() => setIsOpen(false)} 
-      />
+      {isOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 md:hidden backdrop-blur-sm"
+          onClick={() => setIsOpen(false)}
+        />
+      )}
       
-      <div className="fixed md:relative w-[280px] h-full bg-[#1e1f20] flex flex-col shrink-0 transition-all duration-300 border-r border-[#333537] z-50 shadow-2xl md:shadow-none">
+      <div className={`fixed md:relative w-[280px] h-full bg-[#1e1f20] flex flex-col shrink-0 transition-transform duration-300 border-r border-[#333537] z-50 shadow-2xl md:shadow-none ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}`}>
         
         {/* TOP: Header Controls */}
         <div className="p-4 flex items-center gap-4">

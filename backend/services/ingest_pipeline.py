@@ -162,15 +162,22 @@ async def _finalize_error(
 ) -> None:
     """Persist the error state and publish a terminal event.
 
-    We re-read the row before mutating it because the failure path may
-    have been hit after a partial commit (e.g., storage_path set).
+    Rolls back first to discard any chunks that were added to the session
+    by a partially-completed embed loop — otherwise the status-update
+    commit below would flush them, leaving an `error` document with half
+    its embeddings and duplicating them on re-upload. Re-fetches the row
+    after rollback because the rollback detaches ORM instances.
+
     Best-effort: if the DB write itself fails we still want the SSE
     subscriber to wake up, so the publish runs unconditionally.
     """
     try:
-        doc.status = "error"
-        doc.error_message = message
-        db.commit()
+        db.rollback()
+        fresh = db.query(models.Document).filter(models.Document.id == doc.id).first()
+        if fresh is not None:
+            fresh.status = "error"
+            fresh.error_message = message
+            db.commit()
     except Exception:
         _logger.exception("ingest_doc: could not persist error state for %s", doc.id)
         db.rollback()
