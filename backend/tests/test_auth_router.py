@@ -97,3 +97,31 @@ def test_login_locks_out_after_threshold(db_session, monkeypatch):
         assert r.status_code in (401, 429)
     finally:
         app.dependency_overrides.clear()
+
+
+def test_logout_clears_cookie_and_session(db_session, monkeypatch):
+    _setup_user(db_session)
+    try:
+        c = _client(db_session, monkeypatch)
+        c.post("/api/auth/login", json={"username": "alice", "password": "hunter2hunter2"})
+        # session row exists
+        assert db_session.query(models.AuthSession).count() == 1
+
+        r = c.post("/api/auth/logout")
+        assert r.status_code == 200
+        # session row deleted
+        db_session.expire_all()
+        assert db_session.query(models.AuthSession).count() == 0
+        # cookie cleared (max-age=0 on the response sets it to expire)
+        assert r.cookies.get(cookie_auth.COOKIE_NAME) in (None, "")
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_logout_without_cookie_returns_200_idempotent(db_session, monkeypatch):
+    try:
+        c = _client(db_session, monkeypatch)
+        r = c.post("/api/auth/logout")
+        assert r.status_code == 200
+    finally:
+        app.dependency_overrides.clear()

@@ -2,7 +2,7 @@
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
@@ -55,3 +55,16 @@ async def login(
         "is_admin": user.is_admin,
         "can_create_workspaces": user.can_create_workspaces,
     }
+
+
+@router.post("/logout")
+def logout(
+    request: Request,
+    response: Response,
+    db: DbSession = Depends(database.get_db),
+):
+    sid = request.cookies.get(cookie_auth.COOKIE_NAME)
+    if sid:
+        cookie_auth.invalidate_session(db, sid)
+    response.delete_cookie(cookie_auth.COOKIE_NAME, path="/")
+    return {"ok": True}
