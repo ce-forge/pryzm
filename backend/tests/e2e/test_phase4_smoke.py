@@ -1,11 +1,11 @@
-"""UI smoke tests for Phase 4: workspace identity propagation + cache namespacing.
+"""UI smoke tests for workspace identity propagation + cache namespacing.
 
 Each test starts from a fresh BrowserContext. Screenshots saved to _artifacts/.
 
-Selector notes (inherited from Phase 3):
+Selector notes:
   - Chat input: textarea[placeholder="Ask Pryzm anything..."]
-  - Assistant content: <p> tags inside the .custom-scrollbar.overflow-x-hidden
-    chat container (same as Phase 3 — React-Markdown output).
+  - Assistant content: <p> tags inside .custom-scrollbar.overflow-x-hidden
+    (React-Markdown output).
   - Workspace isolation: navigating to /?workspace=<slug> completely changes
     which sessions are listed and which cache partition is active.
 """
@@ -15,7 +15,6 @@ from playwright.sync_api import Page
 
 FRONTEND_URL = "http://127.0.0.1:3000"
 
-# Reuse the Phase 3 assistant-has-content predicate verbatim.
 _ASSISTANT_HAS_CONTENT = """
 () => {
     const els = Array.from(document.querySelectorAll('.custom-scrollbar'));

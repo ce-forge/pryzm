@@ -1,19 +1,18 @@
 """End-to-end document ingestion pipeline.
 
-Async-ingestion PR 3 (docs/specs/2026-05-15-async-ingestion.md). The
-shape is: `/upload` inserts a `Document(status='processing')` row
-synchronously and hands the row's id to `ingest_doc`, which runs as a
-background task. The task does caption-or-extract → save → chunk +
-embed → flip status, publishing progress to the broker the whole way.
+`/upload` inserts a `Document(status='processing')` row synchronously
+and hands the row's id to `ingest_doc`, which runs as a background task.
+The task does caption-or-extract → save → chunk + embed → flip status,
+publishing progress to the broker the whole way.
 
 Contract:
 
-- Never raises. Anything that previously surfaced as a 4xx (unsupported
-  MIME, empty caption, non-UTF-8 text, etc.) is persisted onto the
-  Document as `status='error'` + `error_message=...` and published as
-  a terminal event. The route handler has already committed the row
-  by the time the background task starts — there's nobody left to
-  receive a thrown exception.
+- Never raises. Failure modes (unsupported MIME, empty caption,
+  non-UTF-8 text, etc.) are persisted onto the Document as
+  `status='error'` + `error_message=...` and published as a terminal
+  event. The route handler has already committed the row by the time
+  the background task starts; there's nobody to receive a thrown
+  exception.
 - Always publishes a single terminal event (`status: 'ready'` or
   `status: 'error'`) to the broker before returning, so SSE
   subscribers complete cleanly.

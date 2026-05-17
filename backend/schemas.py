@@ -52,9 +52,8 @@ class MessageHistory(BaseModel):
     status: str = "complete"
     timestamp: Optional[str] = None
     referenced_files: Optional[List[ReferencedFile]] = None
-    # Tool calls executed during this assistant turn (NULL for user/memory
-    # rows and for legacy assistant rows). See spec
-    # docs/specs/2026-05-15-tool-call-separation.md for the shape.
+    # Tool calls executed during this assistant turn. NULL on rows with
+    # no tool use.
     tool_calls: Optional[List[ToolCall]] = None
 
 class FolderCreate(BaseModel):

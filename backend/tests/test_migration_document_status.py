@@ -1,9 +1,7 @@
 """Verifies migration 53f0bcb1ae0d: add documents.status + error_message.
 
-Async-ingestion PR 1. Status column carries 'processing' / 'ready' /
-'error'; error_message is populated only on error. Existing rows
-backfill to 'ready' at upgrade since they were all ingested
-synchronously under the old path.
+Status column carries 'processing' / 'ready' / 'error'; error_message
+is populated only on error. Existing rows backfill to 'ready' at upgrade.
 """
 from alembic import command
 from sqlalchemy import create_engine, text

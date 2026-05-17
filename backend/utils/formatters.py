@@ -1,15 +1,8 @@
 def format_file_analyzed(sources: list) -> str:
-    """Formats the markdown output when RAG successfully reads a file.
+    """Markdown banner for a turn whose RAG context came from attached files.
 
-    Earlier versions (PR #30) embedded each image as a base64 data URL
-    inline so the assistant turn rendered a tiny thumbnail next to the
-    filename. That added 3-7 MB of base64 PER MESSAGE for full-size
-    phone-camera photos, which got persisted to the assistant message
-    and froze the UI when re-opening the chat. The upload pill already
-    shows the user the image at the moment of attachment, so the chat
-    transcript doesn't need to re-embed it. If a real thumbnail in
-    chat is wanted later it should go through a sized server endpoint,
-    not an inline data URL.
+    Filenames only — image bytes are not re-embedded inline; the upload
+    pill is the user-visible preview.
     """
     sources_str = ", ".join(sources)
     return f"\n> **File Analyzed:** `{sources_str}`\n\n"

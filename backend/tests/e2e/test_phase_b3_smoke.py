@@ -1,5 +1,5 @@
-"""Phase B3 e2e probe — verifies GET /api/admin/models against the live
-backend, with the live llama-swap providing the `/running` data.
+"""e2e probe — verifies GET /api/admin/models against the live backend,
+with the live llama-swap providing the `/running` data.
 
 No POST/DELETE here: those mutate the real YAML and SIGHUP the container.
 Mutation paths are covered by the in-process unit tests in

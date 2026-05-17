@@ -55,7 +55,7 @@ def test_image_upload_pill_shows_thumbnail_and_progress_ring(
 ):
     """Pick the cat-photo fixture; before upload completes the pill
     should be rendering both the <img> thumbnail and the circular
-    progress overlay (PR #41)."""
+    progress overlay."""
     _open_app_with_token(page, api_token)
     _attach_file(page, FIXTURE_IMG)
 
@@ -95,9 +95,9 @@ def test_image_upload_pill_settles_into_success_state(
 def test_send_button_disabled_while_upload_in_flight(
     page: Page, api_token: str, screenshot,
 ):
-    """PR #44 — pressing Send while bytes are flying or the backend
-    is captioning races against the auto-RAG retrieval. The submit
-    button must be `disabled` during that window."""
+    """Pressing Send while bytes are flying or the backend is captioning
+    races against the auto-RAG retrieval. The submit button must be
+    `disabled` during that window."""
     _open_app_with_token(page, api_token)
 
     # Type something so the !prompt.trim() gate doesn't dominate the
@@ -123,7 +123,7 @@ def test_send_button_disabled_while_upload_in_flight(
 
 
 # ---------------------------------------------------------------------------
-# Hash-named camera files are renamed at intake (PR #47)
+# Hash-named camera files are renamed at intake
 # ---------------------------------------------------------------------------
 
 def test_hash_named_file_is_renamed_in_pill(
@@ -150,7 +150,7 @@ def test_hash_named_file_is_renamed_in_pill(
 
 
 # ---------------------------------------------------------------------------
-# Removing a pill triggers DELETE /documents/<id> (PR #48)
+# Removing a pill triggers DELETE /documents/<id>
 # ---------------------------------------------------------------------------
 
 def test_remove_pill_fires_document_delete(
@@ -268,11 +268,10 @@ def test_multiple_images_upload_sequentially_to_success(
 def test_full_height_containers_use_h_dvh_class(
     page: Page, api_token: str,
 ):
-    """PR #43 swapped h-screen (100vh, ignores mobile chrome) for h-dvh
-    (dynamic viewport height). Asserting the class is on the right
-    elements is sufficient — the runtime CSS value lookup is what
-    actually fixes the bug, but Tailwind 4's class-to-css mapping is
-    stable and not something we want to re-test."""
+    """Full-height containers must use h-dvh (dynamic viewport height),
+    not h-screen — the latter ignores mobile browser chrome. Asserting
+    the class is on the right elements is sufficient; Tailwind's
+    class-to-CSS mapping is stable and not worth re-testing here."""
     _open_app_with_token(page, api_token)
 
     body_class = page.locator("body").get_attribute("class") or ""

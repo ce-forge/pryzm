@@ -79,7 +79,8 @@ async def test_tool_execution_yields_typed_events():
     assert tool_result_events[0]["name"] == "_probe_typed_event_tool"
     assert tool_result_events[0]["result"] == "FAKE_RESULT"
 
-    # And critically: no text chunk should contain the old markdown markers
+    # Critically: tool-call markers must not appear inline in text chunks
+    # (tool events ride a separate typed channel).
     text_chunks = [y for y in yields if isinstance(y, str)]
     combined = "".join(text_chunks)
     assert "> **Tool:**" not in combined

@@ -1,4 +1,4 @@
-"""Phase B2 e2e probe — verifies the router emits an `llm.route` line with the
+"""e2e probe — verifies the router emits an `llm.route` line with the
 expected tier when /analyze is invoked.
 
 Reads the live backend log at /tmp/pryzm_backend.log because the pryzm.llm

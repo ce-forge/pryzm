@@ -3,17 +3,14 @@
 Speaks /v1/chat/completions, /v1/embeddings, /v1/models — the de facto
 standard wire format adopted by llama-server (via llama-swap), vLLM,
 LM Studio, etc. This is NOT a multi-backend abstraction; it's one module
-talking to one server (llama-swap in front of llama.cpp). The wire format
-just happens to be the standard one because so many tools already speak it.
+talking to one server (llama-swap in front of llama.cpp).
 
-The module exposes the same function signatures the previous Ollama wrapper
-had — chat / generate / embed / list_models — so ai_engine and friends
-keep their existing call shapes. Response payloads are adapted in here so
-callers continue to see the Ollama-shaped `{message, prompt_eval_count,
-eval_count, ...}` dict on chat/generate.
+Exposes chat / generate / embed / list_models. Response payloads are
+adapted in here so callers see a normalised `{message, prompt_eval_count,
+eval_count, ...}` dict.
 
 `DEFAULT_CHAT_MODEL` / `DEFAULT_SMALL_CHAT_MODEL` are the catalog endpoints.
-Phase B2's router (`core/llm_router.py`) picks between them per request for
+The per-request router (`core/llm_router.py`) picks between them for
 user-facing chat; internal callers (`generate_title`, `condense_chat_memory`)
 import them directly.
 """

@@ -4,9 +4,8 @@ Runs out-of-band after /analyze closes (scheduled via FastAPI BackgroundTasks).
 Uses a Postgres advisory lock keyed on the session id so concurrent requests
 for the same session don't both condense at once.
 
-The condense logic itself (load prior memory, slice messages, call the LLM,
-persist new memory row) is lifted from what was previously inline in
-routers/chat.py's stream generator finally block.
+Pipeline: load prior memory → slice messages → call the LLM → persist a
+new memory row.
 """
 from __future__ import annotations
 

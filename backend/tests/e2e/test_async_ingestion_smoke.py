@@ -146,12 +146,11 @@ def test_pill_transitions_uploading_processing_success(
 def test_send_button_gated_through_processing_window(
     page: Page, api_token: str, screenshot,
 ):
-    """Critical regression guard: PR 3's wider send-gate must keep the
-    submit button disabled across the full 'pending → uploading →
-    processing → success' arc, not just while bytes are flying. If the
-    gate is too narrow the user can submit a prompt while the doc is
-    mid-embed, the auto-RAG path misses the chunk, and they get a
-    worse answer than if they'd waited."""
+    """The send-gate must keep the submit button disabled across the full
+    'pending → uploading → processing → success' arc, not just while bytes
+    are flying. If the gate is too narrow the user can submit a prompt
+    while the doc is mid-embed, the auto-RAG path misses the chunk, and
+    they get a worse answer than if they'd waited."""
     _open_app_with_token(page, api_token)
     page.locator('textarea[placeholder="Ask Pryzm anything..."]').fill(
         "describe the image"

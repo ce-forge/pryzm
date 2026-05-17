@@ -1,6 +1,7 @@
 """drop deprecated workspaces.preferred_model
 
-Phase 4 migrated all consumers to engine_config.model. This drops the column.
+engine_config.model is the single source of truth; this drops the
+redundant column.
 
 Revision ID: bf317b5870ef
 Revises: a8c69f612a8a

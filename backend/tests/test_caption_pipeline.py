@@ -1,10 +1,8 @@
 """Unit tests for the unified single-VLM captioning pipeline.
 
-After PR #46 (Qwen2-VL swap), `ingest_pipeline._caption_image` is a
-thin wrapper around `image_describe.describe`. Earlier hybrid OCR +
-VLM behavior was removed because the captioning model now handles
-both verbatim extraction and structural description in one call,
-without the layout-collapse failure mode the OCR step introduced.
+`ingest_pipeline._caption_image` is a thin wrapper around
+`image_describe.describe` — the captioning model handles both verbatim
+text extraction and structural description in a single call.
 """
 from __future__ import annotations
 
