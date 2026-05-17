@@ -310,15 +310,17 @@ Additional decisions resolved in the May 18 brainstorm:
 19. **Folder ID generation:** server-side UUIDv7 (was client-supplied).
 20. **Login rate limiting:** 10 failures per username per 15-minute window triggers a 15-minute lockout. Admin can reset.
 
-## Phased plan (sizing only — implementation plan is a separate doc)
+## Phased plan
 
-- **Phase A** — auth model, login/logout/me, folder-id server generation, Phase A backfill. ~3 days.
-- **Phase B** — workspace ownership migration, admin endpoints, last-admin guard, session invalidation on password change. ~3-4 days.
-- **Phase C** — frontend login page, permission-flag UI audit, logout home. ~2 days.
-- **Phase D** — dev dashboard (separate spec).
-- **Phase E** — bearer-token removal, CORS tightening. ~half day.
+Implementation plan lives in a separate doc once this spec is approved.
 
-Auth foundation (Phases A-C + E) is roughly 1.5 weeks. Phase D depends on the audit subsystem landing first.
+- **Phase A** — auth model, login/logout/me, folder-id server generation, Phase A backfill.
+- **Phase B** — workspace ownership migration, admin endpoints, last-admin guard, session invalidation on password change.
+- **Phase C** — frontend login page, permission-flag UI audit, logout home.
+- **Phase D** — dev dashboard (separate spec; depends on audit subsystem).
+- **Phase E** — bearer-token removal, CORS tightening.
+
+Phases are independently shippable. Bearer token keeps working through Phase D.
 
 ## What this unblocks
 
