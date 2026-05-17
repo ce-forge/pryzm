@@ -193,6 +193,8 @@ No notification fires on submission (the user is the one submitting; they know).
 
 **Polling cadence:** every 30 seconds while the app is focused, plus once on window focus event (so switching back to a stale tab refreshes). Skip when window is blurred or app is backgrounded.
 
+**Future WebSocket migration.** When the planned WebSocket transport (Item 4 in `docs/internal/2026-05-14-future-features.md`) ships, `NotificationPin` switches from polling to subscribing on the WS multiplex. The notification data model, the bug-resolve hook, and the admin-side endpoints are unchanged across the migration — only the frontend hook's data source flips. The polling endpoints can stay as a fallback at that point or be removed.
+
 **Frontend component (`NotificationPin`):** lives in the sidebar header.
 - Shows a bell icon
 - Red badge with count when `unseen_count > 0`
@@ -270,7 +272,7 @@ All resolved during brainstorm:
 1. **Six tabs:** Users, Workspaces, Audit, Engine, System, Bug Reports.
 2. **Bug reports separate from audit_events:** `bug_reports` is its own mutable table; lifecycle events recorded in `audit_events`.
 3. **Notifications as a generic primitive:** `notifications` table, used by the bug-resolve hook in v1, reusable for admin broadcasts and system messages later.
-4. **Notification delivery:** polling, not push. 30-second interval while window is focused.
+4. **Notification delivery:** polling for v1; migrates to WebSocket subscription when the planned WS transport lands (Item 4 in `docs/internal/2026-05-14-future-features.md`). Data model unchanged across the migration.
 5. **Notification auto-dismiss:** popover closes after 5 seconds of no interaction; DB row stays with `seen_at` set.
 6. **Bug resolve always notifies the user.** No admin opt-out at resolve time. Dismiss exists for cases where notification isn't appropriate.
 7. **Engine tab uses iframe**, not native re-render. Lazy-mounted.
