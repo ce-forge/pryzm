@@ -85,7 +85,7 @@ export function useMessageActions(
     } catch (err) {
       console.error("Failed to branch session:", err);
     }
-  }, [activeSessionKey, navigateToSession, notifySessionCreated]);
+  }, [activeSessionKey, navigateToSession, notifySessionCreated, workspace]);
 
   const rerunAssistant = useCallback(async (index: number) => {
     if (index === 0 || messages[index].role !== 'assistant') return;

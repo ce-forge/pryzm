@@ -335,3 +335,57 @@ async def test_restrict_to_filenames_dedupes_chunk_overlap(db_session):
     # Confirm both unique tails are present (we didn't drop content).
     assert "intro text." in result["context"]
     assert "continuing dialogue." in result["context"]
+
+
+@pytest.mark.asyncio
+async def test_overview_mode_returns_chunks_in_id_order(db_session, monkeypatch):
+    """overview_mode must return chunks ordered by id (UUIDv7 = insertion
+    order), not whatever Postgres feels like returning."""
+    from services import knowledge
+    from db import models
+
+    ws = models.Workspace(
+        id="ws-ov", slug="ws-ov", display_name="OV",
+        system_prompt="", enabled_tools=[], is_builtin=False,
+        engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+    )
+    sess = models.Session(id="sess-ov", workspace_id="ws-ov", title="t")
+    doc = models.Document(
+        id="doc-ov", workspace_id="ws-ov", session_id="sess-ov",
+        filename="big.txt", status="ready",
+    )
+    db_session.add_all([ws, sess, doc])
+    db_session.commit()
+
+    # Insert chunks with ids that will sort lexicographically in a known order.
+    chunk_ids = [f"chunk-{i:04d}" for i in range(10)]
+    for cid in chunk_ids:
+        db_session.add(models.DocumentChunk(
+            id=cid, document_id="doc-ov", workspace_id="ws-ov",
+            content=f"content {cid}", embedding=[0.0] * 768,
+        ))
+    db_session.commit()
+
+    # Fake the embedding client; overview_mode doesn't actually use it but
+    # the function signature wants one.
+    class FakeClient:
+        pass
+
+    result = await knowledge.retrieve_relevant_chunks(
+        client=FakeClient(),
+        db=db_session,
+        query="",
+        workspace_id="ws-ov",
+        session_id="sess-ov",
+        overview_mode=True,
+        top_k=5,
+    )
+
+    # Pull the chunk ids out of the formatted context by matching their content.
+    assert "content chunk-0000" in result["context"]
+    assert "content chunk-0004" in result["context"]
+    first_five = chunk_ids[:5]
+    for cid in first_five:
+        assert f"content {cid}" in result["context"]
+    for cid in chunk_ids[5:]:
+        assert f"content {cid}" not in result["context"]
