@@ -112,3 +112,8 @@ class WorkspaceDeleteResponse(BaseModel):
     removed_sessions: int
     removed_folders: int
     removed_documents: int
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str

@@ -10,6 +10,7 @@ from config import settings
 from db import database
 from routers import health, chat, workspaces, admin, folders, documents
 from routers import settings as settings_router
+from routers import auth as auth_router
 from core.auth import require_token
 from core import llm_router
 from services import model_prewarm
@@ -148,6 +149,7 @@ app.add_middleware(RequestLogger)
 
 
 app.include_router(health.router)
+app.include_router(auth_router.router)
 app.include_router(workspaces.router, dependencies=[Depends(require_token)])
 app.include_router(chat.router, dependencies=[Depends(require_token)])
 app.include_router(folders.router, dependencies=[Depends(require_token)])
