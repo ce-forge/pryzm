@@ -1,12 +1,8 @@
 """Cookie-based session authentication.
 
-Separate from core/auth.py (bearer-token) so the eventual Phase E removal
-is a clean file delete + import-replace rather than function-level surgery.
-
 This module covers password hashing/verification, session helpers, the
 current_user FastAPI dependency, and the login rate limiter.
 """
-import hmac as _hmac
 import secrets
 import time
 from collections import defaultdict
@@ -15,10 +11,9 @@ from typing import Annotated, Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError, VerificationError
-from fastapi import Cookie, Depends, Header, HTTPException, Query, status
+from fastapi import Cookie, Depends, HTTPException, status
 from sqlalchemy.orm import Session as DbSession
 
-from config import settings as _config_settings
 from db import database, models
 
 
@@ -91,44 +86,11 @@ def invalidate_user_sessions(db: DbSession, user_id: str) -> None:
 COOKIE_NAME = "pryzm_session"
 
 
-_BEARER_PREFIX = "Bearer "
-
-
-def _bearer_resolves_to_bootstrap_admin(
-    authorization: Optional[str],
-    token: Optional[str],
-    db: DbSession,
-) -> Optional[models.User]:
-    """Translate a valid bearer token (header or ?token=) to the bootstrap
-    admin user — the oldest user with is_admin=True AND is_active=True.
-    Returns None if no bearer was presented, or if it didn't match the
-    configured token."""
-    presented: Optional[str] = None
-    if authorization and authorization.startswith(_BEARER_PREFIX):
-        presented = authorization[len(_BEARER_PREFIX):]
-    elif token:
-        presented = token
-    if presented is None:
-        return None
-    if not _hmac.compare_digest(presented, _config_settings.PRYZM_API_TOKEN):
-        return None
-    return (
-        db.query(models.User)
-        .filter(models.User.is_admin.is_(True), models.User.is_active.is_(True))
-        .order_by(models.User.created_at.asc())
-        .first()
-    )
-
-
 def current_user(
     pryzm_session: Annotated[Optional[str], Cookie()] = None,
-    authorization: Annotated[Optional[str], Header()] = None,
-    token: Annotated[Optional[str], Query()] = None,
     db: DbSession = Depends(database.get_db),
 ) -> models.User:
     user = get_session_user(db, pryzm_session) if pryzm_session else None
-    if user is None:
-        user = _bearer_resolves_to_bootstrap_admin(authorization, token, db)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

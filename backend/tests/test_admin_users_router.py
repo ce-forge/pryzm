@@ -19,19 +19,18 @@ def _setup_admin(db_session):
     return admin
 
 
-def _admin_client(db_session, monkeypatch):
+def _admin_client(db_session):
     admin = _setup_admin(db_session)
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     c = TestClient(app)
     c.cookies.set(cookie_auth.COOKIE_NAME, sid)
     return c, admin
 
 
-def test_admin_list_users_returns_existing(db_session, monkeypatch):
+def test_admin_list_users_returns_existing(db_session):
     try:
-        c, admin = _admin_client(db_session, monkeypatch)
+        c, admin = _admin_client(db_session)
         r = c.get("/api/admin/users")
         assert r.status_code == 200
         body = r.json()
@@ -41,9 +40,9 @@ def test_admin_list_users_returns_existing(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_admin_create_user_with_no_templates(db_session, monkeypatch):
+def test_admin_create_user_with_no_templates(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         r = c.post("/api/admin/users", json={
             "username": "alice",
             "password": "alice-pw-12chars",
@@ -62,9 +61,9 @@ def test_admin_create_user_with_no_templates(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_admin_create_user_instantiates_starter_templates(db_session, monkeypatch):
+def test_admin_create_user_instantiates_starter_templates(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         tmpl = models.WorkspaceTemplate(
             id="tmpl-x", slug="tmpl-x", display_name="X", system_prompt="x",
             enabled_tools=[],
@@ -88,9 +87,9 @@ def test_admin_create_user_instantiates_starter_templates(db_session, monkeypatc
         app.dependency_overrides.clear()
 
 
-def test_admin_patch_user_changes_fields(db_session, monkeypatch):
+def test_admin_patch_user_changes_fields(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         r = c.patch(f"/api/admin/users/{bob.id}", json={
@@ -106,9 +105,9 @@ def test_admin_patch_user_changes_fields(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_admin_password_reset_invalidates_sessions(db_session, monkeypatch):
+def test_admin_password_reset_invalidates_sessions(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         bob = models.User(
             username="bob",
             password_hash=cookie_auth.hash_password("old-pw-12chars"),
@@ -130,9 +129,9 @@ def test_admin_password_reset_invalidates_sessions(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_admin_cannot_demote_last_admin(db_session, monkeypatch):
+def test_admin_cannot_demote_last_admin(db_session):
     try:
-        c, admin = _admin_client(db_session, monkeypatch)
+        c, admin = _admin_client(db_session)
         r = c.patch(f"/api/admin/users/{admin.id}", json={"is_admin": False})
         assert r.status_code == 400
         db_session.expire_all()
@@ -142,9 +141,9 @@ def test_admin_cannot_demote_last_admin(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_admin_delete_soft_by_default(db_session, monkeypatch):
+def test_admin_delete_soft_by_default(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         r = c.delete(f"/api/admin/users/{bob.id}")
@@ -156,9 +155,9 @@ def test_admin_delete_soft_by_default(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_admin_delete_hard_cascades(db_session, monkeypatch):
+def test_admin_delete_hard_cascades(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         r = c.delete(f"/api/admin/users/{bob.id}?hard=true")
@@ -168,12 +167,11 @@ def test_admin_delete_hard_cascades(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_non_admin_cannot_call_admin_endpoints(db_session, monkeypatch):
+def test_non_admin_cannot_call_admin_endpoints(db_session):
     try:
         non_admin = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add(non_admin); db_session.commit(); db_session.refresh(non_admin)
         sid = cookie_auth.create_session(db_session, non_admin.id)
-        monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
         app.dependency_overrides[database.get_db] = lambda: db_session
         c = TestClient(app)
         c.cookies.set(cookie_auth.COOKIE_NAME, sid)

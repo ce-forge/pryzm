@@ -6,29 +6,33 @@ from db import database, models
 from main import app
 
 
-def test_folder_create_does_not_require_client_id(db_session, monkeypatch):
-    # Create bootstrap admin (required by bearer token auth to resolve)
+def _seed_admin_and_ws(db_session, ws_id: str):
     admin = models.User(
         username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
         is_admin=True, is_active=True,
     )
     db_session.add(admin)
     db_session.commit()
+    db_session.refresh(admin)
 
     ws = models.Workspace(
-        id="ws-fid", slug="ws-fid", display_name="FID",
+        id=ws_id, slug=ws_id, display_name=ws_id.upper(),
         system_prompt="", enabled_tools=[],
         user_id=admin.id,
         engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws)
     db_session.commit()
+    return admin
 
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
+
+def test_folder_create_does_not_require_client_id(db_session):
+    admin = _seed_admin_and_ws(db_session, "ws-fid")
+    sid = cookie_auth.create_session(db_session, admin.id)
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
-        c.headers.update({"Authorization": "Bearer test-token"})
+        c.cookies.set(cookie_auth.COOKIE_NAME, sid)
         r = c.post("/folders", json={"name": "Notes", "workspace": "ws-fid"})
         assert r.status_code == 200, r.text
         body = r.json()
@@ -36,42 +40,24 @@ def test_folder_create_does_not_require_client_id(db_session, monkeypatch):
         assert len(body["id"]) > 20
         folder = db_session.query(models.Folder).filter_by(id=body["id"]).one()
         assert folder.name == "Notes"
-        # Bearer token resolves to bootstrap admin
         assert folder.user_id == admin.id
     finally:
         app.dependency_overrides.clear()
 
 
-def test_folder_create_ignores_client_supplied_id(db_session, monkeypatch):
-    # Create bootstrap admin (required by bearer token auth to resolve)
-    admin = models.User(
-        username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
-        is_admin=True, is_active=True,
-    )
-    db_session.add(admin)
-    db_session.commit()
-
-    ws = models.Workspace(
-        id="ws-fid2", slug="ws-fid2", display_name="FID2",
-        system_prompt="", enabled_tools=[],
-        user_id=admin.id,
-        engine_config={"backend": "llama_cpp"},
-    )
-    db_session.add(ws)
-    db_session.commit()
-
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
+def test_folder_create_ignores_client_supplied_id(db_session):
+    admin = _seed_admin_and_ws(db_session, "ws-fid2")
+    sid = cookie_auth.create_session(db_session, admin.id)
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
-        c.headers.update({"Authorization": "Bearer test-token"})
+        c.cookies.set(cookie_auth.COOKIE_NAME, sid)
         r = c.post("/folders", json={"name": "Notes", "workspace": "ws-fid2", "id": "client-supplied-id"})
         # Either pydantic strips the extra (200 with server id) or rejects (422)
         assert r.status_code in (200, 422)
         if r.status_code == 200:
             body = r.json()
             assert body["id"] != "client-supplied-id"
-            # Bearer token resolves to bootstrap admin
             folder = db_session.query(models.Folder).filter_by(id=body["id"]).one()
             assert folder.user_id == admin.id
     finally:

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import ActiveSession from "@/components/ActiveSession";
 import { AppProviders } from "@/context/AppProviders";
+import { ChatProviders } from "@/context/ChatProviders";
 import { LoginPage } from "@/components/LoginPage";
 import ChangePasswordForm from "@/components/ChangePasswordForm";
 import { useAuth } from "@/context/AuthContext";
@@ -39,10 +40,12 @@ function AppShell() {
   }
 
   return (
-    <div className="flex h-dvh w-full bg-[#131314] text-[#e3e3e3] overflow-hidden font-sans">
-      <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
-      <ActiveSession isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
-    </div>
+    <ChatProviders>
+      <div className="flex h-dvh w-full bg-[#131314] text-[#e3e3e3] overflow-hidden font-sans">
+        <Sidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
+        <ActiveSession isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen} />
+      </div>
+    </ChatProviders>
   );
 }
 

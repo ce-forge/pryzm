@@ -12,6 +12,7 @@ Selector notes (no data-testid attributes in this codebase):
   - Processing indicator: <span> text "Processing" shown by ProcessingAnimation
     while the backend is still generating (no content yet in the bubble).
 """
+import os
 import time
 
 from playwright.sync_api import Browser, Page
@@ -22,11 +23,18 @@ FRONTEND_URL = "http://127.0.0.1:3000"
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _open_app_with_token(page: Page, token: str) -> None:
-    """Navigate to / and inject the token, then reload so the app initialises."""
+def _login_in_context(page: Page) -> None:
+    """Drive the LoginPage form for the given page. Used inside fresh
+    browser contexts that don't have the session_scoped login_via_ui
+    fixture (e.g. multi-context concurrency tests)."""
+    username = os.environ.get("PRYZM_E2E_USERNAME", "admin")
+    password = os.environ.get("PRYZM_E2E_PASSWORD", "admin")
     page.goto(FRONTEND_URL)
-    page.evaluate(f'() => localStorage.setItem("pryzm_api_token", "{token}")')
-    page.reload()
+    page.locator("#username").wait_for(state="visible", timeout=10_000)
+    page.locator("#username").fill(username)
+    page.locator("#password").fill(password)
+    page.get_by_role("button", name="Sign in").click()
+    page.locator("#username").wait_for(state="detached", timeout=10_000)
     page.wait_for_load_state("networkidle", timeout=10_000)
 
 
@@ -60,11 +68,11 @@ _ASSISTANT_HAS_CONTENT = """
 # Test 1: streaming path end-to-end
 # ---------------------------------------------------------------------------
 
-def test_chat_streams_in_personal_workspace(page: Page, api_token: str, screenshot):
+def test_chat_streams_in_personal_workspace(page: Page, login_via_ui, screenshot):
     """Send a message in the personal workspace and verify the assistant bubble
     appears with streamed content. Exercises the full async streaming path
     end-to-end."""
-    _open_app_with_token(page, api_token)
+    login_via_ui()
 
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
@@ -83,7 +91,7 @@ def test_chat_streams_in_personal_workspace(page: Page, api_token: str, screensh
 # Test 2: concurrent chats — the headline async win
 # ---------------------------------------------------------------------------
 
-def test_concurrent_chats_overlap(browser: Browser, api_token: str):
+def test_concurrent_chats_overlap(browser: Browser):
     """Fire chats in two browser contexts simultaneously and verify BOTH complete.
 
     The backend serves chat requests concurrently — two requests should not
@@ -97,8 +105,8 @@ def test_concurrent_chats_overlap(browser: Browser, api_token: str):
         page_a = ctx_a.new_page()
         page_b = ctx_b.new_page()
 
-        _open_app_with_token(page_a, api_token)
-        _open_app_with_token(page_b, api_token)
+        _login_in_context(page_a)
+        _login_in_context(page_b)
 
         page_a.goto(f"{FRONTEND_URL}/?workspace=personal")
         page_b.goto(f"{FRONTEND_URL}/?workspace=it_copilot")
@@ -133,14 +141,14 @@ def test_concurrent_chats_overlap(browser: Browser, api_token: str):
 # Test 3: error envelope renders clean ⚠ UI
 # ---------------------------------------------------------------------------
 
-def test_error_envelope_shows_clean_error_ui(page: Page, api_token: str, screenshot):
+def test_error_envelope_shows_clean_error_ui(page: Page, login_via_ui, screenshot):
     """When the backend emits an error envelope the frontend must render the
     message as '⚠ <reason>'. Bare engine-error strings must not surface.
 
     Uses Playwright route interception to inject a synthetic NDJSON response so
     this test runs without touching the live LLM backend.
     """
-    _open_app_with_token(page, api_token)
+    login_via_ui()
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
 

@@ -7,23 +7,22 @@ from db import database, models
 from main import app
 
 
-def _admin_client(db_session, monkeypatch):
+def _admin_client(db_session):
     admin = models.User(
         username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
         is_admin=True, is_active=True,
     )
     db_session.add(admin); db_session.commit(); db_session.refresh(admin)
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     c = TestClient(app)
     c.cookies.set(cookie_auth.COOKIE_NAME, sid)
     return c, admin
 
 
-def test_list_users_workspaces(db_session, monkeypatch):
+def test_list_users_workspaces(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         for slug in ("ws-1", "ws-2"):
@@ -41,9 +40,9 @@ def test_list_users_workspaces(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_admin_edit_any_workspace_bypasses_owner_can_edit(db_session, monkeypatch):
+def test_admin_edit_any_workspace_bypasses_owner_can_edit(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         ws = models.Workspace(
@@ -63,9 +62,9 @@ def test_admin_edit_any_workspace_bypasses_owner_can_edit(db_session, monkeypatc
         app.dependency_overrides.clear()
 
 
-def test_admin_delete_user_workspace(db_session, monkeypatch):
+def test_admin_delete_user_workspace(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         ws = models.Workspace(

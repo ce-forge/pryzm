@@ -14,7 +14,6 @@ from routers import auth as auth_router
 from routers import admin_users as admin_users_router
 from routers import admin_templates as admin_templates_router
 from routers import admin_workspaces as admin_workspaces_router
-from core.auth import require_token
 from core import cookie_auth, llm_router
 from services import model_prewarm
 from services.tasks import garbage_collection_task
@@ -149,13 +148,6 @@ app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=li
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
-    # Also accept any RFC1918 private-network origin on any port. This
-    # makes mobile / LAN access work without forcing users to enumerate
-    # the host's IP in CORS_ORIGINS. The boundary stays inside the local
-    # network (no public-internet wildcards), preserving the explicit-
-    # allowlist principle for non-private origins. Pair this with the
-    # frontend's runtime API_URL resolution in src/utils/constants.ts.
-    allow_origin_regex=settings.CORS_PRIVATE_NETWORK_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

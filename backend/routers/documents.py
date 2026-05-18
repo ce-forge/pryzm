@@ -25,7 +25,6 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from core import cookie_auth
-from core.auth import require_token
 from core.deps import get_http_client
 from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models

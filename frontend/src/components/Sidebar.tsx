@@ -1,11 +1,13 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { useSessionContext } from "@/context/SessionContext";
 import { useAuth } from "@/context/AuthContext";
 import SessionDirectory from "./SessionDirectory";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
-import { MenuIcon } from "./Icons";
+import Identicon from "./Identicon";
+import { MenuIcon, DashboardIcon, SignOutIcon } from "./Icons";
 import { markSidebarScrolling } from "@/hooks/useSidebarPrefetchGuard";
 
 interface SidebarProps {
@@ -34,25 +36,41 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         <div className="w-sidebar h-full bg-[#1e1f20] flex flex-col border-r border-[#333537] shadow-2xl md:shadow-none">
 
           {/* TOP: Header Controls */}
-          <div className="p-4 flex items-center justify-between gap-4">
-            <button onClick={() => setIsOpen(false)} className="p-2 hover:bg-[#282a2c] rounded-full text-gray-400">
-              <MenuIcon className="w-5 h-5" />
-            </button>
-            <div className="flex items-center gap-2">
+          <div className="p-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <button
+                onClick={() => setIsOpen(false)}
+                className="text-gray-400 hover:text-[#e3e3e3] transition-colors shrink-0"
+                aria-label="Toggle sidebar"
+              >
+                <MenuIcon className="w-5 h-5" />
+              </button>
+              {user && (
+                <div className="flex items-center gap-2 min-w-0">
+                  <Identicon seed={user.username} size={24} />
+                  <span className="text-sm text-gray-300 truncate">{user.username}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
               {user?.is_admin && (
-                <a
+                <Link
                   href="/dashboard"
-                  className="text-sm text-gray-400 hover:text-[#e3e3e3] transition-colors px-2 py-1"
+                  className="p-1.5 rounded text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c] transition-colors"
+                  title="Dashboard"
+                  aria-label="Open admin dashboard"
                 >
-                  Dashboard
-                </a>
+                  <DashboardIcon className="w-4 h-4" />
+                </Link>
               )}
               <button
-                onClick={() => logout()}
+                onClick={() => { void logout(); }}
+                className="p-1.5 rounded text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c] transition-colors"
                 title={user ? `Sign out ${user.username}` : "Sign out"}
-                className="text-sm text-gray-400 hover:text-[#e3e3e3] transition-colors px-2 py-1"
+                aria-label="Sign out"
               >
-                Sign out
+                <SignOutIcon className="w-4 h-4" />
               </button>
             </div>
           </div>

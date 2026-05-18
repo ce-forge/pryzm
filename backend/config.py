@@ -12,11 +12,6 @@ class Settings(BaseSettings):
     DB_PORT: int = 5432
     DB_NAME: str
 
-    # Shared bearer token for all API clients. No default — Pydantic raises at
-    # startup if the env var is missing, which is the correct fail-fast shape
-    # for a required secret.
-    PRYZM_API_TOKEN: str
-
     # First-boot bootstrap admin. If the users table is empty at startup,
     # core.bootstrap.ensure_bootstrap_admin creates an admin from these env
     # vars. PASSWORD has no default: when unset and users is empty, startup
@@ -43,20 +38,6 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
-
-    # Regex for private-network origins (RFC1918 + loopback). Pair with
-    # main.py's allow_origin_regex so mobile/LAN access works without the
-    # user having to enumerate each device's IP. The boundary stays inside
-    # the local network — public origins still need to be added explicitly.
-    CORS_PRIVATE_NETWORK_REGEX: str = (
-        r"^https?://("
-        r"127\.0\.0\.1|"
-        r"localhost|"
-        r"10\.\d{1,3}\.\d{1,3}\.\d{1,3}|"
-        r"192\.168\.\d{1,3}\.\d{1,3}|"
-        r"172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
-        r")(:\d+)?$"
-    )
 
     model_config = SettingsConfigDict(env_file="../.env", extra="ignore")
 

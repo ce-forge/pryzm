@@ -6,7 +6,7 @@ from db import database, models
 from main import app
 
 
-def test_folder_create_assigns_user_id(db_session, monkeypatch):
+def test_folder_create_assigns_user_id(db_session):
     # Create a regular user (not admin)
     u = models.User(
         username="alice", password_hash=cookie_auth.hash_password("alice-pw-12chars"),
@@ -29,13 +29,10 @@ def test_folder_create_assigns_user_id(db_session, monkeypatch):
     # Create a session cookie for the user
     sid = cookie_auth.create_session(db_session, u.id)
 
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
-        # Set both cookie (for current_user) and bearer token (for router-level require_token)
         c.cookies.set(cookie_auth.COOKIE_NAME, sid)
-        c.headers.update({"Authorization": "Bearer test-token"})
         r = c.post("/folders", json={"name": "Notes", "workspace": "ws-folder"})
         assert r.status_code == 200, r.text
         body = r.json()

@@ -7,26 +7,14 @@ tests/test_admin_models.py.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import httpx
-import pytest
 
 BACKEND_URL = "http://127.0.0.1:8000"
 
 
-@pytest.fixture
-def api_token() -> str:
-    env_path = Path(__file__).parent.parent.parent.parent / ".env"
-    for line in env_path.read_text().splitlines():
-        if line.startswith("PRYZM_API_TOKEN="):
-            return line.split("=", 1)[1].strip()
-    pytest.fail("PRYZM_API_TOKEN missing from .env", pytrace=False)
-
-
-def test_list_models_against_live_backend(api_token: str):
-    headers = {"Authorization": f"Bearer {api_token}"}
-    res = httpx.get(f"{BACKEND_URL}/api/admin/models", headers=headers, timeout=5.0)
+def test_list_models_against_live_backend(session_cookie: str):
+    cookies = {"pryzm_session": session_cookie}
+    res = httpx.get(f"{BACKEND_URL}/api/admin/models", cookies=cookies, timeout=5.0)
     assert res.status_code == 200, res.text
     rows = res.json()
     by_id = {r["id"]: r for r in rows}

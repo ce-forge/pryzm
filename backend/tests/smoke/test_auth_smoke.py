@@ -8,16 +8,12 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
-from config import settings
+from core import cookie_auth
 from core.cookie_auth import hash_password
 from db import database, models
 from main import app
 
 
-# Phase B: bearer tokens resolve to the bootstrap admin (oldest active admin
-# user) via current_user's dual-mode lookup. With no admin in the DB, every
-# bearer request fails with 401 before the route's own deps run. Seed once
-# per fixture so the bearer is usable.
 SMOKE_ADMIN_ID = "u-smoke-admin"
 
 
@@ -38,16 +34,12 @@ def _seed_smoke_admin(seed_db) -> models.User:
 
 @pytest.fixture
 def client(db_at_head, monkeypatch):
-    """TestClient with a known token, a migrated test DB, and DB dependency
-    overridden to use the test engine so seeds inserted via db_session are
-    visible to routes.
+    """TestClient with an authenticated cookie, a migrated test DB, and DB
+    dependency overridden to use the test engine so seeds inserted via
+    db_session are visible to routes.
     """
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "smoke-test-token")
-
-    # Prevent the lifespan startup from running alembic against production DB.
     monkeypatch.setattr(database, "init_db", lambda: None)
 
-    # Route the get_db dependency through the test engine.
     test_engine = db_at_head
     TestSessionLocal = sessionmaker(
         bind=test_engine, autocommit=False, autoflush=False,
@@ -63,9 +55,12 @@ def client(db_at_head, monkeypatch):
     app.dependency_overrides[database.get_db] = _test_get_db
 
     with TestSessionLocal() as seed_db:
-        _seed_smoke_admin(seed_db)
+        admin = _seed_smoke_admin(seed_db)
+        sid = cookie_auth.create_session(seed_db, admin.id)
 
-    yield TestClient(app)
+    c = TestClient(app)
+    c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+    yield c
 
     app.dependency_overrides.clear()
 
@@ -81,7 +76,6 @@ def client_and_session(db_at_head, monkeypatch):
     client fixture above can't do this because it doesn't expose a test-side
     session. This fixture yields both so they share the bind.
     """
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "smoke-test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
 
     test_engine = db_at_head
@@ -99,38 +93,39 @@ def client_and_session(db_at_head, monkeypatch):
     app.dependency_overrides[database.get_db] = _test_get_db
 
     session = TestSessionLocal()
-    _seed_smoke_admin(session)
+    admin = _seed_smoke_admin(session)
+    sid = cookie_auth.create_session(session, admin.id)
+    c = TestClient(app)
+    c.cookies.set(cookie_auth.COOKIE_NAME, sid)
     try:
-        yield TestClient(app), session
+        yield c, session
     finally:
         session.close()
         app.dependency_overrides.clear()
 
 
-def _auth_headers(token: str = "smoke-test-token") -> dict:
-    return {"Authorization": f"Bearer {token}"}
-
-
 def test_health_exempt_from_auth(client):
-    """/health is the only route that doesn't require a token."""
+    """/health is the only route that doesn't require auth."""
     resp = client.get("/health")
     assert resp.status_code == 200
 
 
-def test_route_without_token_401(client):
-    resp = client.get("/workspaces")  # no Authorization header
+def test_route_without_cookie_401(client):
+    client.cookies.clear()
+    resp = client.get("/workspaces")
     assert resp.status_code == 401
 
 
-def test_route_with_wrong_token_401(client):
-    resp = client.get("/workspaces", headers=_auth_headers("wrong"))
+def test_route_with_bad_cookie_401(client):
+    client.cookies.set(cookie_auth.COOKIE_NAME, "not-a-real-session-id")
+    resp = client.get("/workspaces")
     assert resp.status_code == 401
 
 
-def test_route_with_correct_token_passes_auth(client):
-    """With the right token, the auth gate passes; downstream may still return
-    other codes for unrelated reasons, but it must not 401."""
-    resp = client.get("/workspaces", headers=_auth_headers())
+def test_route_with_valid_cookie_passes_auth(client):
+    """With a valid session cookie, the auth gate passes; downstream may
+    still return other codes for unrelated reasons, but it must not 401."""
+    resp = client.get("/workspaces")
     assert resp.status_code != 401
 
 
@@ -145,18 +140,13 @@ def test_reset_rejects_non_builtin_400(client_and_session):
     )
     session.add(ws)
     session.commit()
-    resp = client.post(
-        "/workspaces/non-builtin/reset", headers=_auth_headers(),
-    )
+    resp = client.post("/workspaces/non-builtin/reset")
     assert resp.status_code == 400
 
 
 def test_message_edit_cross_workspace_404(client_and_session):
     """Editing a message via a workspace that doesn't own it returns 404."""
     client, session = client_and_session
-    # Both workspaces must be owned by the bearer's bootstrap admin so
-    # workspace_query_dep resolves; the 404 must come from the cross-
-    # workspace check, not from the per-user workspace filter.
     ws_a = models.Workspace(
         id="ws-a", slug="ws-a", display_name="A",
         system_prompt="", enabled_tools=[],
@@ -180,7 +170,6 @@ def test_message_edit_cross_workspace_404(client_and_session):
     resp = client.patch(
         "/messages/msg-a?workspace=ws-b",
         json={"content": "tampered"},
-        headers=_auth_headers(),
     )
     assert resp.status_code == 404
 
@@ -199,7 +188,6 @@ def test_message_edit_missing_returns_404(client_and_session):
     resp = client.patch(
         "/messages/nonexistent-id?workspace=ws-x",
         json={"content": "x"},
-        headers=_auth_headers(),
     )
     assert resp.status_code == 404
 
@@ -209,6 +197,5 @@ def test_message_edit_missing_workspace_param_422(client):
     resp = client.patch(
         "/messages/anything",
         json={"content": "x"},
-        headers=_auth_headers(),
     )
     assert resp.status_code == 422

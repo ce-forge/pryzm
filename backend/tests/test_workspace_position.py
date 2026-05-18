@@ -22,15 +22,13 @@ def _seed_three(db_session):
     return admin
 
 
-def test_list_workspaces_orders_by_position(db_session, monkeypatch):
+def test_list_workspaces_orders_by_position(db_session):
     admin = _seed_three(db_session)
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
         c.cookies.set(cookie_auth.COOKIE_NAME, sid)
-        c.headers.update({"Authorization": "Bearer test-token"})
         r = c.get("/workspaces")
         assert r.status_code == 200
         slugs = [w["slug"] for w in r.json()]
@@ -39,15 +37,13 @@ def test_list_workspaces_orders_by_position(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_patch_position_moves_workspace_up(db_session, monkeypatch):
+def test_patch_position_moves_workspace_up(db_session):
     admin = _seed_three(db_session)
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
         c.cookies.set(cookie_auth.COOKIE_NAME, sid)
-        c.headers.update({"Authorization": "Bearer test-token"})
         # Move 'c' (position=2) to position=0
         r = c.patch("/workspaces/c/position", json={"position": 0})
         assert r.status_code == 200, r.text
@@ -58,15 +54,13 @@ def test_patch_position_moves_workspace_up(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_patch_position_moves_workspace_down(db_session, monkeypatch):
+def test_patch_position_moves_workspace_down(db_session):
     admin = _seed_three(db_session)
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
         c.cookies.set(cookie_auth.COOKIE_NAME, sid)
-        c.headers.update({"Authorization": "Bearer test-token"})
         # Move 'a' (position=0) to position=2
         r = c.patch("/workspaces/a/position", json={"position": 2})
         assert r.status_code == 200, r.text

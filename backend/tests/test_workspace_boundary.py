@@ -111,12 +111,10 @@ def test_builtin_record_has_required_fields():
 def test_session_patch_rejects_cross_workspace_folder_id(db_session, monkeypatch):
     """PATCH /sessions/{id} must reject a folder_id from a different workspace."""
     from fastapi.testclient import TestClient
-    from config import settings
+    from core import cookie_auth
     from db import database
     from main import app
 
-    # Bearer auth resolves to the oldest admin user; make this user admin so
-    # workspace_query_dep's per-user filter matches the seeded workspace owner.
     user = models.User(
         id="user-patch", username="patch", password_hash="hash", is_admin=True
     )
@@ -137,15 +135,16 @@ def test_session_patch_rejects_cross_workspace_folder_id(db_session, monkeypatch
     db_session.add_all([user, ws_a, ws_b, sess_a, folder_b])
     db_session.commit()
 
+    sid = cookie_auth.create_session(db_session, user.id)
+
     def _get_db_override():
         yield db_session
 
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
     app.dependency_overrides[database.get_db] = _get_db_override
     try:
         with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
+            c.cookies.set(cookie_auth.COOKIE_NAME, sid)
             resp = c.patch(
                 "/sessions/sess-pa?workspace=ws-pa",
                 json={"folder_id": "f-pb"},

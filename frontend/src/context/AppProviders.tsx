@@ -2,29 +2,13 @@
 
 import React from "react";
 import { AuthProvider } from "@/context/AuthContext";
-import { WorkspaceProvider } from "@/context/WorkspaceContext";
-import { SessionProvider } from "@/context/SessionContext";
-import { InferenceProvider } from "@/context/InferenceContext";
-import { UploaderProvider } from "@/context/UploaderContext";
-import { TestSuiteProvider } from "@/context/TestSuiteContext";
 
 /**
- * Composition order matters: lower providers consume higher ones via their
- * useXxxContext() hooks (e.g. InferenceProvider reads SessionContext).
- * AuthProvider is the outermost layer so any provider or consumer can read auth state.
+ * Auth lives at the outermost layer so every route can read `useAuth()`
+ * regardless of whether it's a chat page or an admin route. The data-
+ * fetching providers (workspaces, sessions, inference, uploader, test
+ * suite) live in ChatProviders and only mount once the user is known.
  */
 export function AppProviders({ children }: { children: React.ReactNode }) {
-  return (
-    <AuthProvider>
-      <WorkspaceProvider>
-        <SessionProvider>
-          <InferenceProvider>
-            <UploaderProvider>
-              <TestSuiteProvider>{children}</TestSuiteProvider>
-            </UploaderProvider>
-          </InferenceProvider>
-        </SessionProvider>
-      </WorkspaceProvider>
-    </AuthProvider>
-  );
+  return <AuthProvider>{children}</AuthProvider>;
 }

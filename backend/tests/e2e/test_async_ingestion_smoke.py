@@ -36,21 +36,14 @@ FIXTURE_IMG = Path(__file__).parent / "fixtures" / "images.jpeg"
 SETTLE_TIMEOUT_MS = 60_000
 
 
-def _open_app_with_token(page: Page, token: str) -> None:
-    page.goto(FRONTEND_URL)
-    page.evaluate(f'() => localStorage.setItem("pryzm_api_token", "{token}")')
-    page.reload()
-    page.wait_for_load_state("networkidle", timeout=SETTLE_TIMEOUT_MS)
-
-
 def test_upload_returns_202_with_processing_status(
-    page: Page, api_token: str, screenshot,
+    page: Page, login_via_ui, screenshot,
 ):
     """The POST /upload network round-trip should resolve as 202 (not
     200) with a body containing `document_id` and `status:'processing'`.
     Asserting at the network layer because the body shape is the
     contract between PR 3's backend flip and PR 3's frontend pill."""
-    _open_app_with_token(page, api_token)
+    login_via_ui()
 
     upload_response: dict = {}
 
@@ -81,13 +74,13 @@ def test_upload_returns_202_with_processing_status(
 
 
 def test_sse_subscription_opens_for_document(
-    page: Page, api_token: str, screenshot,
+    page: Page, login_via_ui, screenshot,
 ):
     """After /upload returns 202 the frontend should immediately open
     an EventSource on /uploads/<doc_id>/events. Asserting at the
     network layer so we catch a regression that the pill state
     machine alone wouldn't surface (e.g. if it polled instead)."""
-    _open_app_with_token(page, api_token)
+    login_via_ui()
 
     sse_urls: list[str] = []
 
@@ -106,13 +99,15 @@ def test_sse_subscription_opens_for_document(
     )
 
     assert sse_urls, "no GET /uploads/<id>/events was issued by the frontend"
-    # The token must ride in the URL — EventSource can't set headers.
-    assert "token=" in sse_urls[0], sse_urls
+    # EventSource sends the pryzm_session cookie automatically; auth is
+    # via cookie, not URL token. The URL still carries `?workspace=` so
+    # the backend can scope the doc to the caller's workspace.
+    assert "workspace=" in sse_urls[0], sse_urls
     screenshot("sse-opened")
 
 
 def test_pill_transitions_uploading_processing_success(
-    page: Page, api_token: str, screenshot,
+    page: Page, login_via_ui, screenshot,
 ):
     """The pill should pass through both the determinate progress ring
     (bytes uploading) and the indeterminate spin (server processing)
@@ -120,7 +115,7 @@ def test_pill_transitions_uploading_processing_success(
     window is tiny — we assert the start state and the terminal state
     rather than catching the transition mid-flight (which is flaky on
     fast hardware regardless of how the test is written)."""
-    _open_app_with_token(page, api_token)
+    login_via_ui()
     page.locator('input[type="file"]').set_input_files(str(FIXTURE_IMG))
 
     # Thumbnail appears immediately (blob URL, no network).
@@ -144,14 +139,14 @@ def test_pill_transitions_uploading_processing_success(
 
 
 def test_send_button_gated_through_processing_window(
-    page: Page, api_token: str, screenshot,
+    page: Page, login_via_ui, screenshot,
 ):
     """The send-gate must keep the submit button disabled across the full
     'pending → uploading → processing → success' arc, not just while bytes
     are flying. If the gate is too narrow the user can submit a prompt
     while the doc is mid-embed, the auto-RAG path misses the chunk, and
     they get a worse answer than if they'd waited."""
-    _open_app_with_token(page, api_token)
+    login_via_ui()
     page.locator('textarea[placeholder="Ask Pryzm anything..."]').fill(
         "describe the image"
     )

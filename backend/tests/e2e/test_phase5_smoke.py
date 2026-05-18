@@ -18,13 +18,6 @@ from playwright.sync_api import Page
 FRONTEND_URL = "http://127.0.0.1:3000"
 
 
-def _open_app_with_token(page: Page, token: str) -> None:
-    page.goto(FRONTEND_URL)
-    page.evaluate(f'() => localStorage.setItem("pryzm_api_token", "{token}")')
-    page.reload()
-    page.wait_for_load_state("networkidle", timeout=10_000)
-
-
 def _send_chat_message(page: Page, text: str) -> None:
     """Fill, press Enter, and wait for the user bubble in DOM. The
     DOM-confirmation step protects against the silent-drop case where
@@ -61,7 +54,7 @@ _ASSISTANT_HAS_CONTENT = """
 # Test 1: rapid sends produce distinct, ordered messages
 # ---------------------------------------------------------------------------
 
-def test_rapid_sends_distinct_ids_and_ordered(page: Page, api_token: str, screenshot):
+def test_rapid_sends_distinct_ids_and_ordered(page: Page, login_via_ui, screenshot):
     """Send 3 messages in succession; verify each lands as a distinct user
     bubble in send-order, with no id collisions.
 
@@ -71,7 +64,7 @@ def test_rapid_sends_distinct_ids_and_ordered(page: Page, api_token: str, screen
     strict-mode double invocations. The historical Date.now() collision risk
     only matters when two IDs are minted in the same millisecond.
     """
-    _open_app_with_token(page, api_token)
+    login_via_ui()
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
 
@@ -134,7 +127,7 @@ def test_rapid_sends_distinct_ids_and_ordered(page: Page, api_token: str, screen
 # Test 2: navigate during stream → no orphan bubble on return
 # ---------------------------------------------------------------------------
 
-def test_navigate_during_stream_no_orphan_bubble(page: Page, api_token: str, screenshot):
+def test_navigate_during_stream_no_orphan_bubble(page: Page, login_via_ui, screenshot):
     """Start a stream in personal; let it finish; navigate away to it_copilot;
     navigate back to the same session URL. The bubble must hold real content,
     not an empty (orphan) bubble.
@@ -144,7 +137,7 @@ def test_navigate_during_stream_no_orphan_bubble(page: Page, api_token: str, scr
     cache-bucket-survives-navigation property from mid-stream cancellation
     behavior, which is a separate concern.
     """
-    _open_app_with_token(page, api_token)
+    login_via_ui()
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
 
@@ -209,11 +202,11 @@ def test_navigate_during_stream_no_orphan_bubble(page: Page, api_token: str, scr
 # Test 3: workspace edit rolls back on backend 500
 # ---------------------------------------------------------------------------
 
-def test_workspace_edit_rollback_on_500(page: Page, api_token: str, screenshot):
+def test_workspace_edit_rollback_on_500(page: Page, login_via_ui, screenshot):
     """Edit a workspace's display_name with PATCH /workspaces/<slug> forced to
     500 via Playwright's network interception. The optimistic UI value must
     revert to the previous value."""
-    _open_app_with_token(page, api_token)
+    login_via_ui()
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
 
@@ -255,12 +248,12 @@ def test_workspace_edit_rollback_on_500(page: Page, api_token: str, screenshot):
 # Test 4: ChatBubble re-renders bounded during a sibling stream
 # ---------------------------------------------------------------------------
 
-def test_chatbubble_render_bounded_during_stream(page: Page, api_token: str, screenshot):
+def test_chatbubble_render_bounded_during_stream(page: Page, login_via_ui, screenshot):
     """Seed a session with one Q/A pair, then send a new message. Use a
     MutationObserver on the seed assistant <p> to count how many times its
     text changes during the new stream — a memoized bubble's content node
     should not mutate per chunk."""
-    _open_app_with_token(page, api_token)
+    login_via_ui()
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
 

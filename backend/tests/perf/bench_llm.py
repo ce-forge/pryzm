@@ -12,7 +12,7 @@ Usage:
     ./venv/bin/python tests/perf/bench_llm.py \\
         --backend http://127.0.0.1:8000 \\
         --workspace personal \\
-        --token "$(grep PRYZM_API_TOKEN ../.env | cut -d= -f2)" \\
+        --username admin --password admin \\
         --repeats 3 \\
         --label ollama-baseline-2026-05-14
 """
@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import json
 import statistics
+import sys
 import time
 from pathlib import Path
 
@@ -39,13 +40,28 @@ def _percentile(xs: list[float], p: float) -> float:
     return s[lo] + (s[hi] - s[lo]) * (k - lo)
 
 
+def _login(backend: str, username: str, password: str) -> str:
+    """POST /api/auth/login and return the pryzm_session cookie value."""
+    resp = httpx.post(
+        f"{backend}/api/auth/login",
+        json={"username": username, "password": password},
+        timeout=5.0,
+    )
+    resp.raise_for_status()
+    sid = resp.cookies.get("pryzm_session")
+    if not sid:
+        raise RuntimeError("login succeeded but no pryzm_session cookie returned")
+    return sid
+
+
 def _send_one(
-    client: httpx.Client, backend: str, token: str, workspace: str, prompt: str
+    client: httpx.Client, backend: str, workspace: str, prompt: str
 ) -> dict | None:
     """Sends one prompt to /analyze, returns the usage dict from the final chunk
-    (or None on parse / network failure)."""
+    (or None on parse / network failure). The session cookie is attached by the
+    client's cookie jar."""
     url = f"{backend}/analyze?workspace={workspace}"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = {"Content-Type": "application/json"}
     body = {"prompt": prompt, "session_id": None, "attachments": []}
 
     last_usage = None
@@ -114,7 +130,8 @@ def main() -> int:
             "those classes into plain text generation (misleadingly fast)."
         ),
     )
-    parser.add_argument("--token", required=True, help="PRYZM_API_TOKEN value")
+    parser.add_argument("--username", default="admin", help="Login username")
+    parser.add_argument("--password", default="admin", help="Login password")
     parser.add_argument("--repeats", type=int, default=3, help="N repeats per prompt")
     parser.add_argument("--label", required=True, help="Label for the results file (e.g. 'ollama-baseline')")
     args = parser.parse_args()
@@ -122,13 +139,19 @@ def main() -> int:
     by_class: dict[str, list[dict]] = {cls: [] for cls in PROMPTS}
 
     print(f"[bench_llm] backend={args.backend} workspace={args.workspace} repeats={args.repeats}")
-    with httpx.Client(http2=False) as client:
+    try:
+        sid = _login(args.backend, args.username, args.password)
+    except Exception as e:
+        print(f"[bench_llm] login failed: {e}", file=sys.stderr)
+        return 1
+
+    with httpx.Client(http2=False, cookies={"pryzm_session": sid}) as client:
         for cls, prompts in PROMPTS.items():
             for prompt in prompts:
                 for i in range(args.repeats):
                     t0 = time.perf_counter()
                     try:
-                        usage = _send_one(client, args.backend, args.token, args.workspace, prompt)
+                        usage = _send_one(client, args.backend, args.workspace, prompt)
                     except Exception as e:
                         print(f"  [{cls}] prompt {prompt[:30]!r} run {i+1}: ERROR {e}")
                         continue
