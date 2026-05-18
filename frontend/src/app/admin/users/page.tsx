@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 
 interface AdminUser {
@@ -328,7 +329,14 @@ export default function AdminUsersPage() {
               )}
               {users.map((u) => (
                 <tr key={u.id} className="border-t border-[#2a2a2c]">
-                  <td className="px-3 py-2">{u.username}</td>
+                  <td className="px-3 py-2">
+                    <Link
+                      href={`/admin/users/${encodeURIComponent(u.id)}`}
+                      className="text-sky-400 hover:underline"
+                    >
+                      {u.username}
+                    </Link>
+                  </td>
                   <td className="px-3 py-2">{u.is_admin ? "yes" : "no"}</td>
                   <td className="px-3 py-2">{u.is_active ? "yes" : "no"}</td>
                   <td className="px-3 py-2">

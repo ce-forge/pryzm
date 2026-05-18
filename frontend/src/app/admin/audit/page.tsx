@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/utils/apiClient";
 import { AuditEventDetailModal } from "@/components/admin/AuditEventDetailModal";
 import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
@@ -34,6 +35,18 @@ const TIME_PRESETS = [
 const PAGE_SIZE = 50;
 
 export default function AdminAuditPage() {
+  // Deep-link support: ?user_id=, ?event_type=, ?time_hours= initialize the
+  // matching filters so other admin views (per-user detail, eventually
+  // workspace detail) can hand off into a pre-filtered audit view.
+  const searchParams = useSearchParams();
+  const initialUserId = searchParams.get("user_id") ?? "";
+  const initialEventType = searchParams.get("event_type") ?? "";
+  const initialTimeHoursRaw = searchParams.get("time_hours");
+  const initialTimePresetHours =
+    initialTimeHoursRaw && !isNaN(Number(initialTimeHoursRaw))
+      ? Number(initialTimeHoursRaw)
+      : null;
+
   const [events, setEvents] = useState<AuditEvent[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,9 +54,9 @@ export default function AdminAuditPage() {
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
 
   // Filters
-  const [eventTypeFilter, setEventTypeFilter] = useState<string>("");
-  const [userFilter, setUserFilter] = useState<string>("");
-  const [timePresetHours, setTimePresetHours] = useState<number | null>(null);
+  const [eventTypeFilter, setEventTypeFilter] = useState<string>(initialEventType);
+  const [userFilter, setUserFilter] = useState<string>(initialUserId);
+  const [timePresetHours, setTimePresetHours] = useState<number | null>(initialTimePresetHours);
 
   // Dropdown sources
   const [eventTypes, setEventTypes] = useState<string[]>([]);
