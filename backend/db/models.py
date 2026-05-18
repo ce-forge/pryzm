@@ -1,5 +1,5 @@
 import sqlalchemy as sa
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum, Computed
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum, Computed, Integer, JSON
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
@@ -19,12 +19,22 @@ def generate_uuid():
     return str(uuid_utils.uuid7())
 
 
+class WorkspaceTemplate(Base):
+    __tablename__ = "workspace_templates"
+
+    id = Column(String, primary_key=True, default=generate_uuid, index=True)
+    slug = Column(String, nullable=False, unique=True, index=True)
+    display_name = Column(String, nullable=False)
+    system_prompt = Column(Text, nullable=False, default="")
+    enabled_tools = Column(JSON, nullable=False, default=list)
+    color = Column(String, nullable=True)
+    engine_config = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class Workspace(Base):
     __tablename__ = "workspaces"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
-    # Uniqueness is enforced by two partial indexes (see migration
-    # a65df9990a35): UNIQUE(slug) WHERE is_template, and
-    # UNIQUE(user_id, slug) WHERE NOT is_template AND user_id IS NOT NULL.
     slug = Column(String, nullable=False, index=True)
     display_name = Column(String, nullable=False)
     system_prompt = Column(Text, nullable=False, default="")
@@ -34,13 +44,12 @@ class Workspace(Base):
         nullable=False,
         server_default='{"backend": "llama_cpp"}',
     )
-    is_builtin = Column(Boolean, nullable=False, default=False, server_default="false")
     color = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.clock_timestamp())
     user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
-    is_template = Column(Boolean, nullable=False, default=False)
-    template_id = Column(String, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True)
+    template_id = Column(String, ForeignKey("workspace_templates.id", ondelete="SET NULL"), nullable=True, index=True)
     owner_can_edit = Column(Boolean, nullable=False, default=False)
+    position = Column(Integer, nullable=False, default=0, index=True)
 
     sessions = relationship("Session", back_populates="workspace", cascade="all, delete-orphan")
     folders = relationship("Folder", back_populates="workspace", cascade="all, delete-orphan")
