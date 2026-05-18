@@ -26,11 +26,11 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         />
       )}
       
-      {/* Outer animates transform + width. Inner stays at sidebar width so
-          contents don't reflow during the desktop width collapse.
-          Mobile: width stays at sidebar, slides via translate-x.
-          Desktop: width also drops to 0 so chat area reclaims the space. */}
-      <div className={`fixed md:relative h-full shrink-0 transition-all duration-300 z-50 overflow-hidden ${isOpen ? 'w-sidebar translate-x-0' : 'w-sidebar -translate-x-full md:w-0'}`}>
+      {/* Mobile: translate slides off (fixed pos = no layout impact).
+          Desktop: negative margin pulls the layout left so chat reclaims
+          the space. Both animate via a single property each — smooth in
+          both directions. */}
+      <div className={`fixed md:relative h-full shrink-0 transition-all duration-300 z-50 w-sidebar ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 md:-ml-sidebar'}`}>
         <div className="w-sidebar h-full bg-[#1e1f20] flex flex-col border-r border-[#333537] shadow-2xl md:shadow-none">
 
           {/* TOP: Header Controls */}
