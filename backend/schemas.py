@@ -118,6 +118,11 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
 class StarterTemplate(BaseModel):
     template_id: str
     owner_can_edit: bool = False
