@@ -15,16 +15,17 @@ from core import cookie_auth
 from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models
 from schemas import FolderCreate, FolderUpdate
-from services.workspaces import get_or_default
 
 
 router = APIRouter(tags=["Folders"])
 
 
 @router.get("/folders")
-def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.get_db)):
-    ws = get_or_default(db, workspace)
-    return db.query(models.Folder).filter(models.Folder.workspace_id == ws.id).all()
+def get_folders(
+    workspace: models.Workspace = Depends(workspace_query_dep),
+    db: Session = Depends(database.get_db),
+):
+    return db.query(models.Folder).filter(models.Folder.workspace_id == workspace.id).all()
 
 
 @router.post("/folders")
@@ -33,7 +34,17 @@ def create_folder(
     db: Session = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
 ):
-    ws = get_or_default(db, folder.workspace)
+    ws = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.slug == folder.workspace,
+            models.Workspace.user_id == user.id,
+            models.Workspace.is_template.is_(False),
+        )
+        .first()
+    )
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
     new_folder = models.Folder(name=folder.name, workspace_id=ws.id, user_id=user.id)
     db.add(new_folder)
     db.commit()

@@ -24,12 +24,12 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from config import settings
+from core import cookie_auth
 from core.auth import require_token
 from core.deps import get_http_client
 from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models
 from services import ingest_broker, ingest_pipeline
-from services.workspaces import get_or_default
 
 
 router = APIRouter(tags=["Documents"])
@@ -52,6 +52,7 @@ async def upload_document(
     is_global: bool = Form(False),
     db: Session = Depends(database.get_db),
     http_client: httpx.AsyncClient = Depends(get_http_client),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     """Accept an upload, persist a `Document(status='processing')` row,
     and spawn the ingestion pipeline as a background task.
@@ -61,7 +62,17 @@ async def upload_document(
     `/uploads/{document_id}/events` to learn when the doc flips to
     `ready` or `error`.
     """
-    ws = get_or_default(db, workspace)
+    ws = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.slug == workspace,
+            models.Workspace.user_id == user.id,
+            models.Workspace.is_template.is_(False),
+        )
+        .first()
+    )
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
     # Stream the upload in 8KB chunks and bail as soon as we cross the
     # configured ceiling. Reading the whole body unbounded (await file.read())
     # would let a single request balloon the worker's memory.

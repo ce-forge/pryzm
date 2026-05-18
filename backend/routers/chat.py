@@ -18,7 +18,6 @@ from db import database, models
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      MessageHistory, BranchRequest, MessageUpdate)
 from services import condense, ingest_broker
-from services.workspaces import get_or_default
 from tools.registry import build_tool_set
 
 _log = logging.getLogger(__name__)
@@ -206,7 +205,7 @@ def _message_in_workspace_or_404(
 
 @router.get("/sessions", response_model=List[SessionResponse])
 def get_sessions(
-    workspace: str = "it_copilot",
+    workspace: models.Workspace = Depends(workspace_query_dep),
     folder_id: Optional[str] = None,
     limit: Optional[int] = None,
     offset: int = 0,
@@ -222,8 +221,7 @@ def get_sessions(
     limit/offset (optional) — pagination. With no params the response is
     unbounded to preserve the existing frontend's 'load all' behaviour.
     """
-    ws = get_or_default(db, workspace)
-    q = db.query(models.Session).filter(models.Session.workspace_id == ws.id)
+    q = db.query(models.Session).filter(models.Session.workspace_id == workspace.id)
     if folder_id is not None:
         q = q.filter(models.Session.folder_id == folder_id)
     q = q.order_by(models.Session.created_at.desc())
