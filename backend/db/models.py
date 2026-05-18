@@ -26,9 +26,9 @@ class WorkspaceTemplate(Base):
     slug = Column(String, nullable=False, unique=True, index=True)
     display_name = Column(String, nullable=False)
     system_prompt = Column(Text, nullable=False, default="")
-    enabled_tools = Column(JSON, nullable=False, default=list)
+    enabled_tools = Column(JSON, nullable=False, default=list, server_default="[]")
     color = Column(String, nullable=True)
-    engine_config = Column(JSON, nullable=False, default=dict)
+    engine_config = Column(JSON, nullable=False, default=dict, server_default="{}")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
