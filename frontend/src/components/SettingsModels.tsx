@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, getToken } from "@/utils/apiClient";
+import { apiFetch } from "@/utils/apiClient";
 
 type Model = {
   id: string;
@@ -96,9 +96,7 @@ export default function ModelsSection() {
     sseRef.current = ac;
 
     try {
-      const token = getToken();
-      const res = await fetch(`/api/admin/models/${encodeURIComponent(id)}/status`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const res = await apiFetch(`/api/admin/models/${encodeURIComponent(id)}/status`, {
         signal: ac.signal,
       });
       if (!res.ok || !res.body) throw new Error(`status stream HTTP ${res.status}`);
