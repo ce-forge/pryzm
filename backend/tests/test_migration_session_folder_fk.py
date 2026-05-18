@@ -5,12 +5,23 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
 
 
-def _seed_workspace(engine, slug: str) -> str:
+def _seed_workspace_pre_split(engine, slug: str) -> str:
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
                                     enabled_tools, is_builtin)
             VALUES (:id, :slug, 'x', '', '[]'::jsonb, false)
+        """), {"id": slug, "slug": slug})
+    return slug
+
+
+def _seed_workspace(engine, slug: str) -> str:
+    """Head-schema seed (no is_builtin column)."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO workspaces (id, slug, display_name, system_prompt,
+                                    enabled_tools)
+            VALUES (:id, :slug, 'x', '', '[]'::jsonb)
         """), {"id": slug, "slug": slug})
     return slug
 
@@ -63,8 +74,8 @@ def _seed_user(engine, user_id: str) -> str:
 def test_cross_workspace_folder_id_scrubbed_to_null(db_at_revision, alembic_cfg):
     # Start at the revision right before ours.
     engine = db_at_revision("f8d3b1c5a2e9")
-    ws_a = _seed_workspace(engine, "ws-a")
-    ws_b = _seed_workspace(engine, "ws-b")
+    ws_a = _seed_workspace_pre_split(engine, "ws-a")
+    ws_b = _seed_workspace_pre_split(engine, "ws-b")
     _seed_folder(engine, "f-b", ws_b)
     # Cross-workspace dangling ref: session in ws-a points at folder in ws-b.
     _seed_session(engine, "s-dangling", ws_a, "f-b")
@@ -84,7 +95,7 @@ def test_cross_workspace_folder_id_scrubbed_to_null(db_at_revision, alembic_cfg)
 
 def test_same_workspace_folder_id_preserved(db_at_revision, alembic_cfg):
     engine = db_at_revision("f8d3b1c5a2e9")
-    ws = _seed_workspace(engine, "ws-keep")
+    ws = _seed_workspace_pre_split(engine, "ws-keep")
     _seed_folder(engine, "f-keep", ws)
     _seed_session(engine, "s-keep", ws, "f-keep")
     engine.dispose()

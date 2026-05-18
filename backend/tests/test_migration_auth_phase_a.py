@@ -15,7 +15,7 @@ def test_auth_phase_a_schema_upgrades_and_downgrades(db_at_revision, alembic_cfg
     engine.dispose()
 
     # Upgrade through our migration
-    command.upgrade(alembic_cfg, "head")
+    command.upgrade(alembic_cfg, "712c74813064")
     engine = create_engine(_test_database_url(), poolclass=NullPool)
     inspector = inspect(engine)
 

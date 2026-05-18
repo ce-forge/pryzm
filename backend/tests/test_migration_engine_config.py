@@ -45,8 +45,8 @@ def test_engine_config_server_default_on_insert(db_at_head):
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
-                                    enabled_tools, is_builtin)
-            VALUES ('test1', 'test-slug', 'test', '', '[]'::jsonb, false)
+                                    enabled_tools)
+            VALUES ('test1', 'test-slug', 'test', '', '[]'::jsonb)
         """))
         cfg = conn.execute(text(
             "SELECT engine_config FROM workspaces WHERE id = 'test1'"
@@ -60,8 +60,8 @@ def test_engine_config_rejects_null(db_at_head):
         with engine.begin() as conn:
             conn.execute(text("""
                 INSERT INTO workspaces (id, slug, display_name, system_prompt,
-                                        enabled_tools, is_builtin, engine_config)
-                VALUES ('test2', 'test-null', 'x', '', '[]'::jsonb, false, NULL)
+                                        enabled_tools, engine_config)
+                VALUES ('test2', 'test-null', 'x', '', '[]'::jsonb, NULL)
             """))
 
 

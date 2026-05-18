@@ -15,13 +15,13 @@ def _seed_two_workspaces_with_one_message(db: Session):
     )
     ws_a = models.Workspace(
         id="ws-a", slug="ws-a", display_name="A",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
         user_id="user-test",
     )
     ws_b = models.Workspace(
         id="ws-b", slug="ws-b", display_name="B",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
         user_id="user-test",
     )
@@ -87,29 +87,6 @@ def test_message_missing_404(db_session):
     assert exc.value.status_code == 404
 
 
-def test_reset_rejects_non_builtin(db_session):
-    """Reset endpoint must reject non-builtin workspaces with 400."""
-    from routers.workspaces import _validate_resettable
-    ws_a, _ws_b, _msg = _seed_two_workspaces_with_one_message(db_session)
-    # ws_a is is_builtin=False per the seed → reject.
-    with pytest.raises(HTTPException) as exc:
-        _validate_resettable(ws_a)
-    assert exc.value.status_code == 400
-
-
-def test_reset_accepts_builtin(db_session):
-    """Reset of a builtin workspace passes the validator."""
-    from routers.workspaces import _validate_resettable
-    ws_builtin = models.Workspace(
-        id="ws-builtin", slug="builtin", display_name="X",
-        system_prompt="", enabled_tools=[], is_builtin=True,
-        engine_config={"backend": "ollama", "model": "gemma4:e4b"},
-    )
-    db_session.add(ws_builtin)
-    db_session.commit()
-    _validate_resettable(ws_builtin)  # must not raise
-
-
 def test_builtin_workspaces_registry_has_expected_slugs():
     """The two original builtins must be present in the registry."""
     from services.builtins import BUILTIN_WORKSPACES
@@ -145,13 +122,13 @@ def test_session_patch_rejects_cross_workspace_folder_id(db_session, monkeypatch
     )
     ws_a = models.Workspace(
         id="ws-pa", slug="ws-pa", display_name="A",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "llama_cpp"},
         user_id="user-patch",
     )
     ws_b = models.Workspace(
         id="ws-pb", slug="ws-pb", display_name="B",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "llama_cpp"},
         user_id="user-patch",
     )

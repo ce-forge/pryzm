@@ -29,7 +29,7 @@ def test_list_users_workspaces(db_session, monkeypatch):
         for slug in ("ws-1", "ws-2"):
             db_session.add(models.Workspace(
                 slug=slug, display_name=slug, system_prompt="",
-                enabled_tools=[], is_builtin=False, is_template=False,
+                enabled_tools=[],
                 user_id=bob.id, engine_config={"backend": "llama_cpp"},
             ))
         db_session.commit()
@@ -48,7 +48,7 @@ def test_admin_edit_any_workspace_bypasses_owner_can_edit(db_session, monkeypatc
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         ws = models.Workspace(
             slug="ws-x", display_name="X", system_prompt="OLD",
-            enabled_tools=[], is_builtin=False, is_template=False,
+            enabled_tools=[],
             user_id=bob.id, owner_can_edit=False,
             engine_config={"backend": "llama_cpp"},
         )
@@ -70,7 +70,7 @@ def test_admin_delete_user_workspace(db_session, monkeypatch):
         db_session.add(bob); db_session.commit(); db_session.refresh(bob)
         ws = models.Workspace(
             slug="ws-del", display_name="D", system_prompt="",
-            enabled_tools=[], is_builtin=False, is_template=False,
+            enabled_tools=[],
             user_id=bob.id, engine_config={"backend": "llama_cpp"},
         )
         db_session.add(ws); db_session.commit(); db_session.refresh(ws)

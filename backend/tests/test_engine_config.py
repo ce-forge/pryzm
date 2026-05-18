@@ -30,7 +30,6 @@ def test_engine_config_for_workspace_row(db_session):
         display_name="x",
         system_prompt="",
         enabled_tools=[],
-        is_builtin=False,
         engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws)

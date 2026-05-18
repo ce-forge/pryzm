@@ -41,7 +41,7 @@ async def test_tool_execution_yields_typed_events():
     mock_workspace = models.Workspace(
         id="ws-test", slug="it_copilot", display_name="IT Copilot",
         system_prompt="You are a test.", enabled_tools=["_probe_typed_event_tool"],
-        is_builtin=True, engine_config={"backend": "llama_cpp"},
+        engine_config={"backend": "llama_cpp"},
     )
 
     mock_router = MagicMock()
@@ -123,7 +123,7 @@ async def test_live_loop_tool_message_has_tool_call_id():
     mock_workspace = models.Workspace(
         id="ws-test", slug="it_copilot", display_name="IT Copilot",
         system_prompt="You are a test.", enabled_tools=["get_local_time"],
-        is_builtin=True, engine_config={"backend": "llama_cpp"},
+        engine_config={"backend": "llama_cpp"},
     )
 
     mock_router = MagicMock()

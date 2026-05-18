@@ -86,8 +86,8 @@ def test_status_check_constraint_rejects_invalid_value(reset_test_db, alembic_cf
     engine = create_engine(reset_test_db, poolclass=NullPool)
     with engine.begin() as conn:
         conn.execute(text(
-            "INSERT INTO workspaces (id, slug, display_name, system_prompt, enabled_tools, engine_config, is_builtin) "
-            "VALUES ('ws-c', 'ws-c', 'C', '', '[]'::jsonb, '{}'::jsonb, false)"
+            "INSERT INTO workspaces (id, slug, display_name, system_prompt, enabled_tools, engine_config) "
+            "VALUES ('ws-c', 'ws-c', 'C', '', '[]'::jsonb, '{}'::jsonb)"
         ))
     import sqlalchemy.exc
     with engine.begin() as conn:

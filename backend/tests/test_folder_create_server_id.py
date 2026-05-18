@@ -17,8 +17,8 @@ def test_folder_create_does_not_require_client_id(db_session, monkeypatch):
 
     ws = models.Workspace(
         id="ws-fid", slug="ws-fid", display_name="FID",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        is_template=False, user_id=admin.id,
+        system_prompt="", enabled_tools=[],
+        user_id=admin.id,
         engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws)
@@ -53,8 +53,8 @@ def test_folder_create_ignores_client_supplied_id(db_session, monkeypatch):
 
     ws = models.Workspace(
         id="ws-fid2", slug="ws-fid2", display_name="FID2",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        is_template=False, user_id=admin.id,
+        system_prompt="", enabled_tools=[],
+        user_id=admin.id,
         engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws)
