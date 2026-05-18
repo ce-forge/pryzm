@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     MEMORY_CONDENSE_THRESHOLD: int = 15  # When to trigger the background condenser
     MEMORY_CONDENSE_RETAIN: int = 5  # How many recent messages to exclude from the summary
 
+    AUDIT_RETENTION_DAYS: int = 90
+
     # Upload bytes ceiling. /upload streams the request body and bails with
     # HTTP 413 once cumulative bytes exceed this. Bumped here, not in the
     # endpoint — keep tunables in one place. Sized for image uploads (JPG/PNG/WebP)
