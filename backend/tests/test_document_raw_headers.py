@@ -9,7 +9,7 @@ import tempfile
 
 from fastapi.testclient import TestClient
 
-from config import settings
+from core import cookie_auth
 from core.cookie_auth import hash_password
 from db import database, models
 from main import app
@@ -20,8 +20,6 @@ def test_document_raw_has_private_cache_and_etag(db_session, monkeypatch):
     os.write(fd, b"\x89PNG\r\n\x1a\n")
     os.close(fd)
 
-    # Phase B: bearer token resolves to the bootstrap admin via the dual-mode
-    # current_user dep, and workspace_query_dep scopes by (slug, user.id).
     admin = models.User(
         username="admin", password_hash=hash_password("test-pw-12chars"),
         is_admin=True, is_active=True, can_create_workspaces=True,
@@ -51,15 +49,16 @@ def test_document_raw_has_private_cache_and_etag(db_session, monkeypatch):
     db_session.add_all([ws, doc])
     db_session.commit()
 
+    sid = cookie_auth.create_session(db_session, admin.id)
+
     def _get_db_override():
         yield db_session
 
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
     app.dependency_overrides[database.get_db] = _get_db_override
     try:
         with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
+            c.cookies.set(cookie_auth.COOKIE_NAME, sid)
             resp = c.get("/documents/doc-h/raw?workspace=ws-h")
     finally:
         app.dependency_overrides.clear()
