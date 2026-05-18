@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from config import settings
 from core import cookie_auth
+from core.audit import EventType, log_event
 from core.deps import get_http_client
 from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models
@@ -106,6 +107,25 @@ async def upload_document(
     db.commit()
     db.refresh(doc)
     document_id = doc.id
+
+    log_event(
+        db,
+        EventType.DOCUMENT_UPLOADED,
+        user=user,
+        workspace=ws,
+        resource_type="document",
+        resource_id=doc.id,
+        payload={
+            "document_id": doc.id,
+            "filename": file.filename,
+            "mime": content_type,
+            "size_bytes": len(content),
+            "session_id": active_session_id,
+            "is_global": is_global,
+        },
+        request=request,
+    )
+    db.commit()
 
     ingest_broker.add_task(ingest_pipeline.ingest_doc(
         document_id=document_id,
@@ -247,8 +267,10 @@ def get_document_raw(
 @router.delete("/documents/{document_id}")
 def delete_document(
     document_id: str,
+    request: Request,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     """Hard-delete a Document + its chunks + its on-disk file.
 
@@ -262,6 +284,29 @@ def delete_document(
     after_delete event listener on Document (db/models.py).
     """
     doc = verify_workspace_owns(document_id, models.Document, workspace.id, db)
+    deleted_filename = doc.filename
+    deleted_session_id = doc.session_id
+
     db.delete(doc)
+
+    session_obj = (
+        db.query(models.Session).filter_by(id=deleted_session_id).first()
+        if deleted_session_id
+        else None
+    )
+    log_event(
+        db,
+        EventType.DOCUMENT_DELETED,
+        user=user,
+        workspace=workspace,
+        session=session_obj,
+        resource_type="document",
+        resource_id=document_id,
+        payload={
+            "document_id": document_id,
+            "filename": deleted_filename,
+        },
+        request=request,
+    )
     db.commit()
     return {"status": "deleted"}

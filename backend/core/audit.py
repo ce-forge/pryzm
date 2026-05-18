@@ -56,6 +56,20 @@ class EventType:
     ADMIN_SYSTEM_MODEL_REMOVED = "admin.system.model_removed"
     ADMIN_SYSTEM_MICRO_PROMPT_EDITED = "admin.system.micro_prompt_edited"
 
+    # workspace.*
+    WORKSPACE_CREATED = "workspace.created"
+    WORKSPACE_EDITED = "workspace.edited"
+
+    # folder.*
+    FOLDER_CREATED = "folder.created"
+    FOLDER_EDITED = "folder.edited"
+    FOLDER_DELETED = "folder.deleted"
+
+    # document.*
+    DOCUMENT_UPLOADED = "document.uploaded"
+    DOCUMENT_DELETED = "document.deleted"
+    DOCUMENT_PROCESSING_FAILED = "document.processing_failed"
+
 
 def log_event(
     db: Session,
