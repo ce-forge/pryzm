@@ -26,16 +26,15 @@ def workspace_query_dep(
     user: models.User = Depends(current_user),
     db: SqlSession = Depends(database.get_db),
 ) -> models.Workspace:
-    """FastAPI dep: resolve `?workspace={slug}` to the caller's own,
-    non-template workspace. 404 on any miss (wrong owner, template, or
-    nonexistent slug) — 404 not 403 to avoid leaking existence across users.
+    """FastAPI dep: resolve `?workspace={slug}` to the caller's own
+    workspace. 404 on any miss (wrong owner or nonexistent slug) — 404
+    not 403 to avoid leaking existence across users.
     """
     ws = (
         db.query(models.Workspace)
         .filter(
             models.Workspace.slug == workspace,
             models.Workspace.user_id == user.id,
-            models.Workspace.is_template.is_(False),
         )
         .first()
     )

@@ -20,13 +20,13 @@ def _seed(db_session):
     alice_ws = models.Workspace(
         slug="ws-shared", display_name="A's WS",
         system_prompt="", enabled_tools=[],
-        is_builtin=False, is_template=False, user_id=alice.id,
+        user_id=alice.id,
         engine_config={"backend": "llama_cpp"},
     )
     bob_ws = models.Workspace(
         slug="ws-shared", display_name="B's WS",
         system_prompt="", enabled_tools=[],
-        is_builtin=False, is_template=False, user_id=bob.id,
+        user_id=bob.id,
         engine_config={"backend": "llama_cpp"},
     )
     db_session.add_all([alice_ws, bob_ws])
@@ -51,14 +51,3 @@ def test_workspace_query_dep_404_for_other_users_workspace(db_session):
     assert exc.value.status_code == 404
 
 
-def test_workspace_query_dep_skips_templates(db_session):
-    alice, _, _, _ = _seed(db_session)
-    tmpl = models.Workspace(
-        slug="ws-shared", display_name="Template",
-        system_prompt="", enabled_tools=[],
-        is_builtin=False, is_template=True, user_id=None,
-        engine_config={"backend": "llama_cpp"},
-    )
-    db_session.add(tmpl); db_session.commit()
-    result = workspace_query_dep(workspace="ws-shared", user=alice, db=db_session)
-    assert result.is_template is False
