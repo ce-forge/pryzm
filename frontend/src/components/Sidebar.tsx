@@ -9,6 +9,7 @@ import SessionDirectory from "./SessionDirectory";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import Identicon from "./Identicon";
 import { BugReportModal } from "./BugReportModal";
+import { NotificationPin } from "./NotificationPin";
 import { MenuIcon, DashboardIcon, SignOutIcon, BugIcon } from "./Icons";
 import { markSidebarScrolling } from "@/hooks/useSidebarPrefetchGuard";
 
@@ -58,6 +59,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              <NotificationPin />
               <button
                 onClick={() => setShowBugModal(true)}
                 className="p-1.5 rounded text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c] transition-colors"

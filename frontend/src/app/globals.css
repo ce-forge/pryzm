@@ -23,13 +23,23 @@ body {
 /* Pointer cursor on everything the user can act on. Browsers stopped
    defaulting buttons to pointer years ago to match macOS HIG; web apps
    override because users expect "interactive = pointer". Disabled
-   controls get not-allowed so failed clicks are explained visually. */
+   controls get not-allowed so failed clicks are explained visually.
+   Native form controls (select / checkbox / radio) get pointer too —
+   admin dashboards lean on dropdowns heavily and the native arrow-cursor
+   makes filter rows feel inert. */
 button:not(:disabled),
 [role="button"]:not(:disabled),
+a[href],
+select:not(:disabled),
+input[type="checkbox"]:not(:disabled),
+input[type="radio"]:not(:disabled),
 summary {
   cursor: pointer;
 }
 button:disabled,
-[role="button"][aria-disabled="true"] {
+[role="button"][aria-disabled="true"],
+select:disabled,
+input[type="checkbox"]:disabled,
+input[type="radio"]:disabled {
   cursor: not-allowed;
 }
