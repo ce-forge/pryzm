@@ -67,7 +67,11 @@ def test_logout_emits_event(db_session, monkeypatch):
 
 
 def test_password_change_emits_event(db_session, monkeypatch):
+    # Voluntary password changes are 403'd now; the endpoint only allows
+    # the forced-first-login flow. Set the flag so the path is reachable.
     admin = _seed_admin(db_session, password="old-pw")
+    admin.must_change_password = True
+    db_session.commit()
     sid = cookie_auth.create_session(db_session, admin.id)
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
