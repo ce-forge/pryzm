@@ -130,6 +130,19 @@ def change_password(
     db: DbSession = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
 ):
+    # Voluntary password changes are not allowed — admin owns all credentials.
+    # The endpoint only accepts the forced-change-on-first-login flow, which
+    # the user reaches by virtue of must_change_password=True (set by admin at
+    # create time or after a reset). Once flipped to False, this endpoint is
+    # closed; the user must ask admin for a fresh reset.
+    if not user.must_change_password:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Voluntary password changes are not supported. Ask your "
+                "admin to reset your password if you need a new one."
+            ),
+        )
     if not cookie_auth.verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Current password incorrect.")
     if len(payload.new_password) < 4:
