@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
+import { EventTypeBadge } from "./EventTypeBadge";
 
 export interface AuditEventDetail {
   id: string;
@@ -9,7 +10,9 @@ export interface AuditEventDetail {
   user_display_name_at_event: string | null;
   event_type: string;
   workspace_id: string | null;
+  workspace_display_name: string | null;
   session_id: string | null;
+  session_title: string | null;
   resource_type: string | null;
   resource_id: string | null;
   payload: Record<string, unknown>;
@@ -80,7 +83,12 @@ export function AuditEventDetailModal({ eventId, onClose }: Props) {
           {!event && !error && <div className="text-gray-400">Loading…</div>}
           {event && (
             <>
-              <DetailRow label="Event type" value={event.event_type} mono />
+              <div className="flex gap-4 items-center">
+                <div className="text-xs text-gray-400 w-24 shrink-0">
+                  Event type
+                </div>
+                <EventTypeBadge eventType={event.event_type} />
+              </div>
               <DetailRow
                 label="When"
                 value={
@@ -99,8 +107,16 @@ export function AuditEventDetailModal({ eventId, onClose }: Props) {
                     : "—"
                 }
               />
-              <DetailRow label="Workspace" value={event.workspace_id ?? "—"} mono />
-              <DetailRow label="Session" value={event.session_id ?? "—"} mono />
+              <NamedIdRow
+                label="Workspace"
+                id={event.workspace_id}
+                name={event.workspace_display_name}
+              />
+              <NamedIdRow
+                label="Session"
+                id={event.session_id}
+                name={event.session_title}
+              />
               <DetailRow
                 label="Resource"
                 value={
@@ -153,6 +169,41 @@ function DetailRow({
         }
       >
         {value}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Renders an entity reference as "display_name" on top and "<uuid>" muted
+ * underneath. Falls back to "(deleted)" when only the id is null (FK was
+ * SET NULL on cascade) or just the raw id when the name didn't resolve.
+ */
+function NamedIdRow({
+  label,
+  id,
+  name,
+}: {
+  label: string;
+  id: string | null;
+  name: string | null;
+}) {
+  return (
+    <div className="flex gap-4">
+      <div className="text-xs text-gray-400 w-24 shrink-0 pt-0.5">{label}</div>
+      <div className="flex-1 min-w-0">
+        {id ? (
+          <>
+            <div className="text-sm truncate">
+              {name ?? <span className="text-gray-500">(unknown)</span>}
+            </div>
+            <div className="font-mono text-[10px] text-gray-500 truncate">
+              {id}
+            </div>
+          </>
+        ) : (
+          <span className="text-gray-500">—</span>
+        )}
       </div>
     </div>
   );

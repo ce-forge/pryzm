@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
 import { AuditEventDetailModal } from "@/components/admin/AuditEventDetailModal";
+import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
 
 interface AuditEvent {
   id: string;
@@ -213,7 +214,7 @@ export default function AdminAuditPage() {
             <tr>
               <th className="px-3 py-2 font-medium w-40">When</th>
               <th className="px-3 py-2 font-medium w-32">User</th>
-              <th className="px-3 py-2 font-medium w-56">Event</th>
+              <th className="px-3 py-2 font-medium w-64">Event</th>
               <th className="px-3 py-2 font-medium">Payload preview</th>
             </tr>
           </thead>
@@ -241,8 +242,8 @@ export default function AdminAuditPage() {
                     <span className="text-gray-500">system</span>
                   )}
                 </td>
-                <td className="px-3 py-2 font-mono text-xs truncate max-w-56">
-                  {e.event_type}
+                <td className="px-3 py-2 truncate max-w-64">
+                  <EventTypeBadge eventType={e.event_type} />
                 </td>
                 <td className="px-3 py-2 text-xs text-gray-400 truncate">
                   {payloadSummary(e.payload)}
