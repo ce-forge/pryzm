@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
+import { useAuth } from "@/context/AuthContext";
 import { apiFetch } from "@/utils/apiClient";
 import { Workspace } from "@/hooks/useWorkspaces";
 import { withRollback } from "@/utils/withRollback";
@@ -32,7 +33,17 @@ type Props = EditProps | CreateProps;
 
 export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const { workspacesApi } = useWorkspaceContext();
+  const { user } = useAuth();
   const router = useRouter();
+
+  // Edit gate: admins always edit; non-admins only when the workspace's
+  // owner_can_edit flag is set. Create mode is unaffected (gated upstream by
+  // can_create_workspaces in the switcher).
+  const ownerCanEdit = mode === "edit"
+    ? (user?.workspaces.find((w) => w.slug === workspace.slug)?.owner_can_edit ?? false)
+    : true;
+  const canEditWorkspace = mode !== "edit" || !!user?.is_admin || ownerCanEdit;
+  const readOnly = mode === "edit" && !canEditWorkspace;
 
   const [name, setName] = useState(workspace?.display_name ?? "");
   const [prompt, setPrompt] = useState(workspace?.system_prompt ?? "");
@@ -187,6 +198,12 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
 
+          {readOnly && (
+            <p className="text-xs text-gray-500">
+              This workspace is read-only. Contact your admin to enable editing.
+            </p>
+          )}
+
           {/* Create mode: "Start from" selector */}
           {mode === "create" && (
             <div>
@@ -218,7 +235,9 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
               onBlur={() => {
                 if (mode === "edit" && name !== workspace.display_name) save({ display_name: name });
               }}
-              className={`w-full bg-[#131314] border text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors ${nameError ? "border-red-500" : "border-[#333537]"}`}
+              disabled={readOnly}
+              readOnly={readOnly}
+              className={`w-full bg-[#131314] border text-[#e3e3e3] rounded-lg px-4 py-2.5 outline-none focus:border-blue-500 transition-colors disabled:opacity-60 disabled:cursor-not-allowed ${nameError ? "border-red-500" : "border-[#333537]"}`}
               placeholder={mode === "create" ? "e.g. DevOps, Security, Personal" : undefined}
             />
             {mode === "create" && nameError && (
@@ -241,11 +260,12 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
                     key={c}
                     type="button"
                     onClick={() => handleColorChange(c)}
+                    disabled={readOnly}
                     className={`w-10 h-10 rounded-lg flex items-center justify-center transition-all ${classes.text} ${
                       isSelected
                         ? `ring-2 ring-offset-2 ring-offset-[#1e1f20] ${classes.ring} bg-[#282a2c]`
                         : "hover:bg-[#282a2c]/60"
-                    }`}
+                    } disabled:opacity-60 disabled:cursor-not-allowed`}
                     title={c}
                     aria-label={`${c} sprite`}
                   >
@@ -269,7 +289,9 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
                 if (mode === "edit" && prompt !== workspace.system_prompt) save({ system_prompt: prompt });
               }}
               rows={10}
-              className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 font-mono resize-y custom-scrollbar"
+              disabled={readOnly}
+              readOnly={readOnly}
+              className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 font-mono resize-y custom-scrollbar disabled:opacity-60 disabled:cursor-not-allowed"
             />
             <p className="text-xs text-gray-500 mt-1">Use <code>{"{tool_names}"}</code> to substitute the enabled tool list.</p>
           </div>
@@ -285,12 +307,13 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
                 <p className="text-xs text-gray-500 italic">Loading tool registry&hellip;</p>
               )}
               {availableTools.map((t) => (
-                <label key={t.name} className="flex items-start gap-3 p-2 rounded hover:bg-[#282a2c]/40 cursor-pointer">
+                <label key={t.name} className={`flex items-start gap-3 p-2 rounded ${readOnly ? "opacity-60 cursor-not-allowed" : "hover:bg-[#282a2c]/40 cursor-pointer"}`}>
                   <input
                     type="checkbox"
                     checked={enabledTools.includes(t.name)}
                     onChange={() => toggleTool(t.name)}
-                    className="mt-1"
+                    disabled={readOnly}
+                    className="mt-1 disabled:cursor-not-allowed"
                   />
                   <div className="flex-1">
                     <div className="text-sm font-mono text-[#e3e3e3]">{t.name}</div>
@@ -302,9 +325,9 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
           </div>
 
           {/* Edit-mode danger zone */}
-          {mode === "edit" && (
+          {mode === "edit" && (canEditWorkspace || user?.is_admin) && (
             <div className="border-t border-[#333537] pt-6 space-y-3">
-              {workspace.is_builtin && (
+              {workspace.is_builtin && canEditWorkspace && (
                 <button
                   onClick={() => setConfirmReset(true)}
                   className="w-full bg-[#282a2c] hover:bg-[#333537] text-gray-300 px-4 py-2 rounded-lg text-sm font-medium"
@@ -312,7 +335,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
                   Reset to default
                 </button>
               )}
-              {!workspace.is_builtin && (
+              {!workspace.is_builtin && user?.is_admin && (
                 <button
                   onClick={() => setConfirmDelete(true)}
                   className="w-full bg-red-900/30 hover:bg-red-900/50 border border-red-500/30 text-red-400 px-4 py-2 rounded-lg text-sm font-medium"
