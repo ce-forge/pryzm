@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+from core import cookie_auth
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -60,13 +61,40 @@ def _to_response(workspace) -> WorkspaceResponse:
 
 
 @router.get("/workspaces", response_model=List[WorkspaceResponse])
-def list_workspaces(db: Session = Depends(database.get_db)):
-    return [_to_response(ws) for ws in db.query(models.Workspace).order_by(models.Workspace.created_at.asc()).all()]
+def list_workspaces(
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
+):
+    rows = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.user_id == user.id,
+            models.Workspace.is_template.is_(False),
+        )
+        .order_by(models.Workspace.created_at.asc())
+        .all()
+    )
+    return [_to_response(ws) for ws in rows]
 
 
 @router.get("/workspaces/{slug}", response_model=WorkspaceResponse)
-def get_workspace(slug: str, db: Session = Depends(database.get_db)):
-    return _to_response(get_by_slug(db, slug))
+def get_workspace(
+    slug: str,
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
+):
+    ws = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.slug == slug,
+            models.Workspace.user_id == user.id,
+            models.Workspace.is_template.is_(False),
+        )
+        .first()
+    )
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    return _to_response(ws)
 
 
 @router.post("/workspaces", response_model=WorkspaceResponse)
