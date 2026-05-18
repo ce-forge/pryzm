@@ -110,6 +110,12 @@ async def lifespan(app: FastAPI):
 
     gc_task = asyncio.create_task(garbage_collection_task())
 
+    # Audit-events partition lifecycle: ensure next month is provisioned
+    # and drop partitions outside the retention window. Runs immediately
+    # then once a day.
+    from services.audit_retention_scheduler import audit_retention_loop
+    audit_retention_task = asyncio.create_task(audit_retention_loop())
+
     # Shared httpx client — one connection pool for the process lifetime.
     app.state.http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(
@@ -145,6 +151,7 @@ async def lifespan(app: FastAPI):
         await app.state.http_client.aclose()
         # Shutdown
         gc_task.cancel()
+        audit_retention_task.cancel()
 
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)

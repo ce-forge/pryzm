@@ -128,6 +128,77 @@ def test_workspace_edited_emits_event_only_for_changes(db_session):
         app.dependency_overrides.clear()
 
 
+def test_workspace_patch_rejects_when_owner_can_edit_false(db_session):
+    """Admin-instantiated locked workspaces reject edits from the recipient.
+    Admins bypass via /api/admin/workspaces/{id}."""
+    try:
+        c, user = _user_client(db_session)
+        ws = models.Workspace(
+            slug="locked", display_name="Locked", system_prompt="orig",
+            enabled_tools=[], engine_config={"backend": "llama_cpp"},
+            color="blue", user_id=user.id, owner_can_edit=False,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+
+        r = c.patch(f"/workspaces/{ws.slug}", json={"display_name": "Renamed"})
+        assert r.status_code == 403, r.text
+        assert "locked" in r.json()["detail"].lower()
+
+        db_session.refresh(ws)
+        assert ws.display_name == "Locked"
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_workspace_patch_bypasses_owner_lock_for_admin(db_session):
+    """Admin user can still PATCH a locked workspace via the user endpoint."""
+    try:
+        admin = models.User(
+            username="admin1",
+            password_hash=cookie_auth.hash_password("p" * 12),
+            is_admin=True, is_active=True, can_create_workspaces=True,
+        )
+        db_session.add(admin); db_session.commit(); db_session.refresh(admin)
+        ws = models.Workspace(
+            slug="adminlocked", display_name="AdminLocked",
+            system_prompt="x", enabled_tools=[],
+            engine_config={"backend": "llama_cpp"},
+            color="blue", user_id=admin.id, owner_can_edit=False,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+
+        sid = cookie_auth.create_session(db_session, admin.id)
+        app.dependency_overrides[database.get_db] = lambda: db_session
+        from fastapi.testclient import TestClient
+        c = TestClient(app)
+        c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+
+        r = c.patch(f"/workspaces/{ws.slug}", json={"display_name": "Renamed"})
+        assert r.status_code == 200, r.text
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_self_created_workspace_is_editable_by_default(db_session):
+    """POST /workspaces sets owner_can_edit=True so users can edit what they
+    just created."""
+    try:
+        c, user = _user_client(db_session)
+        r = c.post("/workspaces", json={"display_name": "My Own"})
+        assert r.status_code in (200, 201), r.text
+        slug = r.json()["slug"]
+
+        # Verify owner_can_edit landed True at DB layer.
+        ws = db_session.query(models.Workspace).filter_by(slug=slug).one()
+        assert ws.owner_can_edit is True
+
+        # And that a follow-up PATCH succeeds.
+        r2 = c.patch(f"/workspaces/{slug}", json={"display_name": "Renamed"})
+        assert r2.status_code == 200, r2.text
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_workspace_edited_no_event_when_nothing_changed(db_session):
     try:
         c, user = _user_client(db_session)
