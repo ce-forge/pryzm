@@ -14,7 +14,7 @@ import pytest
 
 import os
 
-from core import llm_server
+from core import cookie_auth, llm_server
 from db import models
 from services import image_describe, image_storage, knowledge
 
@@ -26,7 +26,20 @@ _FAKE_CAPTION = (
 )
 
 
-def _seed_workspace(db, slug="img-test") -> models.Workspace:
+def _seed_admin(db) -> models.User:
+    admin = models.User(
+        username="admin",
+        password_hash=cookie_auth.hash_password("admin-pw-12chars"),
+        is_admin=True,
+        is_active=True,
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    return admin
+
+
+def _seed_workspace(db, slug="img-test", user_id: str | None = None) -> models.Workspace:
     ws = models.Workspace(
         id=f"ws-{slug}",
         slug=slug,
@@ -34,6 +47,7 @@ def _seed_workspace(db, slug="img-test") -> models.Workspace:
         system_prompt="",
         enabled_tools=[],
         engine_config={"backend": "llama_cpp"},
+        user_id=user_id,
     )
     db.add(ws)
     db.commit()
@@ -130,10 +144,10 @@ def test_delete_document_endpoint_removes_row_and_file(db_session, monkeypatch, 
     from fastapi.testclient import TestClient
     from main import app
     from db import database
-    from config import settings
 
     monkeypatch.setattr(image_storage, "_UPLOADS_DIR", str(tmp_path / "uploads"))
-    ws = _seed_workspace(db_session, slug="img-endpoint-delete")
+    admin = _seed_admin(db_session)
+    ws = _seed_workspace(db_session, slug="img-endpoint-delete", user_id=admin.id)
     path = image_storage.save_image(b"img-bytes", mime="image/png")
 
     doc = models.Document(
@@ -146,15 +160,16 @@ def test_delete_document_endpoint_removes_row_and_file(db_session, monkeypatch, 
     db_session.add(doc); db_session.commit()
     assert os.path.exists(path)
 
+    sid = cookie_auth.create_session(db_session, admin.id)
+
     def _get_db_override():
         yield db_session
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
     app.dependency_overrides[database.get_db] = _get_db_override
     try:
         with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
-            resp = c.delete("/documents/doc-to-delete")
+            c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+            resp = c.delete(f"/documents/doc-to-delete?workspace={ws.slug}")
         assert resp.status_code == 200
         assert resp.json() == {"status": "deleted"}
         assert db_session.query(models.Document).filter_by(id="doc-to-delete").first() is None
@@ -170,17 +185,19 @@ def test_delete_document_endpoint_404_when_missing(db_session, monkeypatch):
     from fastapi.testclient import TestClient
     from main import app
     from db import database
-    from config import settings
+
+    admin = _seed_admin(db_session)
+    ws = _seed_workspace(db_session, slug="img-endpoint-404", user_id=admin.id)
+    sid = cookie_auth.create_session(db_session, admin.id)
 
     def _get_db_override():
         yield db_session
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
     app.dependency_overrides[database.get_db] = _get_db_override
     try:
         with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
-            resp = c.delete("/documents/nope")
+            c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+            resp = c.delete(f"/documents/nope?workspace={ws.slug}")
         assert resp.status_code == 404
     finally:
         app.dependency_overrides.clear()
@@ -224,9 +241,9 @@ def test_upload_endpoint_returns_202_and_inserts_processing_row(
     from main import app
     from db import database
     from services import ingest_broker
-    from config import settings
 
-    _seed_workspace(db_session, slug="img-202-test")
+    admin = _seed_admin(db_session)
+    _seed_workspace(db_session, slug="img-202-test", user_id=admin.id)
 
     captured: list = []
     def _capture_task(coro):
@@ -237,14 +254,15 @@ def test_upload_endpoint_returns_202_and_inserts_processing_row(
         return _Stub()
     monkeypatch.setattr(ingest_broker, "add_task", _capture_task)
 
+    sid = cookie_auth.create_session(db_session, admin.id)
+
     def _get_db_override():
         yield db_session
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
     app.dependency_overrides[database.get_db] = _get_db_override
     try:
         with TestClient(app) as c:
-            c.headers.update({"Authorization": "Bearer test-token"})
+            c.cookies.set(cookie_auth.COOKIE_NAME, sid)
             resp = c.post(
                 "/upload",
                 files={"file": ("hi.png", b"img-bytes", "image/png")},
