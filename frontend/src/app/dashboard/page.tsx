@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { AppProviders } from "@/context/AppProviders";
 import ModelsSection from "@/components/SettingsModels";
+import MicroPromptsSection from "@/components/MicroPromptsSection";
 
 function DashboardPageBody() {
   const { user, isLoading } = useAuth();
@@ -31,6 +32,10 @@ function DashboardPageBody() {
         <section>
           <h2 className="text-sm font-medium text-gray-300 mb-3">Models</h2>
           <ModelsSection />
+        </section>
+        <section>
+          <h2 className="text-sm font-medium text-gray-300 mb-3">Micro-Prompts</h2>
+          <MicroPromptsSection />
         </section>
       </div>
     </div>
