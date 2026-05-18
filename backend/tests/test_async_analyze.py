@@ -121,13 +121,11 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
     from fastapi.testclient import TestClient
     from sqlalchemy.orm import sessionmaker
 
-    from config import settings
     from db import database, models
-    from core import ai_engine
+    from core import ai_engine, cookie_auth
     from core.deps import get_http_client
     from main import app
 
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "smoke-test-token")
     monkeypatch.setattr(database, "init_db", lambda: None)
 
     # Route get_db through the test engine and seed the default workspace.
@@ -147,8 +145,8 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
     # same test DB, not the dev DB.
     monkeypatch.setattr(database, "SessionLocal", TestSessionLocal)
 
-    # Seed bootstrap admin (bearer token resolves to this user via the dual-mode
-    # current_user dep) and a 'personal' workspace owned by them.
+    # Seed an admin user and a 'personal' workspace owned by them, then mint
+    # an auth session so the request's cookie resolves to this user.
     with TestSessionLocal() as seed_db:
         admin = seed_db.query(models.User).filter_by(username="admin").first()
         if admin is None:
@@ -166,6 +164,7 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
                 slug="personal", display_name="Personal", user_id=admin.id,
             ))
             seed_db.commit()
+        sid = cookie_auth.create_session(seed_db, admin.id)
 
     # Override http_client — stream_chat is mocked so we won't call Ollama.
     app.dependency_overrides[get_http_client] = lambda: None
@@ -188,10 +187,10 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
     monkeypatch.setattr(condense, "condense_for_session", lambda *a, **kw: None)
 
     client = TestClient(app)
+    client.cookies.set(cookie_auth.COOKIE_NAME, sid)
     resp = client.post(
         "/analyze?workspace=personal",
         json={"prompt": "hello", "attachments": [], "skip_db_save": True},
-        headers={"Authorization": "Bearer smoke-test-token"},
     )
 
     assert resp.status_code == 200

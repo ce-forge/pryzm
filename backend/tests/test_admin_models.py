@@ -14,9 +14,8 @@ from typing import Iterator
 import pytest
 from fastapi.testclient import TestClient
 
-from config import settings
-from core import llm_router
-from db import database
+from core import cookie_auth, llm_router
+from db import database, models
 from main import app
 from routers import admin
 
@@ -78,8 +77,7 @@ def tmp_yaml(tmp_path: Path, monkeypatch) -> Path:
 
 
 @pytest.fixture
-def client(tmp_yaml, monkeypatch) -> Iterator[TestClient]:
-    monkeypatch.setattr(settings, "PRYZM_API_TOKEN", "test-token")
+def client(tmp_yaml, db_session, monkeypatch) -> Iterator[TestClient]:
     monkeypatch.setattr(database, "init_db", lambda: None)
     # Stub out the SIGHUP shell-out and warmup HTTP call so tests stay hermetic.
     monkeypatch.setattr(admin, "_reload_llama_swap", lambda: None)
@@ -94,9 +92,18 @@ def client(tmp_yaml, monkeypatch) -> Iterator[TestClient]:
         return {"gemma-4-E2B-it"}
     monkeypatch.setattr(admin, "_fetch_running_model_ids", _stub_running)
 
+    admin_user = models.User(
+        username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
+        is_admin=True, is_active=True,
+    )
+    db_session.add(admin_user); db_session.commit(); db_session.refresh(admin_user)
+    sid = cookie_auth.create_session(db_session, admin_user.id)
+    app.dependency_overrides[database.get_db] = lambda: db_session
+
     with TestClient(app) as c:
-        c.headers.update({"Authorization": "Bearer test-token"})
+        c.cookies.set(cookie_auth.COOKIE_NAME, sid)
         yield c
+    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +145,8 @@ def test_list_models_returns_parsed_rows(client):
     assert nomic["loaded"] is False
 
 
-def test_list_models_requires_token(client):
-    client.headers.pop("Authorization", None)
+def test_list_models_requires_auth(client):
+    client.cookies.clear()
     res = client.get("/api/admin/models")
     assert res.status_code == 401
 
@@ -275,8 +282,8 @@ def test_update_model_group_toggle_chat_to_always_on(client, tmp_yaml):
     assert "always-on" in text
 
 
-def test_update_model_requires_token(client):
-    client.headers.pop("Authorization", None)
+def test_update_model_requires_auth(client):
+    client.cookies.clear()
     res = client.put("/api/admin/models/gemma-4-E2B-it", json={"ngl": 50})
     assert res.status_code == 401
 
@@ -311,7 +318,7 @@ def test_delete_model_happy_path(client, tmp_yaml):
 # Auth
 # ---------------------------------------------------------------------------
 
-def test_endpoints_require_token(client):
-    client.headers.pop("Authorization", None)
+def test_endpoints_require_auth(client):
+    client.cookies.clear()
     assert client.post("/api/admin/models", json={"id": "x", "repo": "a/b:c"}).status_code == 401
     assert client.delete("/api/admin/models/x").status_code == 401
