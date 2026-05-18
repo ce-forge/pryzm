@@ -1,13 +1,15 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import Link from "next/link";
 import { useSessionContext } from "@/context/SessionContext";
 import { useAuth } from "@/context/AuthContext";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import SessionDirectory from "./SessionDirectory";
 import WorkspaceSwitcher from "./WorkspaceSwitcher";
 import Identicon from "./Identicon";
-import { MenuIcon, DashboardIcon, SignOutIcon } from "./Icons";
+import { BugReportModal } from "./BugReportModal";
+import { MenuIcon, DashboardIcon, SignOutIcon, BugIcon } from "./Icons";
 import { markSidebarScrolling } from "@/hooks/useSidebarPrefetchGuard";
 
 interface SidebarProps {
@@ -18,6 +20,8 @@ interface SidebarProps {
 export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
   const session = useSessionContext();
   const { user, logout } = useAuth();
+  const { activeWorkspace } = useWorkspaceContext();
+  const [showBugModal, setShowBugModal] = useState(false);
 
   return (
     <>
@@ -54,6 +58,14 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             </div>
 
             <div className="flex items-center gap-1 shrink-0">
+              <button
+                onClick={() => setShowBugModal(true)}
+                className="p-1.5 rounded text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c] transition-colors"
+                title="Report a bug"
+                aria-label="Report a bug"
+              >
+                <BugIcon className="w-4 h-4" />
+              </button>
               {user?.is_admin && (
                 <Link
                   href="/dashboard"
@@ -92,6 +104,14 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
           </div>
         </div>
       </div>
+
+      {showBugModal && (
+        <BugReportModal
+          workspaceId={activeWorkspace?.id ?? null}
+          sessionId={session.currentSession || null}
+          onClose={() => setShowBugModal(false)}
+        />
+      )}
     </>
   );
 }
