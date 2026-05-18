@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
 
 interface AdminWorkspace {
@@ -20,6 +20,9 @@ interface AdminTemplate {
   id: string;
   slug: string;
   display_name: string;
+  system_prompt?: string;
+  enabled_tools?: string[];
+  engine_config?: Record<string, unknown>;
   color: string | null;
 }
 
@@ -289,8 +292,15 @@ function AllWorkspacesView() {
 
 function TemplatesView() {
   const [templates, setTemplates] = useState<AdminTemplate[]>([]);
+  const [users, setUsers] = useState<AdminUserRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Modal state
+  const [showCreate, setShowCreate] = useState(false);
+  const [editTemplate, setEditTemplate] = useState<AdminTemplate | null>(null);
+  const [pushTemplate, setPushTemplate] = useState<AdminTemplate | null>(null);
+  const [instantiateTemplate, setInstantiateTemplate] = useState<AdminTemplate | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -315,6 +325,14 @@ function TemplatesView() {
     load();
   }, [load]);
 
+  useEffect(() => {
+    apiFetch("/api/admin/users")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((body: AdminUserRow[]) =>
+        setUsers(Array.isArray(body) ? body : []),
+      );
+  }, []);
+
   const deleteTemplate = async (t: AdminTemplate) => {
     const ok = window.confirm(
       `Delete template "${t.display_name}"?\n\n` +
@@ -334,11 +352,20 @@ function TemplatesView() {
 
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gray-400">
-        Templates seed new users&apos; starter workspaces. Create / edit / push
-        operations ship in a follow-up slice — for now this view is read +
-        delete only.
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-400">
+          Templates seed new users&apos; starter workspaces. Push to overwrite
+          settings across all instances; instantiate to add one to a specific
+          user.
+        </p>
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          className="text-sm px-3 py-1.5 rounded bg-[#2a2a2c] hover:bg-[#3a3a3c]"
+        >
+          + New template
+        </button>
+      </div>
 
       {error && <div className="text-sm text-red-400">{error}</div>}
 
@@ -349,7 +376,7 @@ function TemplatesView() {
               <th className="px-3 py-2 font-medium">Display name</th>
               <th className="px-3 py-2 font-medium w-32">Slug</th>
               <th className="px-3 py-2 font-medium w-24">Color</th>
-              <th className="px-3 py-2 font-medium w-32">Actions</th>
+              <th className="px-3 py-2 font-medium w-72">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -373,19 +400,647 @@ function TemplatesView() {
                   {t.color ?? "—"}
                 </td>
                 <td className="px-3 py-2">
-                  <button
-                    type="button"
-                    onClick={() => deleteTemplate(t)}
-                    className="text-xs px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-300 hover:bg-red-500/25"
-                  >
-                    Delete
-                  </button>
+                  <div className="flex flex-wrap gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setEditTemplate(t)}
+                      className="text-xs px-2 py-1 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPushTemplate(t)}
+                      className="text-xs px-2 py-1 rounded bg-sky-500/15 border border-sky-500/30 text-sky-300 hover:bg-sky-500/25"
+                    >
+                      Push
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setInstantiateTemplate(t)}
+                      className="text-xs px-2 py-1 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25"
+                    >
+                      Instantiate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteTemplate(t)}
+                      className="text-xs px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-300 hover:bg-red-500/25"
+                    >
+                      Delete
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {showCreate && (
+        <TemplateCreateModal
+          onClose={() => setShowCreate(false)}
+          onDone={() => {
+            setShowCreate(false);
+            load();
+          }}
+        />
+      )}
+
+      {editTemplate && (
+        <TemplateEditModal
+          target={editTemplate}
+          onClose={() => setEditTemplate(null)}
+          onDone={() => {
+            setEditTemplate(null);
+            load();
+          }}
+        />
+      )}
+
+      {pushTemplate && (
+        <TemplatePushModal
+          target={pushTemplate}
+          onClose={() => setPushTemplate(null)}
+          onDone={() => setPushTemplate(null)}
+        />
+      )}
+
+      {instantiateTemplate && (
+        <TemplateInstantiateModal
+          target={instantiateTemplate}
+          users={users}
+          onClose={() => setInstantiateTemplate(null)}
+          onDone={() => setInstantiateTemplate(null)}
+        />
+      )}
     </div>
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Template modals
+// ---------------------------------------------------------------------------
+
+const TEMPLATE_COLORS = [
+  "blue", "orange", "emerald", "red", "amber", "violet", "cyan", "pink", "white",
+];
+
+function ModalShell({
+  title,
+  onClose,
+  children,
+  size = "max-w-md",
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+  size?: string;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className={`bg-[#1e1e1f] text-[#e3e3e3] rounded-lg w-full ${size} max-h-[85vh] overflow-hidden flex flex-col border border-[#2a2a2c]`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2c]">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          <button
+            type="button"
+            className="text-gray-400 hover:text-[#e3e3e3] text-lg leading-none"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="overflow-y-auto custom-scrollbar">{children}</div>
+      </div>
+    </div>
+  );
+}
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-gray-400">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function ColorPicker({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  return (
+    <div className="flex flex-wrap gap-1">
+      <button
+        type="button"
+        onClick={() => onChange(null)}
+        className={
+          "text-xs px-2 py-1 rounded border " +
+          (value === null
+            ? "bg-[#2a2a2c] border-[#3a3a3c] text-[#e3e3e3]"
+            : "border-[#2a2a2c] text-gray-400")
+        }
+      >
+        none
+      </button>
+      {TEMPLATE_COLORS.map((c) => (
+        <button
+          key={c}
+          type="button"
+          onClick={() => onChange(c)}
+          className={
+            "text-xs px-2 py-1 rounded border " +
+            (value === c
+              ? "bg-[#2a2a2c] border-[#3a3a3c] text-[#e3e3e3]"
+              : "border-[#2a2a2c] text-gray-400 hover:text-[#e3e3e3]")
+          }
+        >
+          {c}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function TemplateCreateModal({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [slug, setSlug] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [color, setColor] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!slug.trim() || !displayName.trim()) {
+      setError("Slug and display name are required.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const r = await apiFetch("/api/admin/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          slug: slug.trim(),
+          display_name: displayName.trim(),
+          system_prompt: systemPrompt,
+          enabled_tools: [],
+          color,
+        }),
+      });
+      if (!r.ok) {
+        let detail = `Failed (${r.status})`;
+        try {
+          const body = await r.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // body wasn't JSON
+        }
+        setError(detail);
+        return;
+      }
+      onDone();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title="New template" onClose={onClose} size="max-w-lg">
+      <form onSubmit={submit} className="p-5 space-y-4">
+        <p className="text-xs text-gray-400">
+          Slug is stable forever — it shows up in cloned-workspace URLs and in
+          audit logs. Pick something short and lowercase. The system prompt and
+          enabled-tools list can be edited later.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Slug">
+            <input
+              type="text"
+              value={slug}
+              onChange={(e) => setSlug(e.target.value)}
+              className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm font-mono"
+              placeholder="e.g. devops"
+              autoComplete="off"
+            />
+          </Field>
+          <Field label="Display name">
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm"
+              placeholder="e.g. DevOps"
+            />
+          </Field>
+        </div>
+        <Field label="System prompt">
+          <textarea
+            value={systemPrompt}
+            onChange={(e) => setSystemPrompt(e.target.value)}
+            rows={5}
+            className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm resize-y font-mono"
+          />
+        </Field>
+        <Field label="Color">
+          <ColorPicker value={color} onChange={setColor} />
+        </Field>
+
+        {error && <div className="text-sm text-red-400">{error}</div>}
+
+        <div className="flex gap-2 justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm px-3 py-1.5 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="text-sm px-3 py-1.5 rounded bg-[#2a2a2c] hover:bg-[#3a3a3c] disabled:opacity-50"
+          >
+            {submitting ? "Creating…" : "Create"}
+          </button>
+        </div>
+      </form>
+    </ModalShell>
+  );
+}
+
+function TemplateEditModal({
+  target,
+  onClose,
+  onDone,
+}: {
+  target: AdminTemplate;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [displayName, setDisplayName] = useState(target.display_name);
+  const [systemPrompt, setSystemPrompt] = useState("");
+  const [color, setColor] = useState<string | null>(target.color ?? null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Fetch full template details (system_prompt isn't on the list payload).
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/admin/templates/${encodeURIComponent(target.id)}`)
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) {
+          setError(`Failed to load (${r.status})`);
+          return;
+        }
+        const body = await r.json();
+        setDisplayName(body.display_name ?? "");
+        setSystemPrompt(body.system_prompt ?? "");
+        setColor(body.color ?? null);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target.id]);
+
+  const submit = async (ev: FormEvent) => {
+    ev.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      const r = await apiFetch(`/api/admin/templates/${encodeURIComponent(target.id)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          display_name: displayName.trim(),
+          system_prompt: systemPrompt,
+          color,
+        }),
+      });
+      if (!r.ok) {
+        setError(`Failed (${r.status})`);
+        return;
+      }
+      onDone();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title={`Edit ${target.slug}`} onClose={onClose} size="max-w-lg">
+      {loading ? (
+        <div className="p-6 text-sm text-gray-400">Loading…</div>
+      ) : (
+        <form onSubmit={submit} className="p-5 space-y-4">
+          <Field label="Display name">
+            <input
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm"
+            />
+          </Field>
+          <Field label="System prompt">
+            <textarea
+              value={systemPrompt}
+              onChange={(e) => setSystemPrompt(e.target.value)}
+              rows={8}
+              className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm resize-y font-mono"
+            />
+          </Field>
+          <Field label="Color">
+            <ColorPicker value={color} onChange={setColor} />
+          </Field>
+
+          {error && <div className="text-sm text-red-400">{error}</div>}
+
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm px-3 py-1.5 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="text-sm px-3 py-1.5 rounded bg-[#2a2a2c] hover:bg-[#3a3a3c] disabled:opacity-50"
+            >
+              {submitting ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      )}
+    </ModalShell>
+  );
+}
+
+function TemplatePushModal({
+  target,
+  onClose,
+  onDone,
+}: {
+  target: AdminTemplate;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [affectedCount, setAffectedCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch(`/api/admin/workspaces?template_id=${encodeURIComponent(target.id)}`)
+      .then(async (r) => {
+        if (cancelled) return;
+        if (!r.ok) {
+          setError(`Failed to count instances (${r.status})`);
+          return;
+        }
+        const body = await r.json();
+        setAffectedCount(Array.isArray(body) ? body.length : 0);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [target.id]);
+
+  const confirm = async () => {
+    setSubmitting(true);
+    setError(null);
+    try {
+      const r = await apiFetch(`/api/admin/templates/${encodeURIComponent(target.id)}/push`, {
+        method: "POST",
+      });
+      if (!r.ok) {
+        setError(`Push failed (${r.status})`);
+        return;
+      }
+      setDone(true);
+      setTimeout(onDone, 900);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title={`Push ${target.slug}`} onClose={onClose}>
+      <div className="p-5 space-y-4 text-sm">
+        {loading ? (
+          <div className="text-gray-400">Counting instances…</div>
+        ) : done ? (
+          <div className="text-emerald-300">Push complete.</div>
+        ) : (
+          <>
+            <p className="text-gray-300">
+              This will overwrite the system prompt, enabled tools, color, and
+              engine config on{" "}
+              <strong>
+                {affectedCount} workspace{affectedCount === 1 ? "" : "s"}
+              </strong>{" "}
+              instantiated from this template. Per-workspace customizations
+              that diverge from the template will be lost.
+            </p>
+            {error && <div className="text-red-400">{error}</div>}
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-sm px-3 py-1.5 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirm}
+                disabled={submitting || affectedCount === 0}
+                className="text-sm px-3 py-1.5 rounded bg-sky-500/20 border border-sky-500/40 text-sky-200 hover:bg-sky-500/30 disabled:opacity-50"
+              >
+                {submitting
+                  ? "Pushing…"
+                  : affectedCount === 0
+                  ? "No instances to push"
+                  : `Push to ${affectedCount}`}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+function TemplateInstantiateModal({
+  target,
+  users,
+  onClose,
+  onDone,
+}: {
+  target: AdminTemplate;
+  users: AdminUserRow[];
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [userId, setUserId] = useState("");
+  const [ownerCanEdit, setOwnerCanEdit] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+
+  const submit = async (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!userId) {
+      setError("Pick a target user.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const r = await apiFetch(
+        `/api/admin/templates/${encodeURIComponent(target.id)}/instantiate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: userId,
+            owner_can_edit: ownerCanEdit,
+          }),
+        },
+      );
+      if (!r.ok) {
+        let detail = `Failed (${r.status})`;
+        try {
+          const body = await r.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // body wasn't JSON
+        }
+        setError(detail);
+        return;
+      }
+      setDone(true);
+      setTimeout(onDone, 900);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <ModalShell title={`Instantiate ${target.slug}`} onClose={onClose}>
+      <form onSubmit={submit} className="p-5 space-y-4 text-sm">
+        {done ? (
+          <div className="text-emerald-300">Workspace created.</div>
+        ) : (
+          <>
+            <p className="text-gray-300">
+              Creates a new workspace for the chosen user, seeded from this
+              template. Rejects if the user already has a workspace from this
+              template (delete the existing one first to re-seed).
+            </p>
+            <Field label="Target user">
+              <select
+                value={userId}
+                onChange={(e) => setUserId(e.target.value)}
+                className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm"
+              >
+                <option value="">Pick a user…</option>
+                {users.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.username}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={ownerCanEdit}
+                onChange={(e) => setOwnerCanEdit(e.target.checked)}
+                className="mt-1"
+              />
+              <span className="flex flex-col">
+                <span>Owner can edit</span>
+                <span className="text-xs text-gray-500">
+                  Lets the recipient change system prompt + enabled tools on
+                  their copy.
+                </span>
+              </span>
+            </label>
+
+            {error && <div className="text-red-400">{error}</div>}
+
+            <div className="flex gap-2 justify-end">
+              <button
+                type="button"
+                onClick={onClose}
+                className="text-sm px-3 py-1.5 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="text-sm px-3 py-1.5 rounded bg-emerald-500/20 border border-emerald-500/40 text-emerald-200 hover:bg-emerald-500/30 disabled:opacity-50"
+              >
+                {submitting ? "Creating…" : "Instantiate"}
+              </button>
+            </div>
+          </>
+        )}
+      </form>
+    </ModalShell>
   );
 }

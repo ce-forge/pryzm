@@ -158,6 +158,7 @@ def instantiate_template(
         display_name=t.display_name,
         system_prompt=t.system_prompt,
         enabled_tools=list(t.enabled_tools or []),
+        color=t.color,
         template_id=t.id,
         user_id=user.id,
         owner_can_edit=payload.owner_can_edit,

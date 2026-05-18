@@ -93,6 +93,7 @@ def test_admin_create_user_instantiates_starter_templates(db_session):
             id="tmpl-x", slug="tmpl-x", display_name="X", system_prompt="x",
             enabled_tools=[],
             engine_config={"backend": "llama_cpp"},
+            color="emerald",
         )
         db_session.add(tmpl); db_session.commit()
 
@@ -108,6 +109,8 @@ def test_admin_create_user_instantiates_starter_templates(db_session):
         ).all()
         assert len(instances) == 1
         assert instances[0].owner_can_edit is True
+        # Color follows from the template at seed time.
+        assert instances[0].color == "emerald"
     finally:
         app.dependency_overrides.clear()
 
