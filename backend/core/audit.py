@@ -30,6 +30,32 @@ class EventType:
     AUTH_PASSWORD_RESET_BY_ADMIN = "auth.password_reset_by_admin"
     AUTH_SESSION_EXPIRED = "auth.session_expired"
 
+    # admin.user.*
+    ADMIN_USER_CREATED = "admin.user.created"
+    ADMIN_USER_EDITED = "admin.user.edited"
+    ADMIN_USER_ACTIVATED = "admin.user.activated"
+    ADMIN_USER_DEACTIVATED = "admin.user.deactivated"
+    ADMIN_USER_PROMOTED_TO_ADMIN = "admin.user.promoted_to_admin"
+    ADMIN_USER_DEMOTED_FROM_ADMIN = "admin.user.demoted_from_admin"
+    ADMIN_USER_DELETED = "admin.user.deleted"
+
+    # admin.template.*
+    ADMIN_TEMPLATE_CREATED = "admin.template.created"
+    ADMIN_TEMPLATE_EDITED = "admin.template.edited"
+    ADMIN_TEMPLATE_DELETED = "admin.template.deleted"
+    ADMIN_TEMPLATE_INSTANTIATED = "admin.template.instantiated"
+    ADMIN_TEMPLATE_PUSHED = "admin.template.pushed"
+
+    # admin.workspace.*
+    ADMIN_WORKSPACE_EDITED = "admin.workspace.edited"
+    ADMIN_WORKSPACE_DELETED = "admin.workspace.deleted"
+
+    # admin.system.*
+    ADMIN_SYSTEM_MODEL_ADDED = "admin.system.model_added"
+    ADMIN_SYSTEM_MODEL_EDITED = "admin.system.model_edited"
+    ADMIN_SYSTEM_MODEL_REMOVED = "admin.system.model_removed"
+    ADMIN_SYSTEM_MICRO_PROMPT_EDITED = "admin.system.micro_prompt_edited"
+
 
 def log_event(
     db: Session,
