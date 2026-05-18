@@ -92,11 +92,32 @@ def change_password(
 
 
 @router.get("/me")
-def me(user: models.User = Depends(cookie_auth.current_user)):
+def me(
+    user: models.User = Depends(cookie_auth.current_user),
+    db: DbSession = Depends(database.get_db),
+):
+    workspaces = (
+        db.query(models.Workspace)
+        .filter(models.Workspace.user_id == user.id)
+        .order_by(models.Workspace.position.asc(), models.Workspace.created_at.asc())
+        .all()
+    )
     return {
         "id": user.id,
         "username": user.username,
         "is_admin": user.is_admin,
         "can_create_workspaces": user.can_create_workspaces,
         "email": user.email,
+        "workspaces": [
+            {
+                "id": w.id,
+                "slug": w.slug,
+                "display_name": w.display_name,
+                "color": w.color,
+                "owner_can_edit": w.owner_can_edit,
+                "template_id": w.template_id,
+                "position": w.position,
+            }
+            for w in workspaces
+        ],
     }
