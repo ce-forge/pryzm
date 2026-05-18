@@ -64,6 +64,7 @@ def test_bootstrap_instantiates_builtin_templates_for_admin(db_session, monkeypa
     ).all()
     assert len(instances) == 1
     assert instances[0].slug == "it_copilot"
+    assert instances[0].engine_config == {"backend": "llama_cpp"}
 
 
 @pytest.mark.skip(reason="Phase A backfill test - obsolete after FK enforcement in Phase B")
