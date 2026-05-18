@@ -25,10 +25,11 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
         />
       )}
       
-      {/* Outer animates width/position; inner stays 280px so contents
-          don't reflow during the desktop collapse animation. */}
-      <div className={`fixed md:relative h-full shrink-0 transition-all duration-300 z-50 overflow-hidden w-[280px] ${isOpen ? 'left-0 md:w-[280px]' : '-left-[280px] md:left-0 md:w-0'}`}>
-        <div className="w-[280px] h-full bg-[#1e1f20] flex flex-col border-r border-[#333537] shadow-2xl md:shadow-none">
+      {/* Outer animates width/position; inner stays at the sidebar width so
+          contents don't reflow during the desktop collapse animation.
+          Width comes from --spacing-sidebar in globals.css. */}
+      <div className={`fixed md:relative h-full shrink-0 transition-all duration-300 z-50 overflow-hidden w-sidebar ${isOpen ? 'left-0 md:w-sidebar' : '-left-sidebar md:left-0 md:w-0'}`}>
+        <div className="w-sidebar h-full bg-[#1e1f20] flex flex-col border-r border-[#333537] shadow-2xl md:shadow-none">
 
           {/* TOP: Header Controls */}
           <div className="p-4 flex items-center gap-4">
