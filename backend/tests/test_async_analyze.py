@@ -147,10 +147,26 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
     # same test DB, not the dev DB.
     monkeypatch.setattr(database, "SessionLocal", TestSessionLocal)
 
-    # Seed the default 'personal' workspace so the route doesn't 500 on lookup.
+    # Seed bootstrap admin (bearer token resolves to this user via the dual-mode
+    # current_user dep) and a 'personal' workspace owned by them.
     with TestSessionLocal() as seed_db:
-        if not seed_db.query(models.Workspace).filter_by(slug="personal").first():
-            seed_db.add(models.Workspace(slug="personal", display_name="Personal"))
+        admin = seed_db.query(models.User).filter_by(username="admin").first()
+        if admin is None:
+            from core.cookie_auth import hash_password
+            admin = models.User(
+                username="admin", password_hash=hash_password("test-pw-12chars"),
+                is_admin=True, is_active=True, can_create_workspaces=True,
+            )
+            seed_db.add(admin); seed_db.commit(); seed_db.refresh(admin)
+        # Check for the user-instance (not the template seeded by migrations)
+        existing_ws = seed_db.query(models.Workspace).filter_by(
+            slug="personal", is_template=False, user_id=admin.id,
+        ).first()
+        if existing_ws is None:
+            seed_db.add(models.Workspace(
+                slug="personal", display_name="Personal", user_id=admin.id,
+                is_template=False,
+            ))
             seed_db.commit()
 
     # Override http_client — stream_chat is mocked so we won't call Ollama.

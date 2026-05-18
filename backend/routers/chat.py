@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import tuple_, func as sqlfunc
 from sqlalchemy.orm import Session
 
-from core import ai_engine
+from core import ai_engine, cookie_auth
 from core.deps import get_http_client
 from core.engine_config import engine_config_for
 from core.llm_metrics import get_last_chat_snapshot as _last_chat_metric_snapshot
@@ -310,6 +310,7 @@ async def analyze_data(
     background_tasks: BackgroundTasks,
     workspace: models.Workspace = Depends(workspace_query_dep),
     http_client: httpx.AsyncClient = Depends(get_http_client),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     # Resolve engine config and tool set once at the boundary.
     engine_config = engine_config_for(workspace)
@@ -333,6 +334,7 @@ async def analyze_data(
             chat_session = models.Session(
                 title=generated_title,
                 workspace_id=workspace.id,
+                user_id=user.id,
             )
             db.add(chat_session)
             db.commit()
@@ -561,6 +563,7 @@ def branch_session(
     body: BranchRequest,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     """Copy a session up to (and including) up_to_message_id into a new
     session. Source session is scoped to workspace — cross-workspace 404s."""
@@ -575,7 +578,7 @@ def branch_session(
 
     # Avoid stacking "(Branch) (Branch) (Branch) ..." when re-branching a branch.
     branched_title = old_session.title if old_session.title.endswith("(Branch)") else f"{old_session.title} (Branch)"
-    new_session = models.Session(title=branched_title, workspace_id=old_session.workspace_id)
+    new_session = models.Session(title=branched_title, workspace_id=old_session.workspace_id, user_id=user.id)
     db.add(new_session)
     db.commit()
     db.refresh(new_session)

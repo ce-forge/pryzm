@@ -1,11 +1,20 @@
 """POST /folders generates its own id."""
 from fastapi.testclient import TestClient
 
+from core import cookie_auth
 from db import database, models
 from main import app
 
 
 def test_folder_create_does_not_require_client_id(db_session, monkeypatch):
+    # Create bootstrap admin (required by bearer token auth to resolve)
+    admin = models.User(
+        username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
+        is_admin=True, is_active=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
     ws = models.Workspace(
         id="ws-fid", slug="ws-fid", display_name="FID",
         system_prompt="", enabled_tools=[], is_builtin=False,
@@ -26,11 +35,21 @@ def test_folder_create_does_not_require_client_id(db_session, monkeypatch):
         assert len(body["id"]) > 20
         folder = db_session.query(models.Folder).filter_by(id=body["id"]).one()
         assert folder.name == "Notes"
+        # Bearer token resolves to bootstrap admin
+        assert folder.user_id == admin.id
     finally:
         app.dependency_overrides.clear()
 
 
 def test_folder_create_ignores_client_supplied_id(db_session, monkeypatch):
+    # Create bootstrap admin (required by bearer token auth to resolve)
+    admin = models.User(
+        username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
+        is_admin=True, is_active=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+
     ws = models.Workspace(
         id="ws-fid2", slug="ws-fid2", display_name="FID2",
         system_prompt="", enabled_tools=[], is_builtin=False,
@@ -50,5 +69,8 @@ def test_folder_create_ignores_client_supplied_id(db_session, monkeypatch):
         if r.status_code == 200:
             body = r.json()
             assert body["id"] != "client-supplied-id"
+            # Bearer token resolves to bootstrap admin
+            folder = db_session.query(models.Folder).filter_by(id=body["id"]).one()
+            assert folder.user_id == admin.id
     finally:
         app.dependency_overrides.clear()

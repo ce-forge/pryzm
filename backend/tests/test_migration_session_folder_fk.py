@@ -15,22 +15,49 @@ def _seed_workspace(engine, slug: str) -> str:
     return slug
 
 
-def _seed_folder(engine, folder_id: str, workspace_id: str) -> str:
+def _seed_folder(engine, folder_id: str, workspace_id: str, user_id: str | None = None) -> str:
+    """Insert a folder. Pass user_id when running at head (Phase B made the
+    column NOT NULL); omit for pre-Phase-A revisions where the column doesn't
+    exist."""
+    if user_id is None:
+        sql = "INSERT INTO folders (id, name, workspace_id) VALUES (:id, 'f', :ws)"
+        params: dict = {"id": folder_id, "ws": workspace_id}
+    else:
+        sql = "INSERT INTO folders (id, name, workspace_id, user_id) VALUES (:id, 'f', :ws, :uid)"
+        params = {"id": folder_id, "ws": workspace_id, "uid": user_id}
     with engine.begin() as conn:
-        conn.execute(text("""
-            INSERT INTO folders (id, name, workspace_id)
-            VALUES (:id, 'f', :ws)
-        """), {"id": folder_id, "ws": workspace_id})
+        conn.execute(text(sql), params)
     return folder_id
 
 
-def _seed_session(engine, session_id: str, workspace_id: str, folder_id: str | None) -> str:
+def _seed_session(engine, session_id: str, workspace_id: str, folder_id: str | None,
+                  user_id: str | None = None) -> str:
+    """Insert a session. Pass user_id when running at head; omit for pre-Phase-A."""
+    if user_id is None:
+        sql = (
+            "INSERT INTO sessions (id, title, workspace_id, folder_id) "
+            "VALUES (:id, 't', :ws, :folder)"
+        )
+        params: dict = {"id": session_id, "ws": workspace_id, "folder": folder_id}
+    else:
+        sql = (
+            "INSERT INTO sessions (id, title, workspace_id, folder_id, user_id) "
+            "VALUES (:id, 't', :ws, :folder, :uid)"
+        )
+        params = {"id": session_id, "ws": workspace_id, "folder": folder_id, "uid": user_id}
+    with engine.begin() as conn:
+        conn.execute(text(sql), params)
+    return session_id
+
+
+def _seed_user(engine, user_id: str) -> str:
     with engine.begin() as conn:
         conn.execute(text("""
-            INSERT INTO sessions (id, title, workspace_id, folder_id)
-            VALUES (:id, 't', :ws, :folder)
-        """), {"id": session_id, "ws": workspace_id, "folder": folder_id})
-    return session_id
+            INSERT INTO users (id, username, password_hash, is_admin, is_active,
+                               can_create_workspaces)
+            VALUES (:id, :id, 'dummy', TRUE, TRUE, TRUE)
+        """), {"id": user_id})
+    return user_id
 
 
 def test_cross_workspace_folder_id_scrubbed_to_null(db_at_revision, alembic_cfg):
@@ -76,9 +103,10 @@ def test_same_workspace_folder_id_preserved(db_at_revision, alembic_cfg):
 
 def test_fk_sets_folder_id_null_on_folder_delete(db_at_head):
     engine = db_at_head
+    user = _seed_user(engine, "u-setnull")
     ws = _seed_workspace(engine, "ws-setnull")
-    _seed_folder(engine, "f-setnull", ws)
-    _seed_session(engine, "s-setnull", ws, "f-setnull")
+    _seed_folder(engine, "f-setnull", ws, user_id=user)
+    _seed_session(engine, "s-setnull", ws, "f-setnull", user_id=user)
 
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM folders WHERE id = 'f-setnull'"))

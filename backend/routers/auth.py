@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
 from db import database, models
-from schemas import LoginRequest
+from schemas import LoginRequest, PasswordChange
 
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -67,6 +67,27 @@ def logout(
     if sid:
         cookie_auth.invalidate_session(db, sid)
     response.delete_cookie(cookie_auth.COOKIE_NAME, path="/")
+    return {"ok": True}
+
+
+@router.post("/password")
+def change_password(
+    payload: PasswordChange,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
+):
+    if not cookie_auth.verify_password(payload.current_password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password incorrect.")
+    if len(payload.new_password) < 12:
+        raise HTTPException(status_code=400, detail="Password must be at least 12 characters.")
+    current_sid = request.cookies.get(cookie_auth.COOKIE_NAME)
+    user.password_hash = cookie_auth.hash_password(payload.new_password)
+    db.query(models.AuthSession).filter(
+        models.AuthSession.user_id == user.id,
+        models.AuthSession.id != current_sid,
+    ).delete(synchronize_session=False)
+    db.commit()
     return {"ok": True}
 
 

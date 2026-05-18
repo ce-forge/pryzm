@@ -10,19 +10,24 @@ from sqlalchemy.orm import Session
 def _seed_two_workspaces_with_one_message(db: Session):
     """Helper: creates two workspaces, each with one session and one message.
     Returns (ws_a, ws_b, msg_in_a)."""
+    user = models.User(
+        id="user-test", username="test", password_hash="hash", is_admin=False
+    )
     ws_a = models.Workspace(
         id="ws-a", slug="ws-a", display_name="A",
         system_prompt="", enabled_tools=[], is_builtin=False,
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        user_id="user-test",
     )
     ws_b = models.Workspace(
         id="ws-b", slug="ws-b", display_name="B",
         system_prompt="", enabled_tools=[], is_builtin=False,
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        user_id="user-test",
     )
-    sess_a = models.Session(id="sess-a", workspace_id="ws-a", title="t")
+    sess_a = models.Session(id="sess-a", workspace_id="ws-a", title="t", user_id="user-test")
     msg_a = models.Message(id="msg-a", session_id="sess-a", role="user", content="x")
-    db.add_all([ws_a, ws_b, sess_a, msg_a])
+    db.add_all([user, ws_a, ws_b, sess_a, msg_a])
     db.commit()
     return ws_a, ws_b, msg_a
 
@@ -133,19 +138,26 @@ def test_session_patch_rejects_cross_workspace_folder_id(db_session, monkeypatch
     from db import database
     from main import app
 
+    # Bearer auth resolves to the oldest admin user; make this user admin so
+    # workspace_query_dep's per-user filter matches the seeded workspace owner.
+    user = models.User(
+        id="user-patch", username="patch", password_hash="hash", is_admin=True
+    )
     ws_a = models.Workspace(
         id="ws-pa", slug="ws-pa", display_name="A",
         system_prompt="", enabled_tools=[], is_builtin=False,
         engine_config={"backend": "llama_cpp"},
+        user_id="user-patch",
     )
     ws_b = models.Workspace(
         id="ws-pb", slug="ws-pb", display_name="B",
         system_prompt="", enabled_tools=[], is_builtin=False,
         engine_config={"backend": "llama_cpp"},
+        user_id="user-patch",
     )
-    sess_a = models.Session(id="sess-pa", workspace_id="ws-pa", title="t")
-    folder_b = models.Folder(id="f-pb", workspace_id="ws-pb", name="B folder")
-    db_session.add_all([ws_a, ws_b, sess_a, folder_b])
+    sess_a = models.Session(id="sess-pa", workspace_id="ws-pa", title="t", user_id="user-patch")
+    folder_b = models.Folder(id="f-pb", workspace_id="ws-pb", name="B folder", user_id="user-patch")
+    db_session.add_all([user, ws_a, ws_b, sess_a, folder_b])
     db_session.commit()
 
     def _get_db_override():

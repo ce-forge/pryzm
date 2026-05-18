@@ -116,3 +116,58 @@ class WorkspaceDeleteResponse(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class StarterTemplate(BaseModel):
+    template_id: str
+    owner_can_edit: bool = False
+
+
+class AdminUserCreate(BaseModel):
+    username: str
+    password: str
+    email: Optional[str] = None
+    is_admin: bool = False
+    can_create_workspaces: bool = False
+    starter_templates: list[StarterTemplate] = []
+
+
+class AdminUserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    is_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+    can_create_workspaces: Optional[bool] = None
+
+
+class AdminPasswordReset(BaseModel):
+    new_password: str
+
+
+class AdminTemplateCreate(BaseModel):
+    slug: str
+    display_name: str
+    system_prompt: str = ""
+    enabled_tools: list[str] = []
+    color: Optional[str] = None
+    engine_config: dict = {}
+
+
+class AdminTemplateUpdate(BaseModel):
+    slug: Optional[str] = None
+    display_name: Optional[str] = None
+    system_prompt: Optional[str] = None
+    enabled_tools: Optional[list[str]] = None
+    color: Optional[str] = None
+    engine_config: Optional[dict] = None
+
+
+class AdminTemplateInstantiate(BaseModel):
+    user_id: str
+    slug: Optional[str] = None
+    owner_can_edit: bool = False

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from core import cookie_auth
 from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models
 from schemas import FolderCreate, FolderUpdate
@@ -27,9 +28,13 @@ def get_folders(workspace: str = "it_copilot", db: Session = Depends(database.ge
 
 
 @router.post("/folders")
-def create_folder(folder: FolderCreate, db: Session = Depends(database.get_db)):
+def create_folder(
+    folder: FolderCreate,
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
+):
     ws = get_or_default(db, folder.workspace)
-    new_folder = models.Folder(name=folder.name, workspace_id=ws.id)
+    new_folder = models.Folder(name=folder.name, workspace_id=ws.id, user_id=user.id)
     db.add(new_folder)
     db.commit()
     return {"status": "success", "id": new_folder.id}

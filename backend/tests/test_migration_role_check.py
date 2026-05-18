@@ -7,16 +7,21 @@ from sqlalchemy.pool import NullPool
 
 
 def _seed_session(engine) -> str:
-    """Create the minimum scaffold (workspace + session) for a message insert."""
+    """Create the minimum scaffold (user + workspace + session) for a message insert."""
     with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO users (id, username, password_hash, is_admin, is_active,
+                               can_create_workspaces)
+            VALUES ('u-c', 'u-c', 'dummy', TRUE, TRUE, TRUE)
+        """))
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
                                     enabled_tools, is_builtin)
             VALUES ('ws-c', 'ws-c', 'x', '', '[]'::jsonb, false)
         """))
         conn.execute(text("""
-            INSERT INTO sessions (id, title, workspace_id)
-            VALUES ('sess-c', 't', 'ws-c')
+            INSERT INTO sessions (id, title, workspace_id, user_id)
+            VALUES ('sess-c', 't', 'ws-c', 'u-c')
         """))
     return "sess-c"
 

@@ -8,11 +8,12 @@ leaking whether the resource exists in another workspace.
 column (Session, Folder, Document, DocumentChunk). Message is scoped via
 Session.workspace_id and uses a separate helper in routers/chat.py.
 """
-from typing import Optional, Type, TypeVar
+from typing import Type, TypeVar
 
 from fastapi import Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session as SqlSession
 
+from core.cookie_auth import current_user
 from db import database, models
 from db.models import Base
 
@@ -20,29 +21,27 @@ from db.models import Base
 T = TypeVar("T", bound=Base)
 
 
-def resolve_workspace_or_404(slug: str, db: SqlSession) -> models.Workspace:
-    """Resolve a workspace slug to its ORM row; 404 if not found."""
-    ws = db.query(models.Workspace).filter(models.Workspace.slug == slug).first()
-    if ws is None:
-        raise HTTPException(status_code=404, detail=f"Workspace not found: {slug}")
-    return ws
-
-
 def workspace_query_dep(
-    workspace: Optional[str] = Query(
-        None, description="Slug of the workspace the resource belongs to"
-    ),
+    workspace: str = Query(..., description="Slug of the workspace the resource belongs to"),
+    user: models.User = Depends(current_user),
     db: SqlSession = Depends(database.get_db),
 ) -> models.Workspace:
-    """FastAPI dep: read `?workspace={slug}` and resolve to a Workspace row.
-
-    422 if the query param is missing, 404 if the slug does not exist. This
-    is the single boundary where slug → id resolution happens for routes
-    that need workspace context.
+    """FastAPI dep: resolve `?workspace={slug}` to the caller's own,
+    non-template workspace. 404 on any miss (wrong owner, template, or
+    nonexistent slug) — 404 not 403 to avoid leaking existence across users.
     """
-    if not workspace:
-        raise HTTPException(status_code=422, detail="workspace query parameter is required")
-    return resolve_workspace_or_404(workspace, db)
+    ws = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.slug == workspace,
+            models.Workspace.user_id == user.id,
+            models.Workspace.is_template.is_(False),
+        )
+        .first()
+    )
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    return ws
 
 
 def verify_workspace_owns(
