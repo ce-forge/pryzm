@@ -28,12 +28,15 @@ from typing import Any, Optional
 
 import httpx
 import ruamel.yaml
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session as DbSession
 
 from config import settings
-from core import llm_router
+from core import cookie_auth, llm_router
+from core.audit import EventType, log_event
+from db import database, models
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 _logger = logging.getLogger("pryzm.admin")
@@ -174,7 +177,13 @@ async def list_models() -> list[dict]:
 
 
 @router.post("/models", status_code=201)
-async def add_model(req: AddModelRequest, background_tasks: BackgroundTasks) -> dict:
+async def add_model(
+    req: AddModelRequest,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+) -> dict:
     if not _ID_VALID_RE.match(req.id):
         raise HTTPException(status_code=400, detail="id must match [A-Za-z0-9][A-Za-z0-9._-]*")
 
@@ -214,12 +223,32 @@ async def add_model(req: AddModelRequest, background_tasks: BackgroundTasks) -> 
         llm_router.reload_router_from_yaml(_YAML_PATH)
 
     _logger.info("admin.model_added id=%s repo=%s", req.id, repo_full)
+    log_event(
+        db, EventType.ADMIN_SYSTEM_MODEL_ADDED,
+        user=admin, request=request,
+        payload={
+            "model_id": req.id,
+            "repo": repo_full,
+            "ctx_size": req.ctx_size,
+            "ngl": req.ngl,
+            "tags": list(req.tags or []),
+            "group": req.group,
+            "vision": "vision" in (req.tags or []),
+        },
+    )
+    db.commit()
     background_tasks.add_task(_warmup_model, req.id)
     return _parse_model_row(req.id, data["models"][req.id])
 
 
 @router.put("/models/{model_id}")
-async def update_model(model_id: str, req: UpdateModelRequest) -> dict:
+async def update_model(
+    model_id: str,
+    req: UpdateModelRequest,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+) -> dict:
     if req.group is not None and req.group not in {"chat", "always-on"}:
         raise HTTPException(status_code=400, detail="group must be 'chat' or 'always-on'")
 
@@ -244,6 +273,16 @@ async def update_model(model_id: str, req: UpdateModelRequest) -> dict:
         new_group = req.group if req.group is not None else (current["group"] or "chat")
         new_tags = req.tags if req.tags is not None else list(current["tags"])
 
+        changed_fields = []
+        if req.ngl is not None and current["ngl"] != new_ngl:
+            changed_fields.append("ngl")
+        if req.ctx_size is not None and current["ctx_size"] != new_ctx:
+            changed_fields.append("ctx_size")
+        if req.group is not None and current["group"] != new_group:
+            changed_fields.append("group")
+        if req.tags is not None and list(current["tags"]) != list(new_tags):
+            changed_fields.append("tags")
+
         existing["cmd"] = ruamel.yaml.scalarstring.PreservedScalarString(
             _build_cmd_block(current["repo"], current["quant"], new_ngl, new_ctx, new_group),
         )
@@ -261,11 +300,22 @@ async def update_model(model_id: str, req: UpdateModelRequest) -> dict:
         "admin.model_updated id=%s ngl=%d ctx_size=%d group=%s tags=%s",
         model_id, new_ngl, new_ctx, new_group, new_tags,
     )
+    log_event(
+        db, EventType.ADMIN_SYSTEM_MODEL_EDITED,
+        user=admin, request=request,
+        payload={"model_id": model_id, "changed_fields": changed_fields},
+    )
+    db.commit()
     return _parse_model_row(model_id, data["models"][model_id])
 
 
 @router.delete("/models/{model_id}")
-async def delete_model(model_id: str) -> dict:
+async def delete_model(
+    model_id: str,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+) -> dict:
     async with _yaml_lock:
         data = _read_yaml()
         models_cfg = data.get("models") or {}
@@ -277,6 +327,12 @@ async def delete_model(model_id: str) -> dict:
                 status_code=400,
                 detail="refusing to delete the embedding model — RAG depends on it",
             )
+        log_event(
+            db, EventType.ADMIN_SYSTEM_MODEL_REMOVED,
+            user=admin, request=request,
+            payload={"model_id": model_id},
+        )
+        db.commit()
         del models_cfg[model_id]
         _write_yaml(data)
         try:

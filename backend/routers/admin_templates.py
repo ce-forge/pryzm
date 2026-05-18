@@ -1,8 +1,9 @@
 """Admin endpoints for template CRUD + push + instantiate."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
+from core.audit import EventType, log_event
 from db import database, models
 from schemas import AdminTemplateCreate, AdminTemplateUpdate, AdminTemplateInstantiate
 
@@ -38,7 +39,9 @@ def list_templates(db: DbSession = Depends(database.get_db)):
 @router.post("")
 def create_template(
     payload: AdminTemplateCreate,
+    request: Request,
     db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
 ):
     dup = db.query(models.WorkspaceTemplate).filter_by(slug=payload.slug).first()
     if dup is not None:
@@ -53,6 +56,16 @@ def create_template(
     if payload.color is not None:
         t.color = payload.color
     db.add(t); db.commit(); db.refresh(t)
+    log_event(
+        db, EventType.ADMIN_TEMPLATE_CREATED,
+        user=admin, request=request,
+        payload={
+            "template_id": t.id,
+            "slug": t.slug,
+            "display_name": t.display_name,
+        },
+    )
+    db.commit()
     return _template_dict(t)
 
 
@@ -68,25 +81,52 @@ def get_template(template_id: str, db: DbSession = Depends(database.get_db)):
 def update_template(
     template_id: str,
     payload: AdminTemplateUpdate,
+    request: Request,
     db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
 ):
     t = db.query(models.WorkspaceTemplate).filter_by(id=template_id).first()
     if t is None:
         raise HTTPException(status_code=404, detail="Template not found.")
     changes = payload.model_dump(exclude_unset=True)
+    changed_fields = [k for k, v in changes.items() if getattr(t, k, None) != v]
     for k, v in changes.items():
         setattr(t, k, v)
+    log_event(
+        db, EventType.ADMIN_TEMPLATE_EDITED,
+        user=admin, request=request,
+        payload={
+            "template_id": t.id,
+            "slug": t.slug,
+            "changed_fields": changed_fields,
+        },
+    )
     db.commit(); db.refresh(t)
     return _template_dict(t)
 
 
 @router.delete("/{template_id}")
-def delete_template(template_id: str, db: DbSession = Depends(database.get_db)):
+def delete_template(
+    template_id: str,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+):
     """Delete a template. The FK on workspaces.template_id uses ON DELETE SET NULL,
     so existing instances stay but lose their template link."""
     t = db.query(models.WorkspaceTemplate).filter_by(id=template_id).first()
     if t is None:
         raise HTTPException(status_code=404, detail="Template not found.")
+    affected = db.query(models.Workspace).filter(models.Workspace.template_id == t.id).count()
+    log_event(
+        db, EventType.ADMIN_TEMPLATE_DELETED,
+        user=admin, request=request,
+        payload={
+            "template_id": t.id,
+            "slug": t.slug,
+            "affected_instances": affected,
+        },
+    )
     db.delete(t); db.commit()
     return {"ok": True}
 
@@ -95,7 +135,9 @@ def delete_template(template_id: str, db: DbSession = Depends(database.get_db)):
 def instantiate_template(
     template_id: str,
     payload: AdminTemplateInstantiate,
+    request: Request,
     db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
 ):
     t = db.query(models.WorkspaceTemplate).filter_by(id=template_id).first()
     if t is None:
@@ -122,16 +164,34 @@ def instantiate_template(
         engine_config=dict(t.engine_config or {}),
     )
     db.add(instance); db.commit(); db.refresh(instance)
+    log_event(
+        db, EventType.ADMIN_TEMPLATE_INSTANTIATED,
+        user=admin, request=request,
+        payload={
+            "template_id": t.id,
+            "slug": t.slug,
+            "target_user_id": user.id,
+            "new_workspace_id": instance.id,
+        },
+    )
+    db.commit()
     return {"id": instance.id, "slug": instance.slug, "user_id": instance.user_id}
 
 
 @router.post("/{template_id}/push")
-def push_template(template_id: str, db: DbSession = Depends(database.get_db)):
+def push_template(
+    template_id: str,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+):
     t = db.query(models.WorkspaceTemplate).filter_by(id=template_id).first()
     if t is None:
         raise HTTPException(status_code=404, detail="Template not found.")
-    instances = db.query(models.Workspace).filter_by(template_id=template_id).all()
-    for inst in instances:
+    affected = db.query(models.Workspace).filter(models.Workspace.template_id == t.id).all()
+    affected_count = len(affected)
+    affected_user_ids = {w.user_id for w in affected}
+    for inst in affected:
         for field in _SETTINGS_FIELDS:
             value = getattr(t, field, None)
             if field == "enabled_tools" and value is not None:
@@ -139,5 +199,15 @@ def push_template(template_id: str, db: DbSession = Depends(database.get_db)):
             if field == "engine_config" and value is not None:
                 value = dict(value)
             setattr(inst, field, value)
+    log_event(
+        db, EventType.ADMIN_TEMPLATE_PUSHED,
+        user=admin, request=request,
+        payload={
+            "template_id": t.id,
+            "affected_workspace_count": affected_count,
+            "affected_user_count": len(affected_user_ids),
+            "had_customizations_count": 0,
+        },
+    )
     db.commit()
-    return {"ok": True, "affected_count": len(instances)}
+    return {"ok": True, "affected_count": affected_count}
