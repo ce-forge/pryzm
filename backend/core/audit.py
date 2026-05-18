@@ -79,6 +79,17 @@ class EventType:
     CHAT_RAG_RETRIEVED = "chat.rag_retrieved"
     CHAT_WEB_SEARCH = "chat.web_search"
 
+    # bugreport.*
+    BUGREPORT_SUBMITTED = "bugreport.submitted"
+    BUGREPORT_ACKNOWLEDGED = "bugreport.acknowledged"
+    BUGREPORT_RESOLVED = "bugreport.resolved"
+    BUGREPORT_DISMISSED = "bugreport.dismissed"
+    BUGREPORT_DELETED = "bugreport.deleted"
+
+    # notification.*
+    NOTIFICATION_SENT = "notification.sent"
+    NOTIFICATION_BROADCAST_SENT = "notification.broadcast_sent"
+
 
 def log_event(
     db: Session,
