@@ -7,23 +7,22 @@ from db import database, models
 from main import app
 
 
-def _admin_client(db_session, monkeypatch):
+def _admin_client(db_session):
     admin = models.User(
         username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
         is_admin=True, is_active=True,
     )
     db_session.add(admin); db_session.commit(); db_session.refresh(admin)
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     c = TestClient(app)
     c.cookies.set(cookie_auth.COOKIE_NAME, sid)
     return c, admin
 
 
-def test_list_templates(db_session, monkeypatch):
+def test_list_templates(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         t = models.WorkspaceTemplate(
             id="t-1", slug="t-1", display_name="T1", system_prompt="",
             enabled_tools=[], engine_config={"backend": "llama_cpp"},
@@ -48,9 +47,9 @@ def test_list_templates(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_create_template(db_session, monkeypatch):
+def test_create_template(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         r = c.post("/api/admin/templates", json={
             "slug": "new-tmpl",
             "display_name": "New Template",
@@ -67,9 +66,9 @@ def test_create_template(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_instantiate_template_for_user(db_session, monkeypatch):
+def test_instantiate_template_for_user(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         t = models.WorkspaceTemplate(
             id="t-instn", slug="t-instn", display_name="T", system_prompt="",
             enabled_tools=[], engine_config={"backend": "llama_cpp"},
@@ -90,9 +89,9 @@ def test_instantiate_template_for_user(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_instantiate_duplicate_blocks(db_session, monkeypatch):
+def test_instantiate_duplicate_blocks(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         t = models.WorkspaceTemplate(
             id="t-dup", slug="t-dup", display_name="T", system_prompt="",
             enabled_tools=[], engine_config={"backend": "llama_cpp"},
@@ -106,9 +105,9 @@ def test_instantiate_duplicate_blocks(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_push_updates_all_instances(db_session, monkeypatch):
+def test_push_updates_all_instances(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         t = models.WorkspaceTemplate(
             id="t-push", slug="t-push", display_name="T", system_prompt="OLD",
             enabled_tools=["get_local_time"], engine_config={"backend": "llama_cpp"},
@@ -138,9 +137,9 @@ def test_push_updates_all_instances(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_delete_template_nulls_template_id_on_instances(db_session, monkeypatch):
+def test_delete_template_nulls_template_id_on_instances(db_session):
     try:
-        c, _ = _admin_client(db_session, monkeypatch)
+        c, _ = _admin_client(db_session)
         t = models.WorkspaceTemplate(
             id="t-del", slug="t-del", display_name="T", system_prompt="",
             enabled_tools=[], engine_config={"backend": "llama_cpp"},

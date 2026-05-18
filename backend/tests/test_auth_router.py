@@ -19,8 +19,7 @@ def _setup_user(db_session, username="alice", password="hunter2hunter2", is_acti
     return u
 
 
-def _client(db_session, monkeypatch):
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
+def _client(db_session):
     app.dependency_overrides[database.get_db] = lambda: db_session
     return TestClient(app)
 
@@ -31,10 +30,10 @@ def reset_rate_limiter():
     yield
 
 
-def test_login_success_sets_cookie_and_returns_user(db_session, monkeypatch):
+def test_login_success_sets_cookie_and_returns_user(db_session):
     u = _setup_user(db_session)
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         r = c.post("/api/auth/login", json={"username": "alice", "password": "hunter2hunter2"})
         assert r.status_code == 200
         body = r.json()
@@ -46,10 +45,10 @@ def test_login_success_sets_cookie_and_returns_user(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_login_wrong_password_returns_401(db_session, monkeypatch):
+def test_login_wrong_password_returns_401(db_session):
     _setup_user(db_session)
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         r = c.post("/api/auth/login", json={"username": "alice", "password": "wrong"})
         assert r.status_code == 401
         assert cookie_auth.COOKIE_NAME not in r.cookies
@@ -57,39 +56,39 @@ def test_login_wrong_password_returns_401(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_login_unknown_username_returns_401(db_session, monkeypatch):
+def test_login_unknown_username_returns_401(db_session):
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         r = c.post("/api/auth/login", json={"username": "nobody", "password": "wrong"})
         assert r.status_code == 401
     finally:
         app.dependency_overrides.clear()
 
 
-def test_login_deactivated_user_returns_401(db_session, monkeypatch):
+def test_login_deactivated_user_returns_401(db_session):
     _setup_user(db_session, is_active=False)
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         r = c.post("/api/auth/login", json={"username": "alice", "password": "hunter2hunter2"})
         assert r.status_code == 401
     finally:
         app.dependency_overrides.clear()
 
 
-def test_login_case_insensitive_username(db_session, monkeypatch):
+def test_login_case_insensitive_username(db_session):
     _setup_user(db_session, username="Alice")
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         r = c.post("/api/auth/login", json={"username": "ALICE", "password": "hunter2hunter2"})
         assert r.status_code == 200
     finally:
         app.dependency_overrides.clear()
 
 
-def test_login_locks_out_after_threshold(db_session, monkeypatch):
+def test_login_locks_out_after_threshold(db_session):
     _setup_user(db_session)
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         for _ in range(cookie_auth.RATE_LIMIT_FAILURES):
             c.post("/api/auth/login", json={"username": "alice", "password": "wrong"})
         # Even correct password should now be rejected
@@ -99,10 +98,10 @@ def test_login_locks_out_after_threshold(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_logout_clears_cookie_and_session(db_session, monkeypatch):
+def test_logout_clears_cookie_and_session(db_session):
     _setup_user(db_session)
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         c.post("/api/auth/login", json={"username": "alice", "password": "hunter2hunter2"})
         # session row exists
         assert db_session.query(models.AuthSession).count() == 1
@@ -118,19 +117,19 @@ def test_logout_clears_cookie_and_session(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_logout_without_cookie_returns_200_idempotent(db_session, monkeypatch):
+def test_logout_without_cookie_returns_200_idempotent(db_session):
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         r = c.post("/api/auth/logout")
         assert r.status_code == 200
     finally:
         app.dependency_overrides.clear()
 
 
-def test_me_returns_user_when_authenticated(db_session, monkeypatch):
+def test_me_returns_user_when_authenticated(db_session):
     _setup_user(db_session)
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         c.post("/api/auth/login", json={"username": "alice", "password": "hunter2hunter2"})
         r = c.get("/api/auth/me")
         assert r.status_code == 200
@@ -141,16 +140,16 @@ def test_me_returns_user_when_authenticated(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_me_returns_401_when_no_cookie(db_session, monkeypatch):
+def test_me_returns_401_when_no_cookie(db_session):
     try:
-        c = _client(db_session, monkeypatch)
+        c = _client(db_session)
         r = c.get("/api/auth/me")
         assert r.status_code == 401
     finally:
         app.dependency_overrides.clear()
 
 
-def test_me_returns_user_and_workspaces(db_session, monkeypatch):
+def test_me_returns_user_and_workspaces(db_session):
     admin = models.User(
         username="admin",
         password_hash=cookie_auth.hash_password("admin-pw-12chars"),
@@ -168,7 +167,6 @@ def test_me_returns_user_and_workspaces(db_session, monkeypatch):
     db_session.add(ws); db_session.commit()
 
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)

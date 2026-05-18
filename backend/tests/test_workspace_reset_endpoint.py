@@ -6,7 +6,7 @@ from db import database, models
 from main import app
 
 
-def test_reset_workspace_from_template(db_session, monkeypatch):
+def test_reset_workspace_from_template(db_session):
     admin = models.User(
         username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
         is_admin=True, is_active=True,
@@ -25,12 +25,10 @@ def test_reset_workspace_from_template(db_session, monkeypatch):
     db_session.add(ws); db_session.commit()
 
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
         c.cookies.set(cookie_auth.COOKIE_NAME, sid)
-        c.headers.update({"Authorization": "Bearer test-token"})
         r = c.post("/workspaces/t-1/reset")
         assert r.status_code == 200, r.text
         db_session.expire_all()
@@ -41,7 +39,7 @@ def test_reset_workspace_from_template(db_session, monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_reset_workspace_without_template_returns_400(db_session, monkeypatch):
+def test_reset_workspace_without_template_returns_400(db_session):
     admin = models.User(
         username="admin", password_hash=cookie_auth.hash_password("admin-pw-12chars"),
         is_admin=True, is_active=True,
@@ -55,12 +53,10 @@ def test_reset_workspace_without_template_returns_400(db_session, monkeypatch):
     db_session.add(ws); db_session.commit()
 
     sid = cookie_auth.create_session(db_session, admin.id)
-    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
     app.dependency_overrides[database.get_db] = lambda: db_session
     try:
         c = TestClient(app)
         c.cookies.set(cookie_auth.COOKIE_NAME, sid)
-        c.headers.update({"Authorization": "Bearer test-token"})
         r = c.post("/workspaces/orphan/reset")
         assert r.status_code == 400
     finally:
