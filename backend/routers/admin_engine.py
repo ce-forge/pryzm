@@ -45,11 +45,20 @@ _logger = logging.getLogger(__name__)
 # that resolve against the iframe's origin — i.e. against Pryzm, not under
 # the proxy prefix. We rewrite those to point back at the proxy. The path
 # segments listed here cover everything llama-swap serves at the top level
-# (UI assets + the JSON API the UI calls).
+# (UI assets, JSON API, model upstreams) — verified by grepping the
+# minified bundle.
 _PROXY_PREFIX = "/api/admin/engine"
-_UPSTREAM_PATHS = ("ui", "api", "logs", "running", "upstream", "favicon")
+_UPSTREAM_PATHS = (
+    "ui", "api", "favicon",
+    # UI-route segments (navigated to via SPA router)
+    "models", "activity", "logs", "performance",
+    # Model-server upstream paths llama-swap forwards on its end
+    "upstream", "running", "sdapi", "v1",
+)
+# Opens with " ' ` ( — template-literal backticks are how the bundle
+# constructs most fetch/EventSource URLs.
 _REWRITE_PATTERN = re.compile(
-    r'(["\'(])(/(?:' + "|".join(_UPSTREAM_PATHS) + r')(?:[/?"#\'\s)]|$))'
+    r'(["\'`(])(/(?:' + "|".join(_UPSTREAM_PATHS) + r')(?:[/?"`\'\s)]|$))'
 )
 
 

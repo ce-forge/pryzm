@@ -126,6 +126,36 @@ def test_rewrite_body_injects_prefix_into_html_paths():
     assert '/api/admin/engine/ui/data.json' in out
 
 
+def test_rewrite_body_handles_template_literal_backticks():
+    """The minified llama-swap bundle uses template literals for fetch /
+    EventSource URLs — `/api/events`, `/api/version`, etc."""
+    js = (
+        b'new EventSource(`/api/events`);\n'
+        b'fetch(`/api/version`);\n'
+        b'fetch(`/upstream/${name}/health`);\n'
+    )
+    out = _rewrite_body(js).decode("utf-8")
+    assert '/api/admin/engine/api/events' in out
+    assert '/api/admin/engine/api/version' in out
+    assert '/api/admin/engine/upstream/' in out
+
+
+def test_rewrite_body_covers_ui_route_segments():
+    """SPA route links like /models, /activity, /performance are top-level
+    paths from llama-swap's perspective and need the prefix too."""
+    html = (
+        b'<a href="/models">Models</a>'
+        b'<a href="/activity">Activity</a>'
+        b'<a href="/performance">Perf</a>'
+        b'<a href="/logs">Logs</a>'
+    )
+    out = _rewrite_body(html).decode("utf-8")
+    assert '/api/admin/engine/models"' in out
+    assert '/api/admin/engine/activity"' in out
+    assert '/api/admin/engine/performance"' in out
+    assert '/api/admin/engine/logs"' in out
+
+
 def test_rewrite_body_skips_unrelated_paths():
     # Random absolute paths that aren't llama-swap's surface stay untouched.
     html = b'<a href="/something/else">x</a>'
