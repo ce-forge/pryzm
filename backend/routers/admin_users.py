@@ -64,6 +64,9 @@ def create_user(
         is_admin=payload.is_admin,
         can_create_workspaces=payload.can_create_workspaces,
         is_active=True,
+        # Admin chose the password; the new user must pick their own on
+        # first login, same gate the bootstrap admin goes through.
+        must_change_password=True,
     )
     db.add(user); db.commit(); db.refresh(user)
 
@@ -196,6 +199,9 @@ def reset_password(
     if len(payload.new_password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
     u.password_hash = cookie_auth.hash_password(payload.new_password)
+    # The admin chose this password; the user should pick their own as
+    # soon as they log back in. Same shape as freshly-created users.
+    u.must_change_password = True
     cookie_auth.invalidate_user_sessions(db, user_id)
     log_event(
         db, EventType.AUTH_PASSWORD_RESET_BY_ADMIN,

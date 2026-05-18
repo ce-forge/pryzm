@@ -25,7 +25,6 @@ export const APP_CONFIG = {
   get API_URL(): string {
     return _resolveApiUrl();
   },
-  DEFAULT_WORKSPACE: "it_copilot",
   // The model's num_ctx is 8192 (see backend/core/ai_engine.py). Out of that
   // we reserve ~2K tokens for the system prompt, tool definitions, memory
   // summary, and a sensible response budget — so the user-facing counter

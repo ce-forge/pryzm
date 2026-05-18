@@ -30,7 +30,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const ai = useInferenceContext();
   const uploader = useUploaderContext();
   const tester = useTestSuiteContext();
-  const { activeWorkspace } = useWorkspaceContext();
+  const { activeWorkspace, hasNoWorkspaces } = useWorkspaceContext();
 
   // Globe toggle is gated on the workspace having web_search in its
   // enabled_tools — Settings is the permission gate, the toggle is the
@@ -128,6 +128,28 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     (id: string, idx: number) => setDeleteConfirm({ id, index: idx }),
     [],
   );
+
+  if (hasNoWorkspaces) {
+    return (
+      <div className="flex flex-col flex-1 h-full w-full max-w-[100vw] overflow-hidden bg-[#131314]">
+        <ChatHeader
+          sessionTitle=""
+          isSidebarOpen={isSidebarOpen}
+          setIsSidebarOpen={setIsSidebarOpen}
+        />
+        <div className="flex-1 flex items-center justify-center px-6">
+          <div className="max-w-md text-center text-sm text-gray-300 space-y-3">
+            <h2 className="text-lg font-semibold">No workspaces yet</h2>
+            <p className="text-gray-400">
+              Your account has no workspaces, so there&apos;s nothing to chat
+              with. Ask an admin to seed one for you, or create your own from
+              the sidebar if your account is allowed to.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 h-full w-full max-w-[100vw] overflow-hidden bg-[#131314]">

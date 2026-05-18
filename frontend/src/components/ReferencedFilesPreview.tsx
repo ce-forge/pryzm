@@ -12,17 +12,15 @@
  * backend marks the response cache-immutable so subsequent renders /
  * page reloads hit the browser cache.
  */
-import { useSearchParams } from "next/navigation";
 import type { ReferencedFile } from "@/types/chat";
 import { APP_CONFIG } from "@/utils/constants";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 
 
 export default function ReferencedFilesPreview({ files }: { files: ReferencedFile[] }) {
   const images = files.filter((f) => f.mime.startsWith("image/"));
-  const searchParams = useSearchParams();
+  const { workspaceSlug: workspace } = useWorkspaceContext();
   if (images.length === 0) return null;
-
-  const workspace = searchParams.get("workspace") || APP_CONFIG.DEFAULT_WORKSPACE;
 
   return (
     <div className="mt-2 flex flex-col gap-2 w-full max-w-2xl">
