@@ -20,6 +20,7 @@ export interface AuthUser {
   can_create_workspaces: boolean;
   email: string | null;
   workspaces: AuthWorkspace[];
+  must_change_password: boolean;
 }
 
 interface AuthContextValue {

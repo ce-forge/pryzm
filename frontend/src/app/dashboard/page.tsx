@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { AppProviders } from "@/context/AppProviders";
 import ModelsSection from "@/components/SettingsModels";
 import MicroPromptsSection from "@/components/MicroPromptsSection";
+import ChangePasswordForm from "@/components/ChangePasswordForm";
 
 function DashboardPageBody() {
   const { user, isLoading } = useAuth();
@@ -36,6 +37,10 @@ function DashboardPageBody() {
         <section>
           <h2 className="text-sm font-medium text-gray-300 mb-3">Micro-Prompts</h2>
           <MicroPromptsSection />
+        </section>
+        <section>
+          <h2 className="text-sm font-medium text-gray-300 mb-3">Change password</h2>
+          <ChangePasswordForm />
         </section>
       </div>
     </div>
