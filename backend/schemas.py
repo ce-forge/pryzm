@@ -142,3 +142,27 @@ class AdminUserUpdate(BaseModel):
 
 class AdminPasswordReset(BaseModel):
     new_password: str
+
+
+class AdminTemplateCreate(BaseModel):
+    slug: str
+    display_name: str
+    system_prompt: str = ""
+    enabled_tools: list[str] = []
+    color: Optional[str] = None
+    engine_config: dict = {}
+
+
+class AdminTemplateUpdate(BaseModel):
+    slug: Optional[str] = None
+    display_name: Optional[str] = None
+    system_prompt: Optional[str] = None
+    enabled_tools: Optional[list[str]] = None
+    color: Optional[str] = None
+    engine_config: Optional[dict] = None
+
+
+class AdminTemplateInstantiate(BaseModel):
+    user_id: str
+    slug: Optional[str] = None
+    owner_can_edit: bool = False
