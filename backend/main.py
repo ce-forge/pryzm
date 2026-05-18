@@ -15,6 +15,7 @@ from routers import admin_users as admin_users_router
 from routers import admin_templates as admin_templates_router
 from routers import admin_workspaces as admin_workspaces_router
 from routers import admin_audit as admin_audit_router
+from routers import admin_engine as admin_engine_router
 from routers import admin_sessions as admin_sessions_router
 from routers import bug_reports as bug_reports_router
 from routers import notifications as notifications_router
@@ -178,6 +179,7 @@ app.include_router(admin_users_router.router)
 app.include_router(admin_templates_router.router)
 app.include_router(admin_workspaces_router.router)
 app.include_router(admin_audit_router.router)
+app.include_router(admin_engine_router.router)
 app.include_router(admin_sessions_router.router)
 app.include_router(bug_reports_router.user_router)
 app.include_router(bug_reports_router.admin_router)
