@@ -183,14 +183,10 @@ export default function AdminUsersPage() {
 
   return (
     <div className="max-w-4xl space-y-8">
-      <div>
-        <h2 className="text-xl font-semibold mb-1">Users</h2>
-        <p className="text-xs text-gray-400">
-          Create, edit, deactivate, reset password, delete. Per-user detail
-          page (workspaces / recent activity / open bug reports) ships in a
-          follow-up slice.
-        </p>
-      </div>
+      <p className="text-xs text-gray-400">
+        Create, edit, deactivate, reset password, delete. Click a username to
+        open their detail page (workspaces, recent activity, open bug reports).
+      </p>
 
       {/* Create form */}
       <section className="border border-[#2a2a2c] rounded p-5 bg-[#161617]">

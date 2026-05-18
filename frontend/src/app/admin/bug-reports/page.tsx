@@ -104,8 +104,6 @@ export default function AdminBugReportsPage() {
 
   return (
     <div className="max-w-6xl">
-      <h2 className="text-xl font-semibold mb-4">Bug reports</h2>
-
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <FilterColumn label="Status">
           <select

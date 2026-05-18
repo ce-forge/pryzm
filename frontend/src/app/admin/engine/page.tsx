@@ -29,13 +29,10 @@ export default function AdminEnginePage() {
 
   return (
     <div className="max-w-6xl">
-      <div className="mb-3 flex items-baseline justify-between gap-3">
-        <h2 className="text-xl font-semibold">Engine</h2>
-        <p className="text-xs text-gray-500">
-          Proxied through Pryzm&apos;s admin auth. llama-swap&apos;s own port
-          (8080) is not exposed externally.
-        </p>
-      </div>
+      <p className="text-xs text-gray-500 mb-3 text-right">
+        Proxied through Pryzm&apos;s admin auth. llama-swap&apos;s own port
+        (8080) is not exposed externally.
+      </p>
 
       <div className="border border-[#2a2a2c] rounded overflow-hidden bg-[#131314]">
         {src ? (
