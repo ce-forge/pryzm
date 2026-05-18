@@ -27,6 +27,7 @@ function uploadWithProgress(
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${APP_CONFIG.API_URL}/upload`);
+    xhr.withCredentials = true;
     const token = getToken();
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
