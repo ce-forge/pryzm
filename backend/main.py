@@ -15,6 +15,8 @@ from routers import admin_users as admin_users_router
 from routers import admin_templates as admin_templates_router
 from routers import admin_workspaces as admin_workspaces_router
 from routers import admin_audit as admin_audit_router
+from routers import bug_reports as bug_reports_router
+from routers import notifications as notifications_router
 from core import cookie_auth, llm_router
 from services import model_prewarm
 from services.tasks import garbage_collection_task
@@ -168,3 +170,7 @@ app.include_router(admin_users_router.router)
 app.include_router(admin_templates_router.router)
 app.include_router(admin_workspaces_router.router)
 app.include_router(admin_audit_router.router)
+app.include_router(bug_reports_router.user_router)
+app.include_router(bug_reports_router.admin_router)
+app.include_router(notifications_router.user_router)
+app.include_router(notifications_router.admin_router)

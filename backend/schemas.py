@@ -174,3 +174,33 @@ class AdminTemplateInstantiate(BaseModel):
     user_id: str
     slug: Optional[str] = None
     owner_can_edit: bool = False
+
+
+# ---------------------------------------------------------------------------
+# Bug reports
+# ---------------------------------------------------------------------------
+
+BUG_CATEGORY = Literal[
+    "incorrect_info", "vision_wrong", "tool_error", "slow", "ui_bug", "other",
+]
+
+
+class BugReportSubmit(BaseModel):
+    category: BUG_CATEGORY
+    message: str = Field(..., min_length=1, max_length=10_000)
+    include_session: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Notifications
+# ---------------------------------------------------------------------------
+
+class AdminNotificationSend(BaseModel):
+    user_id: str
+    message: str = Field(..., min_length=1, max_length=2_000)
+    link_url: Optional[str] = None
+
+
+class AdminNotificationBroadcast(BaseModel):
+    message: str = Field(..., min_length=1, max_length=2_000)
+    link_url: Optional[str] = None

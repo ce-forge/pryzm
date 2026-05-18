@@ -157,6 +157,36 @@ class AuditEvent(Base):
     created_at = Column(DateTime(timezone=True), primary_key=True, nullable=False, server_default=func.now())
 
 
+class BugReport(Base):
+    __tablename__ = "bug_reports"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_display_name = Column(Text, nullable=False)
+    workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True)
+    session_id = Column(String, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    category = Column(Text, nullable=False)
+    message = Column(Text, nullable=False)
+    payload = Column(JSONB, nullable=False, default=dict, server_default="{}")
+    status = Column(Text, nullable=False, server_default="open")
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    message = Column(Text, nullable=False)
+    source = Column(Text, nullable=False)
+    source_id = Column(String, nullable=True)
+    link_url = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    seen_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class Document(Base):
     __tablename__ = "documents"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
