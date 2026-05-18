@@ -61,9 +61,30 @@ def upgrade() -> None:
         "ON audit_events (workspace_id, created_at DESC);"
     ))
 
+    # Append-only on application writes, but the FK columns are allowed to
+    # transition to NULL because that's how Postgres honors the ON DELETE
+    # SET NULL contract when a user/workspace/session is hard-deleted. The
+    # trigger permits UPDATEs where every non-FK column is unchanged AND
+    # any changed FK column is being set to NULL. Anything else aborts.
     op.execute(sa.text("""
         CREATE OR REPLACE FUNCTION audit_events_no_mutation() RETURNS trigger AS $$
         BEGIN
+          IF TG_OP = 'UPDATE' THEN
+            IF NEW.id IS NOT DISTINCT FROM OLD.id
+               AND NEW.event_type IS NOT DISTINCT FROM OLD.event_type
+               AND NEW.user_display_name_at_event IS NOT DISTINCT FROM OLD.user_display_name_at_event
+               AND NEW.resource_type IS NOT DISTINCT FROM OLD.resource_type
+               AND NEW.resource_id IS NOT DISTINCT FROM OLD.resource_id
+               AND NEW.payload IS NOT DISTINCT FROM OLD.payload
+               AND NEW.source_ip IS NOT DISTINCT FROM OLD.source_ip
+               AND NEW.user_agent IS NOT DISTINCT FROM OLD.user_agent
+               AND NEW.created_at IS NOT DISTINCT FROM OLD.created_at
+               AND (NEW.user_id IS NOT DISTINCT FROM OLD.user_id OR NEW.user_id IS NULL)
+               AND (NEW.workspace_id IS NOT DISTINCT FROM OLD.workspace_id OR NEW.workspace_id IS NULL)
+               AND (NEW.session_id IS NOT DISTINCT FROM OLD.session_id OR NEW.session_id IS NULL) THEN
+              RETURN NEW;
+            END IF;
+          END IF;
           RAISE EXCEPTION 'audit_events is append-only';
         END;
         $$ LANGUAGE plpgsql;
