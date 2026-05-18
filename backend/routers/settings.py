@@ -9,11 +9,14 @@ are read by every signed-in user, not gated to admins.
 from typing import Dict
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session as DbSession
 
-from core import llm_server
+from core import cookie_auth, llm_server
+from core.audit import EventType, log_event
 from core.deps import get_http_client
 from core.prompt_manager import MICRO_PROMPTS
+from db import database, models
 from tools.registry import TOOL_DEFINITIONS
 
 
@@ -50,18 +53,40 @@ def get_prompts():
 
 
 @router.patch("/api/prompts")
-def update_prompts(payload: Dict[str, str]):
+def update_prompts(
+    payload: Dict[str, str],
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+):
     """Upsert one or more prompt overrides. Values are constrained to strings
     by the schema so callers can't smuggle non-string JSON into the file.
     To remove an override (and fall back to the default), DELETE the key."""
     MICRO_PROMPTS.save_prompts(payload)
+    log_event(
+        db, EventType.ADMIN_SYSTEM_MICRO_PROMPT_EDITED,
+        user=admin, request=request,
+        payload={"keys_changed": list(payload.keys()), "action": "edited"},
+    )
+    db.commit()
     return {"status": "success"}
 
 
 @router.delete("/api/prompts/{key}")
-def delete_prompt_override(key: str):
+def delete_prompt_override(
+    key: str,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+):
     """Drop a single prompt override so the default takes effect again."""
     removed = MICRO_PROMPTS.delete_prompt(key)
     if not removed:
         raise HTTPException(status_code=404, detail="No override exists for that key.")
+    log_event(
+        db, EventType.ADMIN_SYSTEM_MICRO_PROMPT_EDITED,
+        user=admin, request=request,
+        payload={"keys_changed": [key], "action": "deleted"},
+    )
+    db.commit()
     return {"status": "deleted", "key": key}

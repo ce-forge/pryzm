@@ -1,11 +1,12 @@
 """Admin endpoints for per-user workspace management."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
+from core.audit import EventType, log_event
 from db import database, models
 
 
@@ -64,24 +65,58 @@ def get_workspace(workspace_id: str, db: DbSession = Depends(database.get_db)):
 def update_workspace(
     workspace_id: str,
     payload: AdminWorkspaceUpdate,
+    request: Request,
     db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
 ):
     w = db.query(models.Workspace).filter_by(id=workspace_id).first()
     if w is None:
         raise HTTPException(status_code=404, detail="Workspace not found.")
     changes = payload.model_dump(exclude_unset=True)
+    changed_fields = [k for k, v in changes.items() if getattr(w, k, None) != v]
     for k, v in changes.items():
         if k == "color" and not hasattr(models.Workspace, "color"):
             continue
         setattr(w, k, v)
+    log_event(
+        db, EventType.ADMIN_WORKSPACE_EDITED,
+        user=admin, request=request,
+        workspace=w,
+        payload={
+            "workspace_id": w.id,
+            "owner_user_id": w.user_id,
+            "slug": w.slug,
+            "changed_fields": changed_fields,
+        },
+    )
     db.commit(); db.refresh(w)
     return _ws_dict(w)
 
 
 @router.delete("/workspaces/{workspace_id}")
-def delete_workspace(workspace_id: str, db: DbSession = Depends(database.get_db)):
+def delete_workspace(
+    workspace_id: str,
+    request: Request,
+    db: DbSession = Depends(database.get_db),
+    admin: models.User = Depends(cookie_auth.require_admin),
+):
     w = db.query(models.Workspace).filter_by(id=workspace_id).first()
     if w is None:
         raise HTTPException(status_code=404, detail="Workspace not found.")
+    session_count = db.query(models.Session).filter(models.Session.workspace_id == w.id).count()
+    folder_count = db.query(models.Folder).filter(models.Folder.workspace_id == w.id).count()
+    document_count = db.query(models.Document).filter(models.Document.workspace_id == w.id).count()
+    log_event(
+        db, EventType.ADMIN_WORKSPACE_DELETED,
+        user=admin, request=request,
+        payload={
+            "workspace_id": w.id,
+            "owner_user_id": w.user_id,
+            "slug": w.slug,
+            "removed_session_count": session_count,
+            "removed_folder_count": folder_count,
+            "removed_document_count": document_count,
+        },
+    )
     db.delete(w); db.commit()
     return {"ok": True}
