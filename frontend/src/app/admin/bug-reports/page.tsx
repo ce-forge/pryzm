@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 
 interface AdminBugReport {
@@ -352,7 +353,23 @@ function BugDetailModal({
             }
           />
           <DetailRow label="Workspace" value={bug.workspace_id ?? "—"} mono />
-          <DetailRow label="Session" value={bug.session_id ?? "—"} mono />
+          <div className="flex gap-4">
+            <div className="text-xs text-gray-400 w-24 shrink-0 pt-0.5">
+              Session
+            </div>
+            <div className="flex-1 font-mono text-xs">
+              {bug.session_id ? (
+                <Link
+                  href={`/admin/sessions/${encodeURIComponent(bug.session_id)}`}
+                  className="text-sky-400 hover:underline"
+                >
+                  Read session →
+                </Link>
+              ) : (
+                "—"
+              )}
+            </div>
+          </div>
           {bug.resolved_at && (
             <DetailRow
               label="Resolved"

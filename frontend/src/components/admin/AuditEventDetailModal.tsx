@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 import { EventTypeBadge } from "./EventTypeBadge";
 
@@ -116,6 +117,11 @@ export function AuditEventDetailModal({ eventId, onClose }: Props) {
                 label="Session"
                 id={event.session_id}
                 name={event.session_title}
+                href={
+                  event.session_id
+                    ? `/admin/sessions/${encodeURIComponent(event.session_id)}`
+                    : null
+                }
               />
               <DetailRow
                 label="Resource"
@@ -183,11 +189,14 @@ function NamedIdRow({
   label,
   id,
   name,
+  href,
 }: {
   label: string;
   id: string | null;
   name: string | null;
+  href?: string | null;
 }) {
+  const display = name ?? (id ? <span className="text-gray-500">(unknown)</span> : null);
   return (
     <div className="flex gap-4">
       <div className="text-xs text-gray-400 w-24 shrink-0 pt-0.5">{label}</div>
@@ -195,7 +204,16 @@ function NamedIdRow({
         {id ? (
           <>
             <div className="text-sm truncate">
-              {name ?? <span className="text-gray-500">(unknown)</span>}
+              {href ? (
+                <Link
+                  href={href}
+                  className="text-sky-400 hover:underline"
+                >
+                  {display}
+                </Link>
+              ) : (
+                display
+              )}
             </div>
             <div className="font-mono text-[10px] text-gray-500 truncate">
               {id}
