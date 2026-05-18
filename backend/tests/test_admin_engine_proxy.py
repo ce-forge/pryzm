@@ -2,7 +2,9 @@
 
 llama-swap isn't running in unit tests, so the proxy's actual upstream
 is unreachable. These tests cover the auth gate + the upstream-error
-branch (httpx raises RequestError when there's nothing on port 8080).
+branch (httpx raises RequestError when there's nothing on port 8080) +
+the path-rewriting helpers that inject the proxy prefix into upstream
+HTML.
 """
 import httpx
 import pytest
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 from core import cookie_auth
 from db import database, models
 from main import app
+from routers.admin_engine import _rewrite_body, _rewrite_location
 
 
 def _seed_admin(db_session, username="admin"):
@@ -93,3 +96,43 @@ def test_engine_proxy_502_when_upstream_unreachable(db_session, monkeypatch):
                 delattr(app.state, "http_client")
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# Path-rewriting helpers
+# ---------------------------------------------------------------------------
+
+def test_rewrite_location_prefixes_root_relative():
+    assert _rewrite_location("/ui") == "/api/admin/engine/ui"
+    assert _rewrite_location("/ui/models") == "/api/admin/engine/ui/models"
+
+
+def test_rewrite_location_leaves_absolute_and_already_prefixed_alone():
+    assert _rewrite_location("https://example.com/ui") == "https://example.com/ui"
+    assert _rewrite_location("/api/admin/engine/ui") == "/api/admin/engine/ui"
+
+
+def test_rewrite_body_injects_prefix_into_html_paths():
+    html = (
+        b'<link rel="icon" href="/ui/favicon.png" />\n'
+        b'<script src="/ui/assets/index.js"></script>\n'
+        b'<a href="/api/models">models</a>\n'
+        b'fetch("/ui/data.json")'
+    )
+    out = _rewrite_body(html).decode("utf-8")
+    assert '/api/admin/engine/ui/favicon.png' in out
+    assert '/api/admin/engine/ui/assets/index.js' in out
+    assert '/api/admin/engine/api/models' in out
+    assert '/api/admin/engine/ui/data.json' in out
+
+
+def test_rewrite_body_skips_unrelated_paths():
+    # Random absolute paths that aren't llama-swap's surface stay untouched.
+    html = b'<a href="/something/else">x</a>'
+    out = _rewrite_body(html)
+    assert b'/api/admin/engine' not in out
+
+
+def test_rewrite_body_handles_non_utf8_gracefully():
+    bin_blob = b'\xff\xfe\x00\x01'
+    assert _rewrite_body(bin_blob) == bin_blob

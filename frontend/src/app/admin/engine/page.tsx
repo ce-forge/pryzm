@@ -21,7 +21,10 @@ export default function AdminEnginePage() {
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSrc(`${APP_CONFIG.API_URL}/api/admin/engine/`);
+    // llama-swap serves its UI at /ui/; skip the redirect for a cleaner
+    // first paint. The proxy rewrites in-page asset URLs back to the
+    // /api/admin/engine prefix.
+    setSrc(`${APP_CONFIG.API_URL}/api/admin/engine/ui/`);
   }, []);
 
   return (

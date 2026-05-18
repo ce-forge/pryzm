@@ -20,11 +20,12 @@ Implementation:
 from __future__ import annotations
 
 import logging
+import re
 from typing import AsyncIterator
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from config import settings
 from core import cookie_auth
@@ -38,6 +39,53 @@ router = APIRouter(
 
 
 _logger = logging.getLogger(__name__)
+
+
+# llama-swap's UI emits absolute paths like `/ui/foo.js` and `/api/models`
+# that resolve against the iframe's origin — i.e. against Pryzm, not under
+# the proxy prefix. We rewrite those to point back at the proxy. The path
+# segments listed here cover everything llama-swap serves at the top level
+# (UI assets + the JSON API the UI calls).
+_PROXY_PREFIX = "/api/admin/engine"
+_UPSTREAM_PATHS = ("ui", "api", "logs", "running", "upstream", "favicon")
+_REWRITE_PATTERN = re.compile(
+    r'(["\'(])(/(?:' + "|".join(_UPSTREAM_PATHS) + r')(?:[/?"#\'\s)]|$))'
+)
+
+
+def _rewrite_body(body: bytes) -> bytes:
+    """Inject the proxy prefix into absolute paths inside HTML / JS / JSON
+    text payloads. Conservative — only rewrites strings that start with
+    `/ui/`, `/api/`, etc. matching the upstream's top-level path set."""
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return body
+    rewritten = _REWRITE_PATTERN.sub(
+        lambda m: f"{m.group(1)}{_PROXY_PREFIX}{m.group(2)}", text,
+    )
+    return rewritten.encode("utf-8")
+
+
+def _rewrite_location(location: str) -> str:
+    """3xx Location headers from upstream are root-relative paths; prefix
+    them so the browser stays inside the proxy."""
+    if location.startswith("/") and not location.startswith(_PROXY_PREFIX):
+        return _PROXY_PREFIX + location
+    return location
+
+
+_REWRITE_CONTENT_TYPES = (
+    "text/html", "text/javascript", "application/javascript",
+    "application/json", "text/css",
+)
+
+
+def _should_rewrite_body(content_type: str | None) -> bool:
+    if not content_type:
+        return False
+    ct = content_type.split(";", 1)[0].strip().lower()
+    return ct in _REWRITE_CONTENT_TYPES
 
 
 # Headers we strip before forwarding to llama-swap. Host gets rewritten,
@@ -107,6 +155,30 @@ async def proxy(path: str, request: Request) -> StreamingResponse:
             detail=f"Engine proxy upstream unreachable: {exc.__class__.__name__}",
         )
 
+    out_headers = dict(_filter_response_headers(upstream.headers))
+    if "location" in out_headers:
+        out_headers["location"] = _rewrite_location(out_headers["location"])
+
+    content_type = upstream.headers.get("content-type")
+    rewrite = _should_rewrite_body(content_type)
+
+    if rewrite:
+        # Buffer the response so we can rewrite absolute paths in-place.
+        # llama-swap's HTML/JS payloads are small (kilobytes), so this is
+        # acceptable; streaming endpoints (text/event-stream) skip this
+        # branch and pass through chunk-by-chunk below.
+        try:
+            raw = await upstream.aread()
+        finally:
+            await upstream.aclose()
+        rewritten = _rewrite_body(raw)
+        return Response(
+            content=rewritten,
+            status_code=upstream.status_code,
+            headers=out_headers,
+            media_type=content_type,
+        )
+
     async def iter_body() -> AsyncIterator[bytes]:
         try:
             async for chunk in upstream.aiter_raw():
@@ -117,6 +189,6 @@ async def proxy(path: str, request: Request) -> StreamingResponse:
     return StreamingResponse(
         iter_body(),
         status_code=upstream.status_code,
-        headers=dict(_filter_response_headers(upstream.headers)),
-        media_type=upstream.headers.get("content-type"),
+        headers=out_headers,
+        media_type=content_type,
     )
