@@ -45,8 +45,10 @@ export default function AdminUsersPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
-  // Password reset state — keyed by user id; null means "not open"
+  // Per-row modal state — null means "not open"
   const [resetForUser, setResetForUser] = useState<AdminUser | null>(null);
+  const [editForUser, setEditForUser] = useState<AdminUser | null>(null);
+  const [deleteForUser, setDeleteForUser] = useState<AdminUser | null>(null);
 
   const loadUsers = useCallback(async () => {
     setLoadingList(true);
@@ -65,6 +67,26 @@ export default function AdminUsersPage() {
       setLoadingList(false);
     }
   }, []);
+
+  const toggleActive = useCallback(async (u: AdminUser) => {
+    const r = await apiFetch(`/api/admin/users/${encodeURIComponent(u.id)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_active: !u.is_active }),
+    });
+    if (!r.ok) {
+      let detail = `Failed (${r.status})`;
+      try {
+        const body = await r.json();
+        if (typeof body?.detail === "string") detail = body.detail;
+      } catch {
+        // body wasn't JSON
+      }
+      window.alert(detail);
+      return;
+    }
+    await loadUsers();
+  }, [loadUsers]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -163,8 +185,9 @@ export default function AdminUsersPage() {
       <div>
         <h2 className="text-xl font-semibold mb-1">Users</h2>
         <p className="text-xs text-gray-400">
-          Minimal v1 — create users and view the roster. Edit / reset password
-          / deactivate / delete ship in D.8.
+          Create, edit, deactivate, reset password, delete. Per-user detail
+          page (workspaces / recent activity / open bug reports) ships in a
+          follow-up slice.
         </p>
       </div>
 
@@ -289,7 +312,7 @@ export default function AdminUsersPage() {
                 <th className="px-3 py-2 font-medium w-32">Can create WS</th>
                 <th className="px-3 py-2 font-medium w-44">Created</th>
                 <th className="px-3 py-2 font-medium w-44">Last login</th>
-                <th className="px-3 py-2 font-medium w-32">Actions</th>
+                <th className="px-3 py-2 font-medium w-56">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -322,13 +345,41 @@ export default function AdminUsersPage() {
                       : "never"}
                   </td>
                   <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => setResetForUser(u)}
-                      className="text-xs px-2 py-1 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
-                    >
-                      Reset password
-                    </button>
+                    <div className="flex flex-wrap gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setEditForUser(u)}
+                        className="text-xs px-2 py-1 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setResetForUser(u)}
+                        className="text-xs px-2 py-1 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+                      >
+                        Reset pw
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => toggleActive(u)}
+                        className={
+                          "text-xs px-2 py-1 rounded border " +
+                          (u.is_active
+                            ? "bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25"
+                            : "bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25")
+                        }
+                      >
+                        {u.is_active ? "Deactivate" : "Reactivate"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteForUser(u)}
+                        className="text-xs px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-300 hover:bg-red-500/25"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -343,6 +394,28 @@ export default function AdminUsersPage() {
           onClose={() => setResetForUser(null)}
           onDone={() => {
             setResetForUser(null);
+            loadUsers();
+          }}
+        />
+      )}
+
+      {editForUser && (
+        <EditUserModal
+          target={editForUser}
+          onClose={() => setEditForUser(null)}
+          onDone={() => {
+            setEditForUser(null);
+            loadUsers();
+          }}
+        />
+      )}
+
+      {deleteForUser && (
+        <DeleteUserModal
+          target={deleteForUser}
+          onClose={() => setDeleteForUser(null)}
+          onDone={() => {
+            setDeleteForUser(null);
             loadUsers();
           }}
         />
@@ -513,5 +586,295 @@ function Checkbox({
         )}
       </span>
     </label>
+  );
+}
+
+
+function EditUserModal({
+  target,
+  onClose,
+  onDone,
+}: {
+  target: AdminUser;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [username, setUsername] = useState(target.username);
+  const [email, setEmail] = useState(target.email ?? "");
+  const [isAdmin, setIsAdmin] = useState(target.is_admin);
+  const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(
+    target.can_create_workspaces,
+  );
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const submit = async (ev: FormEvent) => {
+    ev.preventDefault();
+    setSubmitting(true);
+    setError(null);
+    try {
+      // Send only fields that actually changed. PATCH treats missing keys
+      // as unset, so this is enough to keep the audit's changed_fields
+      // payload clean.
+      const patch: Record<string, unknown> = {};
+      if (username.trim() !== target.username) patch.username = username.trim();
+      const normalizedEmail = email.trim() || null;
+      if (normalizedEmail !== (target.email ?? null)) patch.email = normalizedEmail;
+      if (isAdmin !== target.is_admin) patch.is_admin = isAdmin;
+      if (canCreateWorkspaces !== target.can_create_workspaces) {
+        patch.can_create_workspaces = canCreateWorkspaces;
+      }
+
+      if (Object.keys(patch).length === 0) {
+        onClose();
+        return;
+      }
+
+      const r = await apiFetch(`/api/admin/users/${encodeURIComponent(target.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) {
+        let detail = `Failed (${r.status})`;
+        try {
+          const body = await r.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // body wasn't JSON
+        }
+        setError(detail);
+        return;
+      }
+      onDone();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#1e1e1f] text-[#e3e3e3] rounded-lg w-full max-w-md border border-[#2a2a2c]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2c]">
+          <h3 className="text-sm font-semibold">Edit {target.username}</h3>
+          <button
+            type="button"
+            className="text-gray-400 hover:text-[#e3e3e3] text-lg leading-none"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="p-5 space-y-4">
+          <Field label="Username">
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm"
+              autoComplete="off"
+            />
+          </Field>
+
+          <Field label="Email (optional)">
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm"
+              autoComplete="off"
+            />
+          </Field>
+
+          <div className="flex flex-wrap gap-6">
+            <Checkbox
+              label="Admin"
+              checked={isAdmin}
+              onChange={setIsAdmin}
+            />
+            <Checkbox
+              label="Can create workspaces"
+              checked={canCreateWorkspaces}
+              onChange={setCanCreateWorkspaces}
+            />
+          </div>
+
+          {error && <div className="text-sm text-red-400">{error}</div>}
+
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm px-3 py-1.5 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="text-sm px-3 py-1.5 rounded bg-[#2a2a2c] hover:bg-[#3a3a3c] disabled:opacity-50"
+            >
+              {submitting ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+
+function DeleteUserModal({
+  target,
+  onClose,
+  onDone,
+}: {
+  target: AdminUser;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [hardDelete, setHardDelete] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  // Hard delete requires the admin to type the username — destructive
+  // cascade through sessions/folders/documents, no undo.
+  const canSubmit = hardDelete ? confirmText === target.username : true;
+
+  const submit = async (ev: FormEvent) => {
+    ev.preventDefault();
+    if (!canSubmit) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const url = `/api/admin/users/${encodeURIComponent(target.id)}${hardDelete ? "?hard=true" : ""}`;
+      const r = await apiFetch(url, { method: "DELETE" });
+      if (!r.ok) {
+        let detail = `Failed (${r.status})`;
+        try {
+          const body = await r.json();
+          if (typeof body?.detail === "string") detail = body.detail;
+        } catch {
+          // body wasn't JSON
+        }
+        setError(detail);
+        return;
+      }
+      onDone();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#1e1e1f] text-[#e3e3e3] rounded-lg w-full max-w-md border border-[#2a2a2c]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2c]">
+          <h3 className="text-sm font-semibold">Delete {target.username}</h3>
+          <button
+            type="button"
+            className="text-gray-400 hover:text-[#e3e3e3] text-lg leading-none"
+            onClick={onClose}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="p-5 space-y-4">
+          <p className="text-sm text-gray-300">
+            By default this is a <strong>soft delete</strong> — the user is
+            marked inactive and signed out everywhere. Their workspaces,
+            chats, and bug reports remain intact, and you can reactivate
+            them later.
+          </p>
+
+          <Checkbox
+            label="Hard delete (cascades through everything)"
+            hint="Removes the user row AND their workspaces, chats, folders, and documents. Audit history stays (FK SET NULL on user_id)."
+            checked={hardDelete}
+            onChange={(v) => {
+              setHardDelete(v);
+              setConfirmText("");
+            }}
+          />
+
+          {hardDelete && (
+            <Field label={`Type "${target.username}" to confirm`}>
+              <input
+                type="text"
+                value={confirmText}
+                onChange={(e) => setConfirmText(e.target.value)}
+                className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm font-mono"
+                autoComplete="off"
+              />
+            </Field>
+          )}
+
+          {error && <div className="text-sm text-red-400">{error}</div>}
+
+          <div className="flex gap-2 justify-end">
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm px-3 py-1.5 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting || !canSubmit}
+              className={
+                "text-sm px-3 py-1.5 rounded border " +
+                (hardDelete
+                  ? "bg-red-500/20 border-red-500/40 text-red-200 hover:bg-red-500/30 disabled:opacity-50"
+                  : "bg-amber-500/15 border-amber-500/30 text-amber-200 hover:bg-amber-500/25 disabled:opacity-50")
+              }
+            >
+              {submitting
+                ? "Deleting…"
+                : hardDelete
+                ? "Hard delete"
+                : "Soft delete"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
