@@ -81,6 +81,7 @@ def create_user(
             display_name=tmpl.display_name,
             system_prompt=tmpl.system_prompt,
             enabled_tools=list(tmpl.enabled_tools or []),
+            color=tmpl.color,
             template_id=tmpl.id,
             user_id=user.id,
             owner_can_edit=starter.owner_can_edit,

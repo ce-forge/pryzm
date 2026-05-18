@@ -72,6 +72,7 @@ def test_instantiate_template_for_user(db_session):
         t = models.WorkspaceTemplate(
             id="t-instn", slug="t-instn", display_name="T", system_prompt="",
             enabled_tools=[], engine_config={"backend": "llama_cpp"},
+            color="orange",
         )
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add_all([t, bob]); db_session.commit(); db_session.refresh(bob)
@@ -85,6 +86,8 @@ def test_instantiate_template_for_user(db_session):
         ).first()
         assert instance is not None
         assert instance.owner_can_edit is True
+        # Color follows from the template — used to require a separate push.
+        assert instance.color == "orange"
     finally:
         app.dependency_overrides.clear()
 
