@@ -148,3 +148,40 @@ def test_me_returns_401_when_no_cookie(db_session, monkeypatch):
         assert r.status_code == 401
     finally:
         app.dependency_overrides.clear()
+
+
+def test_me_returns_user_and_workspaces(db_session, monkeypatch):
+    admin = models.User(
+        username="admin",
+        password_hash=cookie_auth.hash_password("admin-pw-12chars"),
+        is_admin=True,
+        is_active=True,
+        can_create_workspaces=True,
+    )
+    db_session.add(admin); db_session.commit(); db_session.refresh(admin)
+
+    ws = models.Workspace(
+        slug="my-ws", display_name="My WS", system_prompt="",
+        enabled_tools=[], engine_config={"backend": "llama_cpp"},
+        user_id=admin.id, owner_can_edit=True, position=0,
+    )
+    db_session.add(ws); db_session.commit()
+
+    sid = cookie_auth.create_session(db_session, admin.id)
+    monkeypatch.setattr("config.settings.PRYZM_API_TOKEN", "test-token")
+    app.dependency_overrides[database.get_db] = lambda: db_session
+    try:
+        c = TestClient(app)
+        c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+        r = c.get("/api/auth/me")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["username"] == "admin"
+        assert body["is_admin"] is True
+        assert body["can_create_workspaces"] is True
+        assert body["must_change_password"] in (True, False)
+        assert len(body["workspaces"]) == 1
+        assert body["workspaces"][0]["slug"] == "my-ws"
+        assert body["workspaces"][0]["owner_can_edit"] is True
+    finally:
+        app.dependency_overrides.clear()

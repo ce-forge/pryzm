@@ -1,6 +1,6 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { apiFetch, getToken } from "@/utils/apiClient";
+import { apiFetch } from "@/utils/apiClient";
 
 type Model = {
   id: string;
@@ -96,9 +96,7 @@ export default function ModelsSection() {
     sseRef.current = ac;
 
     try {
-      const token = getToken();
-      const res = await fetch(`/api/admin/models/${encodeURIComponent(id)}/status`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const res = await apiFetch(`/api/admin/models/${encodeURIComponent(id)}/status`, {
         signal: ac.signal,
       });
       if (!res.ok || !res.body) throw new Error(`status stream HTTP ${res.status}`);
@@ -192,9 +190,11 @@ export default function ModelsSection() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-mono text-sm text-[#e3e3e3] truncate">{m.id}</span>
-                  <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider ${m.group === "always-on" ? "bg-purple-900/40 text-purple-300" : "bg-blue-900/40 text-blue-300"}`}>
-                    {m.group ?? "—"}
-                  </span>
+                  {m.group && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider ${m.group === "always-on" ? "bg-purple-900/40 text-purple-300" : "bg-blue-900/40 text-blue-300"}`}>
+                      {m.group}
+                    </span>
+                  )}
                   {m.tags.map(t => (
                     <span key={t} className="text-[10px] px-1.5 py-0.5 rounded bg-[#282a2c] text-gray-400">{t}</span>
                   ))}

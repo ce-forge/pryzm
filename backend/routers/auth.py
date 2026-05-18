@@ -79,10 +79,11 @@ def change_password(
 ):
     if not cookie_auth.verify_password(payload.current_password, user.password_hash):
         raise HTTPException(status_code=401, detail="Current password incorrect.")
-    if len(payload.new_password) < 12:
-        raise HTTPException(status_code=400, detail="Password must be at least 12 characters.")
+    if len(payload.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
     current_sid = request.cookies.get(cookie_auth.COOKIE_NAME)
     user.password_hash = cookie_auth.hash_password(payload.new_password)
+    user.must_change_password = False
     db.query(models.AuthSession).filter(
         models.AuthSession.user_id == user.id,
         models.AuthSession.id != current_sid,
@@ -92,11 +93,33 @@ def change_password(
 
 
 @router.get("/me")
-def me(user: models.User = Depends(cookie_auth.current_user)):
+def me(
+    user: models.User = Depends(cookie_auth.current_user),
+    db: DbSession = Depends(database.get_db),
+):
+    workspaces = (
+        db.query(models.Workspace)
+        .filter(models.Workspace.user_id == user.id)
+        .order_by(models.Workspace.position.asc(), models.Workspace.created_at.asc())
+        .all()
+    )
     return {
         "id": user.id,
         "username": user.username,
         "is_admin": user.is_admin,
         "can_create_workspaces": user.can_create_workspaces,
         "email": user.email,
+        "must_change_password": user.must_change_password,
+        "workspaces": [
+            {
+                "id": w.id,
+                "slug": w.slug,
+                "display_name": w.display_name,
+                "color": w.color,
+                "owner_can_edit": w.owner_can_edit,
+                "template_id": w.template_id,
+                "position": w.position,
+            }
+            for w in workspaces
+        ],
     }

@@ -27,6 +27,7 @@ function uploadWithProgress(
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${APP_CONFIG.API_URL}/upload`);
+    xhr.withCredentials = true;
     const token = getToken();
     if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
@@ -68,7 +69,7 @@ function subscribeToIngestionStatus(
   const url = new URL(`${APP_CONFIG.API_URL}/uploads/${documentId}/events`);
   url.searchParams.set("workspace", workspace);
   if (token) url.searchParams.set("token", token);
-  const es = new EventSource(url.toString());
+  const es = new EventSource(url.toString(), { withCredentials: true });
 
   es.onmessage = (e) => {
     let payload: { status?: string; error?: string };

@@ -85,8 +85,9 @@ export default function SessionDirectory() {
 
   const fetchSessions = useCallback(() => {
     apiFetch(`/sessions?workspace=${workspace}`, { cache: 'no-store' })
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
+        if (!Array.isArray(data)) return;
         setSessions(prev => {
           const backendHasActive = data.some((s: SessionInfo) => s.id === currentSessionId);
           if (currentSessionId && currentSessionId !== "temp_new_chat" && !backendHasActive) {
@@ -102,11 +103,9 @@ export default function SessionDirectory() {
 
   const fetchFolders = useCallback(() => {
     apiFetch(`/folders?workspace=${workspace}`)
-      .then(res => res.json())
+      .then(res => (res.ok ? res.json() : null))
       .then(data => {
-        // localStorage can hold corrupted JSON if the user (or another tab)
-        // wrote garbage; treat parse failure as "no folders open" instead of
-        // crashing the directory render.
+        if (!Array.isArray(data)) return;
         let openSet = new Set<string>();
         try {
           const savedOpen = localStorage.getItem(`pryzm_folders_open_${workspace}`);

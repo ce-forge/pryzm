@@ -1,6 +1,7 @@
 """Bootstrap admin creation on startup."""
 import pytest
 
+from core import cookie_auth
 from core.bootstrap import ensure_bootstrap_admin
 from db import models
 
@@ -15,6 +16,7 @@ def test_bootstrap_creates_admin_when_users_empty(db_session, monkeypatch):
     assert admin.is_admin is True
     assert admin.is_active is True
     assert admin.can_create_workspaces is True
+    assert admin.must_change_password is False
 
 
 def test_bootstrap_noop_when_users_already_exist(db_session, monkeypatch):
@@ -31,11 +33,15 @@ def test_bootstrap_noop_when_users_already_exist(db_session, monkeypatch):
     assert db_session.query(models.User).filter_by(username="admin").first() is None
 
 
-def test_bootstrap_raises_when_users_empty_and_no_password(db_session, monkeypatch):
+def test_bootstrap_defaults_to_admin_admin_when_env_unset(db_session, monkeypatch):
+    monkeypatch.setattr("config.settings.PRYZM_BOOTSTRAP_ADMIN_USERNAME", "admin")
     monkeypatch.setattr("config.settings.PRYZM_BOOTSTRAP_ADMIN_PASSWORD", None)
 
-    with pytest.raises(RuntimeError, match="PRYZM_BOOTSTRAP_ADMIN_PASSWORD"):
-        ensure_bootstrap_admin(db_session)
+    ensure_bootstrap_admin(db_session)
+
+    admin = db_session.query(models.User).filter_by(username="admin").one()
+    assert admin.must_change_password is True
+    assert cookie_auth.verify_password("admin", admin.password_hash) is True
 
 
 def test_bootstrap_instantiates_builtin_templates_for_admin(db_session, monkeypatch):

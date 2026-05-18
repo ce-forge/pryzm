@@ -36,5 +36,9 @@ export async function apiFetch(
   const token = getToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(`${APP_CONFIG.API_URL}${path}`, { ...init, headers });
+  return fetch(`${APP_CONFIG.API_URL}${path}`, {
+    ...init,
+    headers,
+    credentials: "include",
+  });
 }

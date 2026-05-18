@@ -51,8 +51,8 @@ def create_user(
     if existing is not None:
         raise HTTPException(status_code=409, detail="Username already exists.")
 
-    if len(payload.password) < 12:
-        raise HTTPException(status_code=400, detail="Password must be at least 12 characters.")
+    if len(payload.password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
 
     user = models.User(
         username=payload.username,
@@ -138,8 +138,8 @@ def reset_password(
     u = db.query(models.User).filter_by(id=user_id).first()
     if u is None:
         raise HTTPException(status_code=404, detail="User not found.")
-    if len(payload.new_password) < 12:
-        raise HTTPException(status_code=400, detail="Password must be at least 12 characters.")
+    if len(payload.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
     u.password_hash = cookie_auth.hash_password(payload.new_password)
     cookie_auth.invalidate_user_sessions(db, user_id)
     db.commit()

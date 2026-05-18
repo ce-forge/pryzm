@@ -3,6 +3,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
+import { useAuth } from "@/context/AuthContext";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import WorkspaceSettings from "./WorkspaceSettings";
 import { Workspace } from "@/hooks/useWorkspaces";
@@ -16,6 +17,7 @@ type SettingsTarget =
 
 export default function WorkspaceSwitcher() {
   const { workspacesApi, activeWorkspace } = useWorkspaceContext();
+  const { user } = useAuth();
   const router = useRouter();
   const [isOpen, setIsOpen] = useState(false);
   const [settingsTarget, setSettingsTarget] = useState<SettingsTarget>(null);
@@ -99,17 +101,19 @@ export default function WorkspaceSwitcher() {
             ))}
           </div>
 
-          <div className="border-t border-[#333537]">
-            <button
-              onClick={() => {
-                setIsOpen(false);
-                setSettingsTarget({ workspace: null, mode: "create" });
-              }}
-              className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-[#282a2c] hover:text-[#e3e3e3]"
-            >
-              + New workspace
-            </button>
-          </div>
+          {user?.can_create_workspaces && (
+            <div className="border-t border-[#333537]">
+              <button
+                onClick={() => {
+                  setIsOpen(false);
+                  setSettingsTarget({ workspace: null, mode: "create" });
+                }}
+                className="w-full text-left px-3 py-2 text-sm text-gray-400 hover:bg-[#282a2c] hover:text-[#e3e3e3]"
+              >
+                + New workspace
+              </button>
+            </div>
+          )}
         </div>
       )}
 

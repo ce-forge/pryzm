@@ -10,7 +10,7 @@ from main import app
 def _setup(db_session, monkeypatch):
     u = models.User(
         username="alice", password_hash=cookie_auth.hash_password("old-pw-12chars"),
-        is_admin=False, is_active=True,
+        is_admin=False, is_active=True, must_change_password=True,
     )
     db_session.add(u); db_session.commit(); db_session.refresh(u)
     sid_current = cookie_auth.create_session(db_session, u.id)
@@ -36,6 +36,8 @@ def test_password_change_invalidates_other_sessions(db_session, monkeypatch):
         db_session.expire_all()
         remaining = {row.id for row in db_session.query(models.AuthSession).filter_by(user_id=u.id).all()}
         assert remaining == {sid_current}
+        refreshed = db_session.query(models.User).filter_by(id=u.id).one()
+        assert refreshed.must_change_password is False
     finally:
         app.dependency_overrides.clear()
 
@@ -57,7 +59,7 @@ def test_password_change_short_password_returns_400(db_session, monkeypatch):
         c, u, _, _ = _setup(db_session, monkeypatch)
         r = c.post("/api/auth/password", json={
             "current_password": "old-pw-12chars",
-            "new_password": "short",
+            "new_password": "abc",
         })
         assert r.status_code == 400
     finally:

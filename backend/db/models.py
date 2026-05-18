@@ -1,5 +1,5 @@
 import sqlalchemy as sa
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum, Computed, Integer, JSON
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum, Computed, Integer, JSON, text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
@@ -124,6 +124,7 @@ class User(Base):
     can_create_workspaces = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
+    must_change_password = Column(Boolean, nullable=False, default=False, server_default=text("false"))
 
 
 class AuthSession(Base):

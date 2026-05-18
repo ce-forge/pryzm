@@ -53,6 +53,7 @@ export default function ReferencedFilesPreview({ files }: { files: ReferencedFil
               alt={f.filename}
               className="block w-full h-auto max-h-[420px] object-contain"
               loading="lazy"
+              crossOrigin="use-credentials"
             />
             <div className="px-3 py-1.5 text-[11px] text-gray-400 truncate">
               {f.filename}

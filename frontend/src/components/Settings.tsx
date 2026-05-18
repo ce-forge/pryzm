@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { apiFetch, getToken, setToken, clearToken } from "@/utils/apiClient";
+import { useAuth } from "@/context/AuthContext";
 import ModelsSection from "@/components/SettingsModels";
 
 export default function SettingsModal({ workspace: _workspace, close }: { workspace: string, close: () => void }) {
+  const { user } = useAuth();
   const [prompts, setPrompts] = useState<Record<string, string>>({});
   const [initialPrompts, setInitialPrompts] = useState<Record<string, string>>({});
 
@@ -78,7 +80,8 @@ export default function SettingsModal({ workspace: _workspace, close }: { worksp
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-6">
 
-          {/* Connection / API Token */}
+          {/* Connection / API Token — admin-only */}
+          {user?.is_admin && (
           <div>
             <h3 className="text-sm font-semibold text-[#e3e3e3] mb-1">Connection</h3>
             <p className="text-xs text-gray-500 mb-3">The bearer token used to authenticate with the backend. Matches <code className="font-mono text-xs bg-[#131314] px-1 py-0.5 rounded">PRYZM_API_TOKEN</code> in the backend&apos;s <code className="text-xs">.env</code> file.</p>
@@ -129,8 +132,9 @@ export default function SettingsModal({ workspace: _workspace, close }: { worksp
               </div>
             )}
           </div>
+          )}
 
-          <ModelsSection />
+          {user?.is_admin && <ModelsSection />}
 
           <div className="border-t border-[#333537] pt-6">
             <h3 className="text-sm font-semibold text-[#e3e3e3] mb-1">Micro-Prompts</h3>
