@@ -9,9 +9,9 @@ import { AppProviders } from "@/context/AppProviders";
 const TABS = [
   { href: "/admin/users", label: "Users" },
   { href: "/admin/workspaces", label: "Workspaces" },
-  { href: "/admin/audit", label: "Audit" },
-  { href: "/admin/engine", label: "Engine" },
   { href: "/admin/system", label: "System" },
+  { href: "/admin/engine", label: "Engine" },
+  { href: "/admin/audit", label: "Audit" },
   { href: "/admin/bug-reports", label: "Bug reports" },
 ];
 

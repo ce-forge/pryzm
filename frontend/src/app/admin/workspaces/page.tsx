@@ -37,8 +37,7 @@ export default function AdminWorkspacesPage() {
   const [subTab, setSubTab] = useState<SubTab>("workspaces");
   return (
     <div className="max-w-6xl">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">Workspaces</h2>
+      <div className="flex justify-end mb-4">
         <div className="flex gap-1 border border-[#2a2a2c] rounded p-0.5 bg-[#1e1e1f]">
           <SubTabButton
             label="All workspaces"

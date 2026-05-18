@@ -155,8 +155,6 @@ export default function AdminAuditPage() {
 
   return (
     <div className="max-w-6xl">
-      <h2 className="text-xl font-semibold mb-4">Audit</h2>
-
       <div className="flex flex-wrap gap-3 items-end mb-4">
         <FilterColumn label="Event type">
           <select

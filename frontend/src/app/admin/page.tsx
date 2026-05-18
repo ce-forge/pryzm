@@ -4,15 +4,15 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 /**
- * Landing on /admin redirects to the Audit tab as the default. The audit
- * data is the dashboard's primary unique surface (everything else is
- * either CRUD or settings already available elsewhere), so it's the
- * highest-value first view for an admin opening the dashboard.
+ * Landing on /admin redirects to the Users tab as the default — that's
+ * the most common entry point (admin opens the dashboard to manage users)
+ * and matches the first tab in the nav so the active-state highlight is
+ * consistent.
  */
 export default function AdminIndex() {
   const router = useRouter();
   useEffect(() => {
-    router.replace("/admin/audit");
+    router.replace("/admin/users");
   }, [router]);
   return null;
 }
