@@ -24,6 +24,18 @@ from tools.registry import build_tool_set
 _log = logging.getLogger(__name__)
 
 
+def _attachment_filenames(db: Session, attachment_ids: list[str], workspace_id: str) -> list[str]:
+    """Best-effort filename lookup for the audit payload. Cross-workspace
+    ids silently drop out — the analyze endpoint already filters those."""
+    if not attachment_ids:
+        return []
+    rows = db.query(models.Document.filename).filter(
+        models.Document.id.in_(attachment_ids),
+        models.Document.workspace_id == workspace_id,
+    ).all()
+    return [r[0] for r in rows]
+
+
 def _accumulate_tool_event(acc: list, event: dict) -> None:
     """Append/update tool-call accumulator from a streamed event.
 
@@ -403,6 +415,26 @@ async def analyze_data(
             db.refresh(user_msg)
             user_message_id = user_msg.id
 
+            log_event(
+                db,
+                EventType.CHAT_MESSAGE_SENT,
+                user=user,
+                workspace=workspace,
+                session=chat_session,
+                resource_type="message",
+                resource_id=user_msg.id,
+                payload={
+                    "content_preview": request.prompt[:200],
+                    "token_count": len(request.prompt) // 4,
+                    "has_attachments": bool(request.attachments),
+                    "attachment_filenames": _attachment_filenames(
+                        db, request.attachments or [], workspace.id
+                    ),
+                },
+                request=http_request,
+            )
+            db.commit()
+
         history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
         safe_messages = build_safe_messages(history)
 
@@ -488,6 +520,26 @@ async def analyze_data(
                         save_db.commit()
                         save_db.refresh(ai_msg)
                         assistant_message_id = ai_msg.id
+
+                        usage_for_audit = _last_chat_metric_snapshot() or {}
+                        prompt_eval = int(usage_for_audit.get("prompt_eval_count") or 0)
+                        eval_count = int(usage_for_audit.get("eval_count") or 0)
+                        log_event(
+                            save_db,
+                            EventType.CHAT_MESSAGE_RECEIVED,
+                            user=save_db.query(models.User).filter_by(id=user.id).first(),
+                            workspace=save_db.query(models.Workspace).filter_by(id=workspace_id).first(),
+                            session=save_db.query(models.Session).filter_by(id=session_id).first(),
+                            resource_type="message",
+                            resource_id=ai_msg.id,
+                            payload={
+                                "content_preview": full_response[:200],
+                                "token_count": prompt_eval + eval_count,
+                                "model": usage_for_audit.get("model") or "",
+                                "finished_cleanly": True,
+                            },
+                        )
+                        save_db.commit()
                     except Exception as e:
                         save_db.rollback()
                         print(f"Failed to save assistant message: {e}")
@@ -537,6 +589,25 @@ async def analyze_data(
                             status=status,
                         )
                         background_db.add(ai_msg)
+                        background_db.commit()
+                        background_db.refresh(ai_msg)
+
+                        log_event(
+                            background_db,
+                            EventType.CHAT_MESSAGE_RECEIVED,
+                            user=background_db.query(models.User).filter_by(id=user.id).first(),
+                            workspace=background_db.query(models.Workspace).filter_by(id=workspace_id).first(),
+                            session=background_db.query(models.Session).filter_by(id=session_id).first(),
+                            resource_type="message",
+                            resource_id=ai_msg.id,
+                            payload={
+                                "content_preview": full_response[:200],
+                                "token_count": 0,
+                                "model": "",
+                                "finished_cleanly": False,
+                                "status": status,
+                            },
+                        )
                         background_db.commit()
                     except Exception as e:
                         background_db.rollback()
