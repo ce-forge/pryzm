@@ -1,5 +1,20 @@
 @import "tailwindcss";
 
+@theme {
+  /* Sidebar width — referenced by w-sidebar in Tailwind classes and the
+     .sidebar-collapsed rule below. */
+  --spacing-sidebar: 280px;
+}
+
+/* Desktop-only: pulls the sidebar's layout box left by its own width so
+   the chat reclaims the space. Animated via transition-all on the sidebar
+   div. Mobile (position: fixed) ignores margins — mobile uses translate. */
+@media (min-width: 768px) {
+  .sidebar-collapsed {
+    margin-left: calc(-1 * var(--spacing-sidebar));
+  }
+}
+
 body {
   background-color: #121212;
   color: #f8fafc; /* Slate 50 */

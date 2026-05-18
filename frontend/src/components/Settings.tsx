@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { apiFetch, getToken, setToken, clearToken } from "@/utils/apiClient";
 import ModelsSection from "@/components/SettingsModels";
 
@@ -65,7 +66,7 @@ export default function SettingsModal({ workspace: _workspace, close }: { worksp
     setIsEditingToken(false);
   };
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="bg-[#1e1f20] w-full max-w-3xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
         <div className="flex justify-between items-center p-5 border-b border-[#333537] bg-[#131314]">
@@ -164,4 +165,8 @@ export default function SettingsModal({ workspace: _workspace, close }: { worksp
       </div>
     </div>
   );
+
+  // Portal to body — escapes the sidebar's transform containing block.
+  if (typeof document === "undefined") return null;
+  return createPortal(modalContent, document.body);
 }
