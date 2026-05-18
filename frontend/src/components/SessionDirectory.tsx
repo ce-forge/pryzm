@@ -163,19 +163,27 @@ export default function SessionDirectory() {
   };
 
   const createFolderImpl = async (name: string) => {
-    const newFolder = { id: uuid(), name, workspace };
+    // tempId is the placeholder used until the server returns the real one.
+    // Swap is required: without it, drag-drop into the new folder PATCHes
+    // sessions with an id no row in `folders` has, and the move fails until
+    // a fetchFolders cycle replaces state with the real backend ids.
+    const tempId = `temp-${uuid()}`;
     setIsCreatingFolder(false);
     try {
       await withRollback(
-        () => setFolders((prev) => [{ ...newFolder, isOpen: true }, ...prev]),
-        () => setFolders((prev) => prev.filter((f) => f.id !== newFolder.id)),
+        () => setFolders((prev) => [{ id: tempId, name, isOpen: true }, ...prev]),
+        () => setFolders((prev) => prev.filter((f) => f.id !== tempId)),
         async () => {
           const r = await apiFetch("/folders", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(newFolder),
+            body: JSON.stringify({ name, workspace }),
           });
           if (!r.ok) throw new Error("create failed");
+          const body = await r.json().catch(() => null);
+          const realId = body && typeof body.id === "string" ? body.id : null;
+          if (!realId) throw new Error("create response missing id");
+          setFolders((prev) => prev.map((f) => f.id === tempId ? { ...f, id: realId } : f));
         },
       );
     } catch (err) {
