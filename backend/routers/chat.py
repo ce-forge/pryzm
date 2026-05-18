@@ -10,6 +10,7 @@ from sqlalchemy import tuple_, func as sqlfunc
 from sqlalchemy.orm import Session
 
 from core import ai_engine, cookie_auth
+from core.audit import EventType, log_event
 from core.deps import get_http_client
 from core.engine_config import engine_config_for
 from core.llm_metrics import get_last_chat_snapshot as _last_chat_metric_snapshot
@@ -21,6 +22,18 @@ from services import condense, ingest_broker
 from tools.registry import build_tool_set
 
 _log = logging.getLogger(__name__)
+
+
+def _attachment_filenames(db: Session, attachment_ids: list[str], workspace_id: str) -> list[str]:
+    """Best-effort filename lookup for the audit payload. Cross-workspace
+    ids silently drop out — the analyze endpoint already filters those."""
+    if not attachment_ids:
+        return []
+    rows = db.query(models.Document.filename).filter(
+        models.Document.id.in_(attachment_ids),
+        models.Document.workspace_id == workspace_id,
+    ).all()
+    return [r[0] for r in rows]
 
 
 def _accumulate_tool_event(acc: list, event: dict) -> None:
@@ -291,13 +304,28 @@ def update_session(
 @router.delete("/sessions/{session_id}")
 def delete_session(
     session_id: str,
+    request: Request,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     """Delete a session and its messages. Scoped to workspace —
     cross-workspace 404s."""
     session = verify_workspace_owns(session_id, models.Session, workspace.id, db)
+    deleted_title = session.title
+
     db.delete(session)
+
+    log_event(
+        db,
+        EventType.CHAT_SESSION_DELETED,
+        user=user,
+        workspace=workspace,
+        resource_type="session",
+        resource_id=session_id,
+        payload={"title": deleted_title},
+        request=request,
+    )
     db.commit()
     return {"status": "deleted"}
 
@@ -337,6 +365,21 @@ async def analyze_data(
             db.add(chat_session)
             db.commit()
             db.refresh(chat_session)
+            log_event(
+                db,
+                EventType.CHAT_SESSION_CREATED,
+                user=user,
+                workspace=workspace,
+                session=chat_session,
+                resource_type="session",
+                resource_id=chat_session.id,
+                payload={
+                    "title": chat_session.title,
+                    "source": "analyze",
+                },
+                request=http_request,
+            )
+            db.commit()
         elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
             chat_session.title = await ai_engine.generate_title(http_client, request.prompt, engine_config=engine_config)
             db.commit()
@@ -372,6 +415,26 @@ async def analyze_data(
             db.refresh(user_msg)
             user_message_id = user_msg.id
 
+            log_event(
+                db,
+                EventType.CHAT_MESSAGE_SENT,
+                user=user,
+                workspace=workspace,
+                session=chat_session,
+                resource_type="message",
+                resource_id=user_msg.id,
+                payload={
+                    "content_preview": request.prompt[:200],
+                    "token_count": len(request.prompt) // 4,
+                    "has_attachments": bool(request.attachments),
+                    "attachment_filenames": _attachment_filenames(
+                        db, request.attachments or [], workspace.id
+                    ),
+                },
+                request=http_request,
+            )
+            db.commit()
+
         history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
         safe_messages = build_safe_messages(history)
 
@@ -379,6 +442,7 @@ async def analyze_data(
         # `chat_session` after the local `db` is closed below.
         session_id = chat_session.id
         workspace_id = workspace.id
+        user_id = user.id
     finally:
         db.close()
 
@@ -413,6 +477,7 @@ async def analyze_data(
                 session_id=session_id,
                 is_disconnected=http_request.is_disconnected,
                 modes=request.modes,
+                user_id=user_id,
             ):
                 if await http_request.is_disconnected():
                     disconnected = True
@@ -457,6 +522,26 @@ async def analyze_data(
                         save_db.commit()
                         save_db.refresh(ai_msg)
                         assistant_message_id = ai_msg.id
+
+                        usage_for_audit = _last_chat_metric_snapshot() or {}
+                        prompt_eval = int(usage_for_audit.get("prompt_eval_count") or 0)
+                        eval_count = int(usage_for_audit.get("eval_count") or 0)
+                        log_event(
+                            save_db,
+                            EventType.CHAT_MESSAGE_RECEIVED,
+                            user=save_db.query(models.User).filter_by(id=user.id).first(),
+                            workspace=save_db.query(models.Workspace).filter_by(id=workspace_id).first(),
+                            session=save_db.query(models.Session).filter_by(id=session_id).first(),
+                            resource_type="message",
+                            resource_id=ai_msg.id,
+                            payload={
+                                "content_preview": full_response[:200],
+                                "token_count": prompt_eval + eval_count,
+                                "model": usage_for_audit.get("model") or "",
+                                "finished_cleanly": True,
+                            },
+                        )
+                        save_db.commit()
                     except Exception as e:
                         save_db.rollback()
                         print(f"Failed to save assistant message: {e}")
@@ -506,6 +591,25 @@ async def analyze_data(
                             status=status,
                         )
                         background_db.add(ai_msg)
+                        background_db.commit()
+                        background_db.refresh(ai_msg)
+
+                        log_event(
+                            background_db,
+                            EventType.CHAT_MESSAGE_RECEIVED,
+                            user=background_db.query(models.User).filter_by(id=user.id).first(),
+                            workspace=background_db.query(models.Workspace).filter_by(id=workspace_id).first(),
+                            session=background_db.query(models.Session).filter_by(id=session_id).first(),
+                            resource_type="message",
+                            resource_id=ai_msg.id,
+                            payload={
+                                "content_preview": full_response[:200],
+                                "token_count": 0,
+                                "model": "",
+                                "finished_cleanly": False,
+                                "status": status,
+                            },
+                        )
                         background_db.commit()
                     except Exception as e:
                         background_db.rollback()
@@ -559,6 +663,7 @@ def delete_message(
 def branch_session(
     session_id: str,
     body: BranchRequest,
+    request: Request,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
@@ -605,6 +710,22 @@ def branch_session(
         if m.id == body.up_to_message_id:
             break
 
+    log_event(
+        db,
+        EventType.CHAT_SESSION_CREATED,
+        user=user,
+        workspace=workspace,
+        session=new_session,
+        resource_type="session",
+        resource_id=new_session.id,
+        payload={
+            "title": new_session.title,
+            "source": "branch",
+            "branched_from_session_id": session_id,
+            "branched_from_message_id": body.up_to_message_id,
+        },
+        request=request,
+    )
     db.commit()
     return {"new_session_id": new_session.id}
 

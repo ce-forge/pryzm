@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 import httpx
 
+from core.audit import EventType, log_event
 from db import database, models
 from services import knowledge
 from config import settings
@@ -202,6 +203,51 @@ async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
     return await asyncio.to_thread(func, **safe_args)
 
 
+def _audit_chat_event(
+    user_id: Optional[str],
+    workspace_id: str,
+    session_id: Optional[str],
+    event_type: str,
+    payload: dict,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[str] = None,
+) -> None:
+    """Open a short-lived session, write one audit row, commit, close.
+
+    Used by stream_chat's tool loop and auto-RAG path. The router's DB
+    session is closed before the generator runs, so audit writes here
+    can't piggyback on it. Errors are swallowed — losing one chat audit
+    row should not break the user-visible response."""
+    audit_db = database.SessionLocal()
+    try:
+        user_obj = (
+            audit_db.query(models.User).filter_by(id=user_id).first()
+            if user_id
+            else None
+        )
+        ws_obj = audit_db.query(models.Workspace).filter_by(id=workspace_id).first()
+        sess_obj = (
+            audit_db.query(models.Session).filter_by(id=session_id).first()
+            if session_id
+            else None
+        )
+        log_event(
+            audit_db,
+            event_type,
+            user=user_obj,
+            workspace=ws_obj,
+            session=sess_obj,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            payload=payload,
+        )
+        audit_db.commit()
+    except Exception:
+        audit_db.rollback()
+    finally:
+        audit_db.close()
+
+
 async def stream_chat(
     client: httpx.AsyncClient,
     messages: list,
@@ -214,6 +260,7 @@ async def stream_chat(
     tier: Optional[Tier] = None,
     escalated: bool = False,
     modes: Optional[list[str]] = None,
+    user_id: Optional[str] = None,
 ):
     # Substitute {tool_names} placeholder in the workspace's stored
     # system prompt. We need the system_prompt from the DB but do NOT
@@ -328,6 +375,16 @@ async def stream_chat(
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]
                     sources_list = rag_data["sources"]
+                    _audit_chat_event(
+                        user_id, workspace_id, session_id,
+                        EventType.CHAT_RAG_RETRIEVED,
+                        {
+                            "query_preview": (rag_query or "")[:200],
+                            "num_results": len(sources_list),
+                            "source_filenames": list(sources_list),
+                            "mode": "auto",
+                        },
+                    )
                     # Single source of truth for image content is the
                     # caption written at upload time (see
                     # services/image_describe.py). We deliberately do NOT
@@ -432,6 +489,63 @@ async def stream_chat(
                         had_tool_error = True
 
                     yield {"type": "tool_result", "name": func_name, "result": result}
+
+                    # Emit specialized audit event per tool — search_knowledge_base
+                    # → chat.rag_retrieved, web_search → chat.web_search, everything
+                    # else → chat.tool_invoked. No double-emit.
+                    is_error_result = isinstance(result, str) and (
+                        result.startswith("Tool execution failed:")
+                        or "timed out after" in result
+                    )
+                    succeeded = not is_error_result
+                    audit_args = {
+                        k: v for k, v in raw_args.items()
+                        if k not in ("workspace_id", "session_id")
+                    }
+                    if func_name == "search_knowledge_base":
+                        source_filenames = []
+                        if isinstance(result, str):
+                            source_filenames = list(set(
+                                re.findall(r'\[from ([^\]]+)\]', result)
+                            ))
+                        _audit_chat_event(
+                            user_id, workspace_id, session_id,
+                            EventType.CHAT_RAG_RETRIEVED,
+                            {
+                                "query_preview": str(audit_args.get("query", ""))[:200],
+                                "num_results": len(source_filenames),
+                                "source_filenames": source_filenames,
+                                "mode": "tool",
+                            },
+                        )
+                    elif func_name == "web_search":
+                        result_urls = (
+                            re.findall(r'https?://\S+', result)
+                            if isinstance(result, str)
+                            else []
+                        )
+                        _audit_chat_event(
+                            user_id, workspace_id, session_id,
+                            EventType.CHAT_WEB_SEARCH,
+                            {
+                                "query_preview": str(audit_args.get("query", ""))[:200],
+                                "num_results": len(result_urls),
+                                "result_urls": result_urls,
+                            },
+                        )
+                    else:
+                        tool_payload = {
+                            "tool_name": func_name,
+                            "arg_values": audit_args,
+                            "succeeded": succeeded,
+                        }
+                        if not succeeded and isinstance(result, str):
+                            tool_payload["error_message"] = result[:200]
+                        _audit_chat_event(
+                            user_id, workspace_id, session_id,
+                            EventType.CHAT_TOOL_INVOKED,
+                            tool_payload,
+                        )
 
                     # When search_knowledge_base returns chunks from image
                     # documents, surface them as files_referenced so the
