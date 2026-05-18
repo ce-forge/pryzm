@@ -10,6 +10,7 @@ from sqlalchemy import tuple_, func as sqlfunc
 from sqlalchemy.orm import Session
 
 from core import ai_engine, cookie_auth
+from core.audit import EventType, log_event
 from core.deps import get_http_client
 from core.engine_config import engine_config_for
 from core.llm_metrics import get_last_chat_snapshot as _last_chat_metric_snapshot
@@ -291,13 +292,28 @@ def update_session(
 @router.delete("/sessions/{session_id}")
 def delete_session(
     session_id: str,
+    request: Request,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     """Delete a session and its messages. Scoped to workspace —
     cross-workspace 404s."""
     session = verify_workspace_owns(session_id, models.Session, workspace.id, db)
+    deleted_title = session.title
+
     db.delete(session)
+
+    log_event(
+        db,
+        EventType.CHAT_SESSION_DELETED,
+        user=user,
+        workspace=workspace,
+        resource_type="session",
+        resource_id=session_id,
+        payload={"title": deleted_title},
+        request=request,
+    )
     db.commit()
     return {"status": "deleted"}
 
@@ -337,6 +353,21 @@ async def analyze_data(
             db.add(chat_session)
             db.commit()
             db.refresh(chat_session)
+            log_event(
+                db,
+                EventType.CHAT_SESSION_CREATED,
+                user=user,
+                workspace=workspace,
+                session=chat_session,
+                resource_type="session",
+                resource_id=chat_session.id,
+                payload={
+                    "title": chat_session.title,
+                    "source": "analyze",
+                },
+                request=http_request,
+            )
+            db.commit()
         elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
             chat_session.title = await ai_engine.generate_title(http_client, request.prompt, engine_config=engine_config)
             db.commit()
@@ -559,6 +590,7 @@ def delete_message(
 def branch_session(
     session_id: str,
     body: BranchRequest,
+    request: Request,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
@@ -605,6 +637,22 @@ def branch_session(
         if m.id == body.up_to_message_id:
             break
 
+    log_event(
+        db,
+        EventType.CHAT_SESSION_CREATED,
+        user=user,
+        workspace=workspace,
+        session=new_session,
+        resource_type="session",
+        resource_id=new_session.id,
+        payload={
+            "title": new_session.title,
+            "source": "branch",
+            "branched_from_session_id": session_id,
+            "branched_from_message_id": body.up_to_message_id,
+        },
+        request=request,
+    )
     db.commit()
     return {"new_session_id": new_session.id}
 
