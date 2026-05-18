@@ -197,3 +197,30 @@ class LoginRateLimiter:
 
 # Module-level singleton used by the auth router
 login_rate_limiter = LoginRateLimiter()
+
+
+def assert_not_removing_last_admin(
+    db: DbSession,
+    target_user_id: str,
+    would_be_admin: bool,
+    would_be_active: bool,
+) -> None:
+    """Raise HTTP 400 if the proposed change to `target_user_id` would
+    leave zero active admins. `would_be_admin`/`would_be_active` are the
+    flag values AFTER the proposed change."""
+    if would_be_admin and would_be_active:
+        return
+    other_active_admins = (
+        db.query(models.User)
+        .filter(
+            models.User.is_admin.is_(True),
+            models.User.is_active.is_(True),
+            models.User.id != target_user_id,
+        )
+        .count()
+    )
+    if other_active_admins == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot remove last active admin. Promote another user to admin first.",
+        )
