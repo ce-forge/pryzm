@@ -56,7 +56,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
             <div className="flex items-center gap-1 shrink-0">
               {user?.is_admin && (
                 <Link
-                  href="/dashboard"
+                  href="/admin"
                   className="p-1.5 rounded text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c] transition-colors"
                   title="Dashboard"
                   aria-label="Open admin dashboard"
