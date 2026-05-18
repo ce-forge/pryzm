@@ -1,8 +1,5 @@
 """Cookie-based session authentication.
 
-Separate from core/auth.py (bearer-token) so the eventual Phase E removal
-is a clean file delete + import-replace rather than function-level surgery.
-
 This module covers password hashing/verification, session helpers, the
 current_user FastAPI dependency, and the login rate limiter.
 """
