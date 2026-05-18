@@ -1,7 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
 import { FileUpload } from "@/types/chat";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
 import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon, GlobeIcon } from "./Icons";
@@ -76,8 +76,7 @@ export default function ChatInput({
   const dragCounter = useRef(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const menuWrapperRef = useRef<HTMLDivElement>(null);
-  const searchParams = useSearchParams();
-  const workspace = searchParams.get("workspace") || APP_CONFIG.DEFAULT_WORKSPACE;
+  const { workspaceSlug: workspace } = useWorkspaceContext();
 
   useOnClickOutside(menuWrapperRef, () => setShowTestMenu(false));
 

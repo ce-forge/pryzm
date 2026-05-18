@@ -57,6 +57,31 @@ def test_admin_create_user_with_no_templates(db_session):
         alice = db_session.query(models.User).filter_by(username="alice").one()
         assert alice.email == "alice@example.com"
         assert alice.can_create_workspaces is True
+        # Admin chose the password, so user must change on first login.
+        assert alice.must_change_password is True
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_admin_password_reset_forces_change_on_next_login(db_session):
+    try:
+        c, _ = _admin_client(db_session)
+        # Make a user with the flag already cleared (post-first-login state).
+        u = models.User(
+            username="bob",
+            password_hash=cookie_auth.hash_password("bob-pw-12chars"),
+            is_active=True,
+            must_change_password=False,
+        )
+        db_session.add(u); db_session.commit(); db_session.refresh(u)
+
+        r = c.post(
+            f"/api/admin/users/{u.id}/password",
+            json={"new_password": "fresh-pw-12chars"},
+        )
+        assert r.status_code == 200, r.text
+        db_session.refresh(u)
+        assert u.must_change_password is True
     finally:
         app.dependency_overrides.clear()
 

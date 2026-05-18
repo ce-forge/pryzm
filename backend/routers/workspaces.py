@@ -84,8 +84,27 @@ def create_workspace(
     db: Session = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
 ):
+    stripped_display_name = payload.display_name.strip()
+
+    # Reject if this user already has a workspace with the same display name.
+    # The sidebar surfaces display_name (not slug), so allowing duplicates
+    # produces visually-identical entries the user can't tell apart.
+    dup = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.user_id == user.id,
+            models.Workspace.display_name == stripped_display_name,
+        )
+        .first()
+    )
+    if dup is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You already have a workspace named {stripped_display_name!r}.",
+        )
+
     try:
-        slug = slugify_unique(db, payload.display_name)
+        slug = slugify_unique(db, stripped_display_name)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -102,11 +121,12 @@ def create_workspace(
 
     ws = models.Workspace(
         slug=slug,
-        display_name=payload.display_name.strip(),
+        display_name=stripped_display_name,
         system_prompt=system_prompt,
         enabled_tools=enabled_tools,
         engine_config=engine_config,
         color=payload.color,
+        user_id=user.id,
     )
     db.add(ws)
     db.commit()

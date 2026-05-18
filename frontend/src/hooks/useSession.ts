@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
+import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { Message, ReferencedFile, ToolCall } from "@/types/chat";
 
 // Cache key = workspace_slug:sessionId so switching workspaces doesn't bleed
@@ -14,7 +14,7 @@ export function useSession() {
   const router = useRouter();
 
   const urlSessionId = searchParams.get("session");
-  const workspace = searchParams.get("workspace") || APP_CONFIG.DEFAULT_WORKSPACE;
+  const { workspaceSlug: workspace } = useWorkspaceContext();
 
   const [currentSession, setCurrentSession] = useState<string | null>(urlSessionId);
   const [sessionTitle, setSessionTitle] = useState("");
@@ -73,7 +73,6 @@ export function useSession() {
    * stream completes. Message IDs arrive inside the SSE stream itself — no
    * history refetch is needed here.
    */
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- React Compiler infers extra deps (setSessionTitle is a stable setter; included via the rule that all setters are non-deps). The manual memo here is what keeps loadSessionData stable across streaming-chunk re-renders.
   const refreshSessionMeta = useCallback(async () => {
     if (!currentSession || currentSession.startsWith("optimistic-")) {
       setSessionTitle("");
@@ -96,7 +95,6 @@ export function useSession() {
    * Loads session history for the currently-active session if not cached.
    * Called on session navigation. `force=true` bypasses the cache check.
    */
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- as above; manual memo holds loadSessionData stable through stream chunks
   const loadSessionData = useCallback(async (force = false) => {
     if (!currentSession || currentSession.startsWith("optimistic-")) {
       setSessionTitle("");
@@ -184,7 +182,6 @@ export function useSession() {
     }
   }, [workspace, setMessageCache]);
 
-  // eslint-disable-next-line react-hooks/preserve-manual-memoization -- as above
   const navigateToSession = useCallback((id: string) => {
     isNavigatingRef.current = true;
     setCurrentSession(id);
