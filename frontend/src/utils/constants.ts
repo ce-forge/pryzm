@@ -1,17 +1,22 @@
-// Resolve the API base URL at runtime, not build time. Order:
-//   1. NEXT_PUBLIC_API_URL — explicit pin (e.g. Cloudflare tunnel domain).
-//      This is read at build time by Next.js since it's a NEXT_PUBLIC_ var.
-//   2. window.location — same hostname as the page, port 8000. Makes the
-//      app "just work" from any device on the LAN: load the frontend from
-//      http://<host-ip>:3000 and the API target follows the same host.
-//   3. localhost fallback for SSR / non-browser contexts.
-// The previous fixed-127.0.0.1 default broke mobile access entirely: the
-// browser would try to fetch from the *phone's* loopback. Auto-deriving
-// from window.location is the lowest-friction fix.
+// Resolve the API base URL. Order:
+//   1. NEXT_PUBLIC_API_URL — explicit pin if set; overrides everything.
+//   2. Same origin when the page is served on a default port (80/443) —
+//      indicates a reverse proxy is in front.
+//   3. Public hostname + NEXT_PUBLIC_API_EXTERNAL_PORT set — use that port
+//      on the same hostname (covers modem port-remap setups where external
+//      X forwards to internal :8000).
+//   4. Same hostname on :8000 — LAN/dev where the backend is the sibling.
+//   5. Localhost fallback for SSR / non-browser contexts.
+const _PRIVATE_HOST_RE = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)/;
 const _resolveApiUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
   if (typeof window !== "undefined" && window.location?.hostname) {
-    return `${window.location.protocol}//${window.location.hostname}:8000`;
+    if (!window.location.port) return window.location.origin;
+    const hostname = window.location.hostname;
+    const externalPort = process.env.NEXT_PUBLIC_API_EXTERNAL_PORT;
+    const isPrivate = _PRIVATE_HOST_RE.test(hostname);
+    const port = !isPrivate && externalPort ? externalPort : "8000";
+    return `${window.location.protocol}//${hostname}:${port}`;
   }
   return "http://127.0.0.1:8000";
 };
