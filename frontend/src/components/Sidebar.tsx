@@ -30,7 +30,7 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
           Desktop: negative margin pulls the layout left so chat reclaims
           the space. Both animate via a single property each — smooth in
           both directions. */}
-      <div className={`fixed md:relative h-full shrink-0 transition-all duration-300 z-50 w-sidebar ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 md:ml-[calc(-1*var(--spacing-sidebar))]'}`}>
+      <div className={`fixed md:relative h-full shrink-0 transition-all duration-300 z-50 w-sidebar ${isOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0 md:ml-[calc(-1_*_var(--spacing-sidebar))]'}`}>
         <div className="w-sidebar h-full bg-[#1e1f20] flex flex-col border-r border-[#333537] shadow-2xl md:shadow-none">
 
           {/* TOP: Header Controls */}
