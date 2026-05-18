@@ -17,22 +17,12 @@ import time
 from pathlib import Path
 
 import httpx
-import pytest
 
 BACKEND_URL = "http://127.0.0.1:8000"
 BACKEND_LOG = Path("/tmp/pryzm_backend.log")
 
 # Long enough that the request can complete even with a cold model swap.
 ANALYZE_TIMEOUT_S = 180
-
-
-@pytest.fixture
-def api_token() -> str:
-    env_path = Path(__file__).parent.parent.parent.parent / ".env"
-    for line in env_path.read_text().splitlines():
-        if line.startswith("PRYZM_API_TOKEN="):
-            return line.split("=", 1)[1].strip()
-    pytest.fail("PRYZM_API_TOKEN missing from .env", pytrace=False)
 
 
 def _snapshot_log_bytes() -> int:
@@ -45,17 +35,17 @@ def _read_log_since(byte_offset: int) -> str:
         return f.read().decode("utf-8", errors="replace")
 
 
-def _send_analyze(token: str, prompt: str) -> None:
+def _send_analyze(session_cookie: str, prompt: str) -> None:
     """POST /analyze and drain the SSE stream until it closes."""
-    with httpx.Client(timeout=ANALYZE_TIMEOUT_S) as client:
+    with httpx.Client(
+        timeout=ANALYZE_TIMEOUT_S,
+        cookies={"pryzm_session": session_cookie},
+    ) as client:
         with client.stream(
             "POST",
             f"{BACKEND_URL}/analyze",
             params={"workspace": "personal"},
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
+            headers={"Content-Type": "application/json"},
             json={"prompt": prompt},
         ) as resp:
             resp.raise_for_status()
@@ -78,9 +68,9 @@ def _find_route_line(log_chunk: str) -> tuple[str, str, str, int] | None:
     return model, tier, reason, int(prompt_len)
 
 
-def test_short_prompt_routes_to_small(api_token: str):
+def test_short_prompt_routes_to_small(session_cookie: str):
     offset = _snapshot_log_bytes()
-    _send_analyze(api_token, "hi")
+    _send_analyze(session_cookie, "hi")
     # Tiny grace window for the route log to flush after the request returns.
     time.sleep(0.5)
     chunk = _read_log_since(offset)
@@ -91,12 +81,12 @@ def test_short_prompt_routes_to_small(api_token: str):
     assert model == "gemma-4-E2B-it", f"expected small model, got {model}"
 
 
-def test_long_prompt_routes_to_large(api_token: str):
+def test_long_prompt_routes_to_large(session_cookie: str):
     offset = _snapshot_log_bytes()
     # Trigger the prompt_len>500 branch with deterministic content.
     long_prompt = "Please give a brief summary of the following text. " + ("lorem ipsum " * 60)
     assert len(long_prompt) > 500
-    _send_analyze(api_token, long_prompt)
+    _send_analyze(session_cookie, long_prompt)
     time.sleep(0.5)
     chunk = _read_log_since(offset)
     route = _find_route_line(chunk)

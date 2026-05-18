@@ -7,7 +7,8 @@ dev servers (backend on :8000, frontend on :3000). The conftest provides:
 - A per-test fresh `BrowserContext` (so cookies/localStorage don't leak).
 - A `page` shortcut.
 - A `dev_servers_ready` fixture that fails fast if either server is unreachable.
-- An `inject_token` helper that pre-seeds localStorage to skip the TokenGate.
+- A `session_cookie` fixture that logs in via /api/auth/login and returns the
+  pryzm_session cookie value for tests that hit the backend directly.
 - A `screenshot` helper that writes captures to `backend/tests/e2e/_artifacts/`.
 
 These tests are LOCAL ONLY today — no CI integration. Run them while the dev
@@ -17,10 +18,12 @@ servers are up:
 """
 from __future__ import annotations
 
+import os
 import urllib.request
 from pathlib import Path
 from typing import Iterator
 
+import httpx
 import pytest
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
@@ -77,7 +80,9 @@ def page(context: BrowserContext) -> Page:
 
 @pytest.fixture
 def api_token() -> str:
-    """Read PRYZM_API_TOKEN from .env. Tests assume the token is already valid."""
+    """Read PRYZM_API_TOKEN from .env. Used by legacy e2e tests that still
+    drive the localStorage-based TokenGate flow. New backend-direct tests
+    should depend on `session_cookie` instead."""
     env_path = Path(__file__).parent.parent.parent.parent / ".env"
     for line in env_path.read_text().splitlines():
         if line.startswith("PRYZM_API_TOKEN="):
@@ -88,14 +93,39 @@ def api_token() -> str:
 @pytest.fixture
 def inject_token(page: Page, api_token: str):
     """Returns a callable that pre-seeds the token in localStorage, skipping
-    TokenGate. Must be called BEFORE the test asserts anything that depends
-    on the app being loaded."""
+    TokenGate. Used by legacy e2e tests that drive the browser UI."""
     def _do() -> None:
         page.goto(f"{FRONTEND_URL}/")
         page.evaluate(
             f'() => localStorage.setItem("pryzm_api_token", "{api_token}")'
         )
     return _do
+
+
+@pytest.fixture(scope="session")
+def session_cookie() -> str:
+    """Log in to the running backend and return the pryzm_session cookie value.
+
+    Credentials come from env vars PRYZM_E2E_USERNAME / PRYZM_E2E_PASSWORD
+    (default admin / admin). Configure these in .env if your bootstrap admin
+    uses other credentials."""
+    username = os.environ.get("PRYZM_E2E_USERNAME", "admin")
+    password = os.environ.get("PRYZM_E2E_PASSWORD", "admin")
+    resp = httpx.post(
+        f"{BACKEND_URL}/api/auth/login",
+        json={"username": username, "password": password},
+        timeout=5.0,
+    )
+    if resp.status_code != 200:
+        pytest.fail(
+            f"Login failed for user={username!r}: HTTP {resp.status_code} {resp.text}. "
+            "Set PRYZM_E2E_USERNAME / PRYZM_E2E_PASSWORD in your environment.",
+            pytrace=False,
+        )
+    sid = resp.cookies.get("pryzm_session")
+    if not sid:
+        pytest.fail("Login succeeded but no pryzm_session cookie was returned.", pytrace=False)
+    return sid
 
 
 @pytest.fixture
