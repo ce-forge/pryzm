@@ -37,9 +37,9 @@ class Workspace(Base):
     is_builtin = Column(Boolean, nullable=False, default=False, server_default="false")
     color = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.clock_timestamp())
-    user_id = Column(String, nullable=True, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     is_template = Column(Boolean, nullable=False, default=False)
-    template_id = Column(String, nullable=True, index=True)
+    template_id = Column(String, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True)
     owner_can_edit = Column(Boolean, nullable=False, default=False)
 
     sessions = relationship("Session", back_populates="workspace", cascade="all, delete-orphan")
@@ -55,7 +55,7 @@ class Session(Base):
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     folder_id = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    user_id = Column(String, nullable=True, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     workspace = relationship("Workspace", back_populates="sessions")
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="session", cascade="all, delete-orphan")
@@ -99,7 +99,7 @@ class Folder(Base):
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
     name = Column(String)
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
-    user_id = Column(String, nullable=True, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     workspace = relationship("Workspace", back_populates="folders")
 
 

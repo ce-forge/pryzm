@@ -13,6 +13,9 @@ from tools.retrieval import search_knowledge_base
 
 
 def _seed_workspace(db, slug="fnmention"):
+    user = models.User(
+        id=f"user-{slug}", username=slug, password_hash="hash", is_admin=False
+    )
     ws = models.Workspace(
         id=f"ws-{slug}",
         slug=slug,
@@ -21,12 +24,16 @@ def _seed_workspace(db, slug="fnmention"):
         enabled_tools=[],
         is_builtin=False,
         engine_config={"backend": "llama_cpp"},
+        user_id=f"user-{slug}",
     )
+    db.add(user); db.commit()
     db.add(ws); db.commit(); return ws
 
 
 def _seed_session(db, ws_id, slug="session-fn"):
-    s = models.Session(id=f"sess-{slug}", title="t", workspace_id=ws_id)
+    # Extract user_id from workspace
+    ws = db.query(models.Workspace).filter_by(id=ws_id).one()
+    s = models.Session(id=f"sess-{slug}", title="t", workspace_id=ws_id, user_id=ws.user_id)
     db.add(s); db.commit(); return s
 
 

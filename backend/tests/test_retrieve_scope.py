@@ -17,6 +17,25 @@ from db import models
 from services import knowledge
 
 
+def _seed_workspace_and_session(db, ws_slug, sess_slug):
+    """Helper to create workspace with user and session."""
+    user = models.User(
+        id=f"user-{ws_slug}", username=ws_slug, password_hash="hash", is_admin=False
+    )
+    ws = models.Workspace(
+        id=f"ws-{ws_slug}", slug=ws_slug, display_name=ws_slug.upper(),
+        system_prompt="", enabled_tools=[], is_builtin=False,
+        engine_config={"backend": "llama_cpp"}, user_id=f"user-{ws_slug}",
+    )
+    sess = models.Session(
+        id=f"sess-{sess_slug}", workspace_id=f"ws-{ws_slug}", title="t",
+        user_id=f"user-{ws_slug}",
+    )
+    db.add_all([user, ws, sess])
+    db.commit()
+    return ws, sess
+
+
 @pytest.mark.asyncio
 async def test_retrieve_relevant_chunks_scopes_to_attached_filename(
     db_session, tmp_path,
@@ -26,16 +45,7 @@ async def test_retrieve_relevant_chunks_scopes_to_attached_filename(
     otherwise match the scope filter. Regression: user attaches
     images.jpeg and asks 'what is this?' — only images.jpeg chunks
     come back, not all global docs in the workspace."""
-    ws = models.Workspace(
-        id="ws-scoped",
-        slug="scoped",
-        display_name="S",
-        system_prompt="",
-        enabled_tools=[],
-        is_builtin=False,
-        engine_config={"backend": "llama_cpp"},
-    )
-    sess = models.Session(id="sess-scoped", workspace_id="ws-scoped", title="t")
+    ws, sess = _seed_workspace_and_session(db_session, "scoped", "scoped")
 
     target_doc = models.Document(
         id="doc-target", filename="target.png", workspace_id="ws-scoped",
@@ -53,7 +63,7 @@ async def test_retrieve_relevant_chunks_scopes_to_attached_filename(
         id="chunk-distractor", document_id="doc-distractor", workspace_id="ws-scoped",
         content="Caption for a totally unrelated image.", embedding=[0.1] * 768,
     )
-    db_session.add_all([ws, sess, target_doc, distractor_doc, target_chunk, distractor_chunk])
+    db_session.add_all([target_doc, distractor_doc, target_chunk, distractor_chunk])
     db_session.commit()
 
     async with httpx.AsyncClient() as client:
@@ -74,12 +84,7 @@ async def test_retrieve_relevant_chunks_falls_back_when_attached_filename_missin
     """If the attached filename doesn't match any doc (file was
     deleted, marker is stale), retrieval falls through to the broader
     paths instead of returning nothing — the chat shouldn't dead-end."""
-    ws = models.Workspace(
-        id="ws-fallback", slug="fallback", display_name="F",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        engine_config={"backend": "llama_cpp"},
-    )
-    sess = models.Session(id="sess-fallback", workspace_id="ws-fallback", title="t")
+    ws, sess = _seed_workspace_and_session(db_session, "fallback", "fallback")
     doc = models.Document(
         id="doc-fallback", filename="exists.txt", workspace_id="ws-fallback",
         session_id="sess-fallback", is_global=False,
@@ -88,7 +93,7 @@ async def test_retrieve_relevant_chunks_falls_back_when_attached_filename_missin
         id="chunk-fallback", document_id="doc-fallback", workspace_id="ws-fallback",
         content="Some text.", embedding=[0.1] * 768,
     )
-    db_session.add_all([ws, sess, doc, chunk])
+    db_session.add_all([doc, chunk])
     db_session.commit()
 
     async with httpx.AsyncClient() as client:
@@ -109,17 +114,12 @@ async def test_restrict_to_filenames_returns_all_chunks_not_capped(db_session):
     receives the whole document, bounded only by the LLM context limit
     (which surfaces a clear upstream error if exceeded)."""
     import uuid_utils
-    ws = models.Workspace(
-        id="ws-allchunks", slug="ac", display_name="A",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        engine_config={"backend": "llama_cpp"},
-    )
-    sess = models.Session(id="sess-allchunks", workspace_id="ws-allchunks", title="t")
+    ws, sess = _seed_workspace_and_session(db_session, "allchunks", "allchunks")
     doc = models.Document(
         id="doc-allchunks", filename="big.md", workspace_id="ws-allchunks",
         session_id="sess-allchunks", is_global=False,
     )
-    db_session.add_all([ws, sess, doc])
+    db_session.add(doc)
     db_session.commit()
 
     # Seed 20 chunks with time-ordered ids
@@ -150,17 +150,12 @@ async def test_restrict_to_filenames_preserves_chunk_insertion_order(db_session)
     back in the order they were inserted — required for transcription/
     sequential reading. Random-ordered ids (v4) would scramble a transcript."""
     import uuid_utils, time
-    ws = models.Workspace(
-        id="ws-order", slug="ord", display_name="O",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        engine_config={"backend": "llama_cpp"},
-    )
-    sess = models.Session(id="sess-order", workspace_id="ws-order", title="t")
+    ws, sess = _seed_workspace_and_session(db_session, "order", "order")
     doc = models.Document(
         id="doc-order", filename="ordered.md", workspace_id="ws-order",
         session_id="sess-order", is_global=False,
     )
-    db_session.add_all([ws, sess, doc])
+    db_session.add(doc)
     db_session.commit()
 
     # Stagger chunk creation so UUIDv7 ids land in monotonically-increasing
@@ -199,17 +194,12 @@ async def test_add_chunks_to_document_uses_time_ordered_ids(db_session, monkeypa
     sort lexicographically into insertion order. Regression: chunks used
     to get random UUIDv4 ids, which made ORDER BY id useless."""
     from services import knowledge as knowledge_mod
-    ws = models.Workspace(
-        id="ws-v7", slug="v7", display_name="V",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        engine_config={"backend": "llama_cpp"},
-    )
-    sess = models.Session(id="sess-v7", workspace_id="ws-v7", title="t")
+    ws, sess = _seed_workspace_and_session(db_session, "v7", "v7")
     doc = models.Document(
         id="doc-v7", filename="seq.md", workspace_id="ws-v7",
         session_id="sess-v7", is_global=False,
     )
-    db_session.add_all([ws, sess, doc])
+    db_session.add(doc)
     db_session.commit()
 
     async def fake_embed(_client, _text):
@@ -296,17 +286,12 @@ async def test_restrict_to_filenames_dedupes_chunk_overlap(db_session):
     are stitched cleanly in the returned context. Regression: model saw
     duplicated dialogue across the boundary and hallucinated speakers/words."""
     import uuid_utils
-    ws = models.Workspace(
-        id="ws-dedup", slug="dd", display_name="D",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        engine_config={"backend": "llama_cpp"},
-    )
-    sess = models.Session(id="sess-dedup", workspace_id="ws-dedup", title="t")
+    ws, sess = _seed_workspace_and_session(db_session, "dedup", "dedup")
     doc = models.Document(
         id="doc-dedup", filename="overlap.md", workspace_id="ws-dedup",
         session_id="sess-dedup", is_global=False,
     )
-    db_session.add_all([ws, sess, doc])
+    db_session.add(doc)
     db_session.commit()
 
     # Mimic two consecutive splitter chunks with a deliberate shared tail/head.
@@ -344,17 +329,12 @@ async def test_overview_mode_returns_chunks_in_id_order(db_session, monkeypatch)
     from services import knowledge
     from db import models
 
-    ws = models.Workspace(
-        id="ws-ov", slug="ws-ov", display_name="OV",
-        system_prompt="", enabled_tools=[], is_builtin=False,
-        engine_config={"backend": "ollama", "model": "gemma4:e4b"},
-    )
-    sess = models.Session(id="sess-ov", workspace_id="ws-ov", title="t")
+    ws, sess = _seed_workspace_and_session(db_session, "ov", "ov")
     doc = models.Document(
         id="doc-ov", workspace_id="ws-ov", session_id="sess-ov",
         filename="big.txt", status="ready",
     )
-    db_session.add_all([ws, sess, doc])
+    db_session.add(doc)
     db_session.commit()
 
     # Insert chunks with ids that will sort lexicographically in a known order.

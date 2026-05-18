@@ -15,6 +15,9 @@ from services import knowledge
 
 
 def _seed_workspace(db, slug="hybrid-test"):
+    user = models.User(
+        id=f"user-{slug}", username=slug, password_hash="hash", is_admin=False
+    )
     ws = models.Workspace(
         id=f"ws-{slug}",
         slug=slug,
@@ -23,12 +26,15 @@ def _seed_workspace(db, slug="hybrid-test"):
         enabled_tools=[],
         is_builtin=False,
         engine_config={"backend": "llama_cpp"},
+        user_id=f"user-{slug}",
     )
+    db.add(user); db.commit()
     db.add(ws); db.commit(); return ws
 
 
 def _seed_session(db, ws_id, slug):
-    s = models.Session(id=f"sess-{slug}", title="t", workspace_id=ws_id)
+    ws = db.query(models.Workspace).filter_by(id=ws_id).one()
+    s = models.Session(id=f"sess-{slug}", title="t", workspace_id=ws_id, user_id=ws.user_id)
     db.add(s); db.commit(); return s
 
 
