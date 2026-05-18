@@ -12,10 +12,7 @@ export default function AdminSystemPage() {
         individual workspace.
       </p>
 
-      <section>
-        <h3 className="text-sm font-semibold mb-3 text-gray-300">Models</h3>
-        <ModelsSection />
-      </section>
+      <ModelsSection />
 
       <section>
         <h3 className="text-sm font-semibold mb-3 text-gray-300">
