@@ -28,6 +28,7 @@ from typing import Optional
 import httpx
 from sqlalchemy.orm import Session
 
+from core.audit import EventType, log_event
 from db import database, models
 from services import image_describe, image_storage, ingest_broker, knowledge, pdf_extract
 
@@ -177,6 +178,33 @@ async def _finalize_error(
         if fresh is not None:
             fresh.status = "error"
             fresh.error_message = message
+            db.commit()
+
+            ws = db.query(models.Workspace).filter_by(id=fresh.workspace_id).first()
+            user_obj = (
+                db.query(models.User).filter_by(id=ws.user_id).first()
+                if ws and ws.user_id
+                else None
+            )
+            session_obj = (
+                db.query(models.Session).filter_by(id=fresh.session_id).first()
+                if fresh.session_id
+                else None
+            )
+            log_event(
+                db,
+                EventType.DOCUMENT_PROCESSING_FAILED,
+                user=user_obj,
+                workspace=ws,
+                session=session_obj,
+                resource_type="document",
+                resource_id=fresh.id,
+                payload={
+                    "document_id": fresh.id,
+                    "filename": fresh.filename,
+                    "error": message,
+                },
+            )
             db.commit()
     except Exception:
         _logger.exception("ingest_doc: could not persist error state for %s", doc.id)
