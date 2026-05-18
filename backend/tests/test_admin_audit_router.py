@@ -275,6 +275,43 @@ def test_detail_404_on_unknown_id(db_session):
 # event-types
 # -----------------------------------------------------------------------------
 
+def test_list_and_detail_resolve_workspace_and_session_names(db_session):
+    """The admin UI shouldn't see raw UUIDs — verify the response carries
+    workspace.display_name + session.title alongside the FK ids."""
+    try:
+        c, admin = _admin_client(db_session)
+        ws = models.Workspace(
+            slug="audit-ws", display_name="Audit Workspace",
+            system_prompt="x", enabled_tools=[],
+            engine_config={"backend": "llama_cpp"},
+            color="blue", user_id=admin.id, owner_can_edit=True,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+        sess = models.Session(title="Pretty Title", workspace_id=ws.id, user_id=admin.id)
+        db_session.add(sess); db_session.commit(); db_session.refresh(sess)
+
+        e = models.AuditEvent(
+            user_id=admin.id, user_display_name_at_event="admin",
+            event_type="probe.resolve",
+            workspace_id=ws.id, session_id=sess.id, payload={},
+        )
+        db_session.add(e); db_session.commit(); db_session.refresh(e)
+
+        r = c.get("/api/admin/audit?event_type=probe.resolve")
+        assert r.status_code == 200, r.text
+        row = r.json()["events"][0]
+        assert row["workspace_display_name"] == "Audit Workspace"
+        assert row["session_title"] == "Pretty Title"
+
+        r2 = c.get(f"/api/admin/audit/{e.id}")
+        assert r2.status_code == 200, r2.text
+        detail = r2.json()
+        assert detail["workspace_display_name"] == "Audit Workspace"
+        assert detail["session_title"] == "Pretty Title"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_event_types_lists_known_constants(db_session):
     try:
         c, admin = _admin_client(db_session)

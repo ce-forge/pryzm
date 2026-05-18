@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, or_, tuple_
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
@@ -51,7 +51,12 @@ def _decode_cursor(cursor: str) -> tuple[datetime, str]:
         raise HTTPException(status_code=400, detail="Invalid cursor.")
 
 
-def _event_to_dict(e: models.AuditEvent, truncate_payload: bool) -> dict:
+def _event_to_dict(
+    e: models.AuditEvent,
+    truncate_payload: bool,
+    workspace_names: dict[str, str] | None = None,
+    session_titles: dict[str, str] | None = None,
+) -> dict:
     payload = e.payload or {}
     if truncate_payload:
         # Cheap, deterministic truncation: stringify then slice. The frontend
@@ -69,7 +74,13 @@ def _event_to_dict(e: models.AuditEvent, truncate_payload: bool) -> dict:
         "user_display_name_at_event": e.user_display_name_at_event,
         "event_type": e.event_type,
         "workspace_id": e.workspace_id,
+        "workspace_display_name": (
+            (workspace_names or {}).get(e.workspace_id) if e.workspace_id else None
+        ),
         "session_id": e.session_id,
+        "session_title": (
+            (session_titles or {}).get(e.session_id) if e.session_id else None
+        ),
         "resource_type": e.resource_type,
         "resource_id": e.resource_id,
         "payload": payload,
@@ -77,6 +88,36 @@ def _event_to_dict(e: models.AuditEvent, truncate_payload: bool) -> dict:
         "user_agent": e.user_agent,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
+
+
+def _resolve_workspace_and_session_names(
+    db: DbSession,
+    events: list[models.AuditEvent],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Batch-fetch display_name + title for the workspace/session ids referenced
+    by the given events. Avoids the N+1 problem on the list endpoint.
+
+    Deleted workspaces/sessions (FK is SET NULL on cascade) just don't appear
+    in the map — the caller renders them as `(deleted)`.
+    """
+    workspace_ids = {e.workspace_id for e in events if e.workspace_id}
+    session_ids = {e.session_id for e in events if e.session_id}
+
+    workspace_names: dict[str, str] = {}
+    if workspace_ids:
+        rows = db.query(
+            models.Workspace.id, models.Workspace.display_name
+        ).filter(models.Workspace.id.in_(workspace_ids)).all()
+        workspace_names = {row_id: name for row_id, name in rows}
+
+    session_titles: dict[str, str] = {}
+    if session_ids:
+        rows = db.query(
+            models.Session.id, models.Session.title
+        ).filter(models.Session.id.in_(session_ids)).all()
+        session_titles = {row_id: title for row_id, title in rows}
+
+    return workspace_names, session_titles
 
 
 @router.get("")
@@ -138,8 +179,18 @@ def list_events(
         last = rows[-1]
         next_cursor = _encode_cursor(last.created_at, last.id)
 
+    workspace_names, session_titles = _resolve_workspace_and_session_names(db, rows)
+
     return {
-        "events": [_event_to_dict(e, truncate_payload=True) for e in rows],
+        "events": [
+            _event_to_dict(
+                e,
+                truncate_payload=True,
+                workspace_names=workspace_names,
+                session_titles=session_titles,
+            )
+            for e in rows
+        ],
         "next_cursor": next_cursor,
     }
 
@@ -168,4 +219,10 @@ def get_event(
     ).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Audit event not found.")
-    return _event_to_dict(event, truncate_payload=False)
+    workspace_names, session_titles = _resolve_workspace_and_session_names(db, [event])
+    return _event_to_dict(
+        event,
+        truncate_payload=False,
+        workspace_names=workspace_names,
+        session_titles=session_titles,
+    )
