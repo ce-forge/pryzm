@@ -11,6 +11,7 @@ from db import database
 from routers import health, chat, workspaces, admin, folders, documents
 from routers import settings as settings_router
 from routers import auth as auth_router
+from routers import admin_users as admin_users_router
 from core.auth import require_token
 from core import llm_router
 from services import model_prewarm
@@ -168,3 +169,4 @@ app.include_router(folders.router, dependencies=[Depends(require_token)])
 app.include_router(documents.router, dependencies=[Depends(require_token)])
 app.include_router(settings_router.router, dependencies=[Depends(require_token)])
 app.include_router(admin.router, dependencies=[Depends(require_token)])
+app.include_router(admin_users_router.router)

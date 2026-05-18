@@ -116,3 +116,29 @@ class WorkspaceDeleteResponse(BaseModel):
 class LoginRequest(BaseModel):
     username: str
     password: str
+
+
+class StarterTemplate(BaseModel):
+    template_id: str
+    owner_can_edit: bool = False
+
+
+class AdminUserCreate(BaseModel):
+    username: str
+    password: str
+    email: Optional[str] = None
+    is_admin: bool = False
+    can_create_workspaces: bool = False
+    starter_templates: list[StarterTemplate] = []
+
+
+class AdminUserUpdate(BaseModel):
+    username: Optional[str] = None
+    email: Optional[str] = None
+    is_admin: Optional[bool] = None
+    is_active: Optional[bool] = None
+    can_create_workspaces: Optional[bool] = None
+
+
+class AdminPasswordReset(BaseModel):
+    new_password: str
