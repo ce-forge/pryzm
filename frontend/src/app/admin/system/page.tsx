@@ -1,12 +1,31 @@
+"use client";
+
+import ModelsSection from "@/components/SettingsModels";
+import MicroPromptsSection from "@/components/MicroPromptsSection";
+
 export default function AdminSystemPage() {
   return (
-    <div className="max-w-3xl">
-      <h2 className="text-xl font-semibold mb-2">System</h2>
-      <p className="text-sm text-gray-400">
-        Model management + micro-prompt editor. Currently lives at
-        <code className="mx-1 px-1.5 py-0.5 rounded bg-[#2a2a2c] text-xs">/dashboard</code>;
-        ported here in D.7 of the dashboard rollout.
-      </p>
+    <div className="max-w-4xl space-y-10">
+      <header>
+        <h2 className="text-xl font-semibold mb-1">System</h2>
+        <p className="text-xs text-gray-400">
+          Engine-wide settings: which models are available + the micro-prompts
+          that all workspaces share. Domain-specific prompts live on the
+          individual workspace.
+        </p>
+      </header>
+
+      <section>
+        <h3 className="text-sm font-semibold mb-3 text-gray-300">Models</h3>
+        <ModelsSection />
+      </section>
+
+      <section>
+        <h3 className="text-sm font-semibold mb-3 text-gray-300">
+          Micro-prompts
+        </h3>
+        <MicroPromptsSection />
+      </section>
     </div>
   );
 }
