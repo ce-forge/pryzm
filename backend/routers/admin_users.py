@@ -65,8 +65,8 @@ def create_user(
     db.add(user); db.commit(); db.refresh(user)
 
     for starter in payload.starter_templates:
-        tmpl = db.query(models.Workspace).filter_by(
-            id=starter.template_id, is_template=True,
+        tmpl = db.query(models.WorkspaceTemplate).filter_by(
+            id=starter.template_id,
         ).first()
         if tmpl is None:
             raise HTTPException(status_code=400, detail=f"Template {starter.template_id} not found.")
@@ -75,8 +75,6 @@ def create_user(
             display_name=tmpl.display_name,
             system_prompt=tmpl.system_prompt,
             enabled_tools=list(tmpl.enabled_tools or []),
-            is_builtin=tmpl.is_builtin,
-            is_template=False,
             template_id=tmpl.id,
             user_id=user.id,
             owner_can_edit=starter.owner_can_edit,

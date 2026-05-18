@@ -67,7 +67,6 @@ async def upload_document(
         .filter(
             models.Workspace.slug == workspace,
             models.Workspace.user_id == user.id,
-            models.Workspace.is_template.is_(False),
         )
         .first()
     )
