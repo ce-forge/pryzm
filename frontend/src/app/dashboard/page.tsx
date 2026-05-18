@@ -24,7 +24,7 @@ function DashboardPageBody() {
   }
 
   return (
-    <div className="min-h-dvh w-full bg-[#131314] text-[#e3e3e3] p-8">
+    <div className="h-dvh w-full bg-[#131314] text-[#e3e3e3] p-8 overflow-y-auto custom-scrollbar">
       <div className="mx-auto max-w-3xl space-y-8">
         <header className="flex items-center justify-between">
           <h1 className="text-2xl font-semibold">Admin dashboard</h1>
