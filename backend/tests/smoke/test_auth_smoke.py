@@ -9,8 +9,31 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
 from config import settings
+from core.cookie_auth import hash_password
 from db import database, models
 from main import app
+
+
+# Phase B: bearer tokens resolve to the bootstrap admin (oldest active admin
+# user) via current_user's dual-mode lookup. With no admin in the DB, every
+# bearer request fails with 401 before the route's own deps run. Seed once
+# per fixture so the bearer is usable.
+SMOKE_ADMIN_ID = "u-smoke-admin"
+
+
+def _seed_smoke_admin(seed_db) -> models.User:
+    admin = seed_db.query(models.User).filter_by(id=SMOKE_ADMIN_ID).first()
+    if admin is None:
+        admin = models.User(
+            id=SMOKE_ADMIN_ID,
+            username="smoke-admin",
+            password_hash=hash_password("test-pw-12chars"),
+            is_admin=True, is_active=True, can_create_workspaces=True,
+        )
+        seed_db.add(admin)
+        seed_db.commit()
+        seed_db.refresh(admin)
+    return admin
 
 
 @pytest.fixture
@@ -38,6 +61,9 @@ def client(db_at_head, monkeypatch):
             db.close()
 
     app.dependency_overrides[database.get_db] = _test_get_db
+
+    with TestSessionLocal() as seed_db:
+        _seed_smoke_admin(seed_db)
 
     yield TestClient(app)
 
@@ -73,6 +99,7 @@ def client_and_session(db_at_head, monkeypatch):
     app.dependency_overrides[database.get_db] = _test_get_db
 
     session = TestSessionLocal()
+    _seed_smoke_admin(session)
     try:
         yield TestClient(app), session
     finally:
@@ -126,17 +153,24 @@ def test_reset_rejects_non_builtin_400(client_and_session):
 def test_message_edit_cross_workspace_404(client_and_session):
     """Editing a message via a workspace that doesn't own it returns 404."""
     client, session = client_and_session
+    # Both workspaces must be owned by the bearer's bootstrap admin so
+    # workspace_query_dep resolves; the 404 must come from the cross-
+    # workspace check, not from the per-user workspace filter.
     ws_a = models.Workspace(
         id="ws-a", slug="ws-a", display_name="A",
         system_prompt="", enabled_tools=[], is_builtin=False,
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        user_id=SMOKE_ADMIN_ID, is_template=False,
     )
     ws_b = models.Workspace(
         id="ws-b", slug="ws-b", display_name="B",
         system_prompt="", enabled_tools=[], is_builtin=False,
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        user_id=SMOKE_ADMIN_ID, is_template=False,
     )
-    sess_a = models.Session(id="sess-a", workspace_id="ws-a", title="t")
+    sess_a = models.Session(
+        id="sess-a", workspace_id="ws-a", title="t", user_id=SMOKE_ADMIN_ID,
+    )
     msg_a = models.Message(id="msg-a", session_id="sess-a", role="user", content="x")
     session.add_all([ws_a, ws_b, sess_a, msg_a])
     session.commit()
@@ -157,6 +191,7 @@ def test_message_edit_missing_returns_404(client_and_session):
         id="ws-x", slug="ws-x", display_name="X",
         system_prompt="", enabled_tools=[], is_builtin=False,
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        user_id=SMOKE_ADMIN_ID, is_template=False,
     )
     session.add(ws)
     session.commit()

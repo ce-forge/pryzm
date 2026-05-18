@@ -10,6 +10,7 @@ import tempfile
 from fastapi.testclient import TestClient
 
 from config import settings
+from core.cookie_auth import hash_password
 from db import database, models
 from main import app
 
@@ -19,6 +20,16 @@ def test_document_raw_has_private_cache_and_etag(db_session, monkeypatch):
     os.write(fd, b"\x89PNG\r\n\x1a\n")
     os.close(fd)
 
+    # Phase B: bearer token resolves to the bootstrap admin via the dual-mode
+    # current_user dep, and workspace_query_dep scopes by (slug, user.id).
+    admin = models.User(
+        username="admin", password_hash=hash_password("test-pw-12chars"),
+        is_admin=True, is_active=True, can_create_workspaces=True,
+    )
+    db_session.add(admin)
+    db_session.commit()
+    db_session.refresh(admin)
+
     ws = models.Workspace(
         id="ws-h",
         slug="ws-h",
@@ -27,6 +38,8 @@ def test_document_raw_has_private_cache_and_etag(db_session, monkeypatch):
         enabled_tools=[],
         is_builtin=False,
         engine_config={"backend": "llama_cpp"},
+        user_id=admin.id,
+        is_template=False,
     )
     doc = models.Document(
         id="doc-h",
