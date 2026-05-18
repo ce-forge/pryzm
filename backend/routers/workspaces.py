@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from typing import List
 from core import cookie_auth
+from core.audit import EventType, log_event
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -79,7 +80,9 @@ def get_workspace(
 @router.post("/workspaces", response_model=WorkspaceResponse)
 def create_workspace(
     payload: WorkspaceCreate,
+    request: Request,
     db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     try:
         slug = slugify_unique(db, payload.display_name)
@@ -108,6 +111,24 @@ def create_workspace(
     db.add(ws)
     db.commit()
     db.refresh(ws)
+
+    log_event(
+        db,
+        EventType.WORKSPACE_CREATED,
+        user=user,
+        workspace=ws,
+        resource_type="workspace",
+        resource_id=ws.id,
+        payload={
+            "slug": ws.slug,
+            "display_name": ws.display_name,
+            "color": ws.color,
+            "cloned_from_slug": payload.clone_from,
+        },
+        request=request,
+    )
+    db.commit()
+
     return _to_response(ws)
 
 
@@ -115,11 +136,17 @@ def create_workspace(
 def update_workspace(
     slug: str,
     payload: WorkspaceUpdate,
+    request: Request,
     db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
 ):
     ws = get_by_slug(db, slug)
 
     data = payload.model_dump(exclude_unset=True)
+
+    changed_fields: list[str] = []
+    previous_values: dict = {}
+    new_values: dict = {}
 
     if "display_name" in data:
         stripped = data["display_name"].strip()
@@ -128,20 +155,54 @@ def update_workspace(
                 status_code=400,
                 detail="display_name must contain non-whitespace characters",
             )
+        if stripped != ws.display_name:
+            previous_values["display_name"] = ws.display_name
+            new_values["display_name"] = stripped
+            changed_fields.append("display_name")
         ws.display_name = stripped
 
     if "system_prompt" in data:
+        if data["system_prompt"] != ws.system_prompt:
+            previous_values["system_prompt"] = ws.system_prompt
+            new_values["system_prompt"] = data["system_prompt"]
+            changed_fields.append("system_prompt")
         ws.system_prompt = data["system_prompt"]
 
     if "enabled_tools" in data:
         _validate_enabled_tools(data["enabled_tools"])
+        if list(ws.enabled_tools or []) != list(data["enabled_tools"]):
+            previous_values["enabled_tools"] = list(ws.enabled_tools or [])
+            new_values["enabled_tools"] = list(data["enabled_tools"])
+            changed_fields.append("enabled_tools")
         ws.enabled_tools = data["enabled_tools"]
 
     if "color" in data:
+        if data["color"] != ws.color:
+            previous_values["color"] = ws.color
+            new_values["color"] = data["color"]
+            changed_fields.append("color")
         ws.color = data["color"]
 
     db.commit()
     db.refresh(ws)
+
+    if changed_fields:
+        log_event(
+            db,
+            EventType.WORKSPACE_EDITED,
+            user=user,
+            workspace=ws,
+            resource_type="workspace",
+            resource_id=ws.id,
+            payload={
+                "changed_fields": changed_fields,
+                "previous_values": previous_values,
+                "new_values": new_values,
+            },
+            request=request,
+        )
+        db.commit()
+
     return _to_response(ws)
 
 
