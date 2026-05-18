@@ -130,7 +130,6 @@ async def upload_events(
     request: Request,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
-    _auth: None = Depends(require_token),
 ):
     """Server-Sent Events stream for one document's ingestion lifecycle.
 
@@ -201,7 +200,6 @@ def get_document_raw(
     document_id: str,
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
-    _auth: None = Depends(require_token),
 ):
     """Stream the original bytes of an uploaded document.
 
