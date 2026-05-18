@@ -10,6 +10,7 @@ from config import settings
 from db import database
 from routers import health, chat, workspaces, admin, folders, documents
 from routers import settings as settings_router
+from routers import auth as auth_router
 from core.auth import require_token
 from core import llm_router
 from services import model_prewarm
@@ -89,6 +90,18 @@ class RequestLogger:
 async def lifespan(app: FastAPI):
     # Startup
     database.init_db()
+
+    # Bootstrap admin on first boot. If users table is empty and the env var
+    # isn't set, this raises and startup fails — by design, points the operator
+    # at the missing env var.
+    from db import database as _db
+    from core.bootstrap import ensure_bootstrap_admin
+    _bootstrap_db = _db.SessionLocal()
+    try:
+        ensure_bootstrap_admin(_bootstrap_db)
+    finally:
+        _bootstrap_db.close()
+
     gc_task = asyncio.create_task(garbage_collection_task())
 
     # Shared httpx client — one connection pool for the process lifetime.
@@ -148,6 +161,7 @@ app.add_middleware(RequestLogger)
 
 
 app.include_router(health.router)
+app.include_router(auth_router.router)
 app.include_router(workspaces.router, dependencies=[Depends(require_token)])
 app.include_router(chat.router, dependencies=[Depends(require_token)])
 app.include_router(folders.router, dependencies=[Depends(require_token)])

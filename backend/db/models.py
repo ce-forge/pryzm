@@ -22,7 +22,10 @@ def generate_uuid():
 class Workspace(Base):
     __tablename__ = "workspaces"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
-    slug = Column(String, nullable=False, unique=True, index=True)
+    # Uniqueness is enforced by two partial indexes (see migration
+    # a65df9990a35): UNIQUE(slug) WHERE is_template, and
+    # UNIQUE(user_id, slug) WHERE NOT is_template AND user_id IS NOT NULL.
+    slug = Column(String, nullable=False, index=True)
     display_name = Column(String, nullable=False)
     system_prompt = Column(Text, nullable=False, default="")
     enabled_tools = Column(JSONB, nullable=False, server_default="[]")
@@ -34,6 +37,10 @@ class Workspace(Base):
     is_builtin = Column(Boolean, nullable=False, default=False, server_default="false")
     color = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.clock_timestamp())
+    user_id = Column(String, nullable=True, index=True)
+    is_template = Column(Boolean, nullable=False, default=False)
+    template_id = Column(String, nullable=True, index=True)
+    owner_can_edit = Column(Boolean, nullable=False, default=False)
 
     sessions = relationship("Session", back_populates="workspace", cascade="all, delete-orphan")
     folders = relationship("Folder", back_populates="workspace", cascade="all, delete-orphan")
@@ -48,6 +55,7 @@ class Session(Base):
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
     folder_id = Column(String, ForeignKey("folders.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    user_id = Column(String, nullable=True, index=True)
     workspace = relationship("Workspace", back_populates="sessions")
     messages = relationship("Message", back_populates="session", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="session", cascade="all, delete-orphan")
@@ -88,10 +96,35 @@ class Message(Base):
 
 class Folder(Base):
     __tablename__ = "folders"
-    id = Column(String, primary_key=True)
+    id = Column(String, primary_key=True, default=generate_uuid, index=True)
     name = Column(String)
     workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String, nullable=True, index=True)
     workspace = relationship("Workspace", back_populates="folders")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=generate_uuid, index=True)
+    username = Column(String, nullable=False)
+    password_hash = Column(String, nullable=False)
+    email = Column(String, nullable=True)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    can_create_workspaces = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class Document(Base):

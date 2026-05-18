@@ -57,7 +57,6 @@ class MessageHistory(BaseModel):
     tool_calls: Optional[List[ToolCall]] = None
 
 class FolderCreate(BaseModel):
-    id: str
     name: str
     workspace: str
 
@@ -112,3 +111,8 @@ class WorkspaceDeleteResponse(BaseModel):
     removed_sessions: int
     removed_folders: int
     removed_documents: int
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
