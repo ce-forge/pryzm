@@ -137,6 +137,26 @@ class AuthSession(Base):
     last_seen_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    # Postgres requires the partition key (created_at) to be part of any unique
+    # constraint on a partitioned table. The composite PK lives at the DB level;
+    # callers always read/write by id (UUIDv7 — natural insertion order).
+    id = Column(String, primary_key=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    user_display_name_at_event = Column(Text, nullable=True)
+    event_type = Column(Text, nullable=False, index=True)
+    workspace_id = Column(String, ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True)
+    session_id = Column(String, ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True)
+    resource_type = Column(Text, nullable=True)
+    resource_id = Column(String, nullable=True)
+    payload = Column(JSON, nullable=False, default=dict, server_default="{}")
+    source_ip = Column(Text, nullable=True)
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), primary_key=True, nullable=False, server_default=func.now())
+
+
 class Document(Base):
     __tablename__ = "documents"
     id = Column(String, primary_key=True, default=generate_uuid, index=True)
