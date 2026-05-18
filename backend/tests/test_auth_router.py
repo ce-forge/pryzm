@@ -183,3 +183,68 @@ def test_me_returns_user_and_workspaces(db_session):
         assert body["workspaces"][0]["owner_can_edit"] is True
     finally:
         app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/auth/password — only the forced-change flow is accepted
+# ---------------------------------------------------------------------------
+
+def test_change_password_during_forced_flow_succeeds(db_session):
+    """When admin set must_change_password=True, the user can change once."""
+    u = models.User(
+        username="alice",
+        password_hash=cookie_auth.hash_password("temp-pw-12chars"),
+        is_admin=False, is_active=True,
+        must_change_password=True,
+    )
+    db_session.add(u); db_session.commit(); db_session.refresh(u)
+    sid = cookie_auth.create_session(db_session, u.id)
+    app.dependency_overrides[database.get_db] = lambda: db_session
+    try:
+        c = TestClient(app)
+        c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+        r = c.post("/api/auth/password", json={
+            "current_password": "temp-pw-12chars",
+            "new_password": "new-pw-12chars",
+        })
+        assert r.status_code == 200, r.text
+
+        # Flag should flip off, and the endpoint should now reject.
+        db_session.refresh(u)
+        assert u.must_change_password is False
+
+        r2 = c.post("/api/auth/password", json={
+            "current_password": "new-pw-12chars",
+            "new_password": "even-newer-pw-12c",
+        })
+        assert r2.status_code == 403
+        assert "voluntary" in r2.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_voluntary_change_password_rejected(db_session):
+    """A user whose must_change_password=False (normal state) can't change."""
+    u = models.User(
+        username="bob",
+        password_hash=cookie_auth.hash_password("current-pw-12chars"),
+        is_admin=False, is_active=True,
+        must_change_password=False,
+    )
+    db_session.add(u); db_session.commit(); db_session.refresh(u)
+    sid = cookie_auth.create_session(db_session, u.id)
+    app.dependency_overrides[database.get_db] = lambda: db_session
+    try:
+        c = TestClient(app)
+        c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+        r = c.post("/api/auth/password", json={
+            "current_password": "current-pw-12chars",
+            "new_password": "new-pw-12chars",
+        })
+        assert r.status_code == 403, r.text
+
+        # And the password didn't change.
+        db_session.refresh(u)
+        assert cookie_auth.verify_password("current-pw-12chars", u.password_hash)
+    finally:
+        app.dependency_overrides.clear()
