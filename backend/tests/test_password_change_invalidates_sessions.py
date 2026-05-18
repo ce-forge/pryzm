@@ -59,7 +59,7 @@ def test_password_change_short_password_returns_400(db_session, monkeypatch):
         c, u, _, _ = _setup(db_session, monkeypatch)
         r = c.post("/api/auth/password", json={
             "current_password": "old-pw-12chars",
-            "new_password": "short",
+            "new_password": "abc",
         })
         assert r.status_code == 400
     finally:

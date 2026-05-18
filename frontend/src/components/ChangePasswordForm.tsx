@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
 
-const MIN_LENGTH = 12;
+const MIN_LENGTH = 4;
 
 export default function ChangePasswordForm({
   onSuccess,
