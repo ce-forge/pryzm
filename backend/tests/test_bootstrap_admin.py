@@ -45,13 +45,12 @@ def test_bootstrap_instantiates_builtin_templates_for_admin(db_session, monkeypa
     # The migrated test DB already has the seeded builtin templates
     # (it_copilot, personal) at head. Clear them so this test exercises a
     # known, isolated template set.
-    db_session.query(models.Workspace).delete()
+    db_session.query(models.WorkspaceTemplate).delete()
     db_session.commit()
 
-    template = models.Workspace(
+    template = models.WorkspaceTemplate(
         id="tmpl-it", slug="it_copilot", display_name="IT Copilot",
         system_prompt="IT helper", enabled_tools=[],
-        is_builtin=True, is_template=True, user_id=None,
         engine_config={"backend": "llama_cpp"},
     )
     db_session.add(template)
@@ -64,9 +63,6 @@ def test_bootstrap_instantiates_builtin_templates_for_admin(db_session, monkeypa
         user_id=admin.id, template_id="tmpl-it",
     ).all()
     assert len(instances) == 1
-    assert instances[0].is_template is False
-    # Partial unique indexes let the instance reuse the template's literal
-    # slug — no user-id suffix needed.
     assert instances[0].slug == "it_copilot"
 
 
