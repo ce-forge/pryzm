@@ -1,7 +1,7 @@
 """Admin endpoints for per-user workspace management."""
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session as DbSession
 
@@ -40,6 +40,65 @@ def _ws_dict(w: models.Workspace) -> dict:
         "template_id": w.template_id,
         "owner_can_edit": w.owner_can_edit,
     }
+
+
+def _ws_dict_enriched(
+    w: models.Workspace,
+    owner_username: Optional[str],
+    template_display_name: Optional[str],
+) -> dict:
+    """Workspace dict augmented with resolved owner + template names. The
+    list endpoint feeds the dashboard table — raw FK ids would force every
+    cell to be a UUID, which is what we just fixed for audit events."""
+    return {
+        **_ws_dict(w),
+        "owner_username": owner_username,
+        "template_display_name": template_display_name,
+        "created_at": w.created_at.isoformat() if w.created_at else None,
+    }
+
+
+@router.get("/workspaces")
+def list_workspaces(
+    user_id: Optional[str] = Query(None),
+    template_id: Optional[str] = Query(None),
+    orphaned: Optional[bool] = Query(
+        None,
+        description="If true, returns only workspaces whose user_id is NULL.",
+    ),
+    db: DbSession = Depends(database.get_db),
+):
+    q = db.query(models.Workspace)
+    if orphaned:
+        q = q.filter(models.Workspace.user_id.is_(None))
+    elif user_id:
+        q = q.filter(models.Workspace.user_id == user_id)
+    if template_id:
+        q = q.filter(models.Workspace.template_id == template_id)
+    rows = q.order_by(models.Workspace.created_at.desc()).all()
+
+    # Batch-fetch owner usernames + template names to avoid N+1.
+    owner_ids = {w.user_id for w in rows if w.user_id}
+    template_ids = {w.template_id for w in rows if w.template_id}
+    usernames = {
+        uid: uname for uid, uname in db.query(
+            models.User.id, models.User.username
+        ).filter(models.User.id.in_(owner_ids)).all()
+    } if owner_ids else {}
+    template_names = {
+        tid: dn for tid, dn in db.query(
+            models.WorkspaceTemplate.id, models.WorkspaceTemplate.display_name
+        ).filter(models.WorkspaceTemplate.id.in_(template_ids)).all()
+    } if template_ids else {}
+
+    return [
+        _ws_dict_enriched(
+            w,
+            usernames.get(w.user_id) if w.user_id else None,
+            template_names.get(w.template_id) if w.template_id else None,
+        )
+        for w in rows
+    ]
 
 
 @router.get("/users/{user_id}/workspaces")
