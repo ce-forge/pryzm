@@ -1,16 +1,15 @@
-// Resolve the API base URL at runtime, not build time. Order:
-//   1. NEXT_PUBLIC_API_URL — explicit pin (e.g. Cloudflare tunnel domain).
-//      This is read at build time by Next.js since it's a NEXT_PUBLIC_ var.
-//   2. window.location — same hostname as the page, port 8000. Makes the
-//      app "just work" from any device on the LAN: load the frontend from
-//      http://<host-ip>:3000 and the API target follows the same host.
-//   3. localhost fallback for SSR / non-browser contexts.
-// The previous fixed-127.0.0.1 default broke mobile access entirely: the
-// browser would try to fetch from the *phone's* loopback. Auto-deriving
-// from window.location is the lowest-friction fix.
+// Resolve the API base URL. Order:
+//   1. NEXT_PUBLIC_API_URL — explicit pin if set.
+//   2. Same origin when the page is served on a default port (80 or 443) —
+//      indicates a reverse proxy is in front, routing /api/* and the backend
+//      routes to the backend on its private port.
+//   3. Same hostname on :8000 — direct dev/LAN access where the frontend is
+//      served on :3000 and the backend lives on :8000 alongside it.
+//   4. Localhost fallback for SSR / non-browser contexts.
 const _resolveApiUrl = (): string => {
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
   if (typeof window !== "undefined" && window.location?.hostname) {
+    if (!window.location.port) return window.location.origin;
     return `${window.location.protocol}//${window.location.hostname}:8000`;
   }
   return "http://127.0.0.1:8000";
