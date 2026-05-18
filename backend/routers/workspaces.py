@@ -127,6 +127,10 @@ def create_workspace(
         engine_config=engine_config,
         color=payload.color,
         user_id=user.id,
+        # User created this themselves — they own the editing rights.
+        # owner_can_edit=False is reserved for admin-instantiated
+        # templates the admin wants to lock down.
+        owner_can_edit=True,
     )
     db.add(ws)
     db.commit()
@@ -161,6 +165,19 @@ def update_workspace(
     user: models.User = Depends(cookie_auth.current_user),
 ):
     ws = get_by_slug(db, slug)
+
+    # Locked workspaces (admin-instantiated templates with owner_can_edit
+    # cleared) reject edits from the recipient. Admins bypass — they have
+    # the admin endpoint at /api/admin/workspaces/{id} that's gated by
+    # require_admin and never checks this flag.
+    if not ws.owner_can_edit and not user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "This workspace is locked. Ask your admin to enable editing "
+                "or to push template changes."
+            ),
+        )
 
     data = payload.model_dump(exclude_unset=True)
 
