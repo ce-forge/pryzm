@@ -13,6 +13,7 @@ function AppShell() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsMounted(true);
     if (typeof window !== "undefined" && window.innerWidth < 768) setIsSidebarOpen(false);
   }, []);
