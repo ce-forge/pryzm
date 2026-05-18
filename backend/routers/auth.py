@@ -83,6 +83,7 @@ def change_password(
         raise HTTPException(status_code=400, detail="Password must be at least 12 characters.")
     current_sid = request.cookies.get(cookie_auth.COOKIE_NAME)
     user.password_hash = cookie_auth.hash_password(payload.new_password)
+    user.must_change_password = False
     db.query(models.AuthSession).filter(
         models.AuthSession.user_id == user.id,
         models.AuthSession.id != current_sid,
@@ -108,6 +109,7 @@ def me(
         "is_admin": user.is_admin,
         "can_create_workspaces": user.can_create_workspaces,
         "email": user.email,
+        "must_change_password": user.must_change_password,
         "workspaces": [
             {
                 "id": w.id,

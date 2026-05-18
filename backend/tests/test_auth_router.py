@@ -179,6 +179,7 @@ def test_me_returns_user_and_workspaces(db_session, monkeypatch):
         assert body["username"] == "admin"
         assert body["is_admin"] is True
         assert body["can_create_workspaces"] is True
+        assert body["must_change_password"] in (True, False)
         assert len(body["workspaces"]) == 1
         assert body["workspaces"][0]["slug"] == "my-ws"
         assert body["workspaces"][0]["owner_can_edit"] is True
