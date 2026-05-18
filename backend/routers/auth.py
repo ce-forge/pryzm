@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
+from core.audit import EventType, log_event
 from db import database, models
 from schemas import LoginRequest, PasswordChange
 
@@ -16,22 +17,54 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/login")
 async def login(
     payload: LoginRequest,
+    request: Request,
     response: Response,
     db: DbSession = Depends(database.get_db),
 ):
     username = payload.username.strip()
     if cookie_auth.login_rate_limiter.is_locked(username):
+        log_event(
+            db, EventType.AUTH_LOGIN_FAILURE,
+            request=request,
+            payload={"username_attempted": username, "reason": "rate_limited"},
+        )
+        db.commit()
         await asyncio.sleep(0.25)
         raise HTTPException(status_code=401, detail="Invalid credentials.")
 
     user = (
         db.query(models.User)
         .filter(models.User.username.ilike(username))
-        .filter(models.User.is_active.is_(True))
         .first()
     )
-    if user is None or not cookie_auth.verify_password(payload.password, user.password_hash):
+    if user is None:
         cookie_auth.login_rate_limiter.record_failure(username)
+        log_event(
+            db, EventType.AUTH_LOGIN_FAILURE,
+            request=request,
+            payload={"username_attempted": username, "reason": "unknown_user"},
+        )
+        db.commit()
+        await asyncio.sleep(0.25)
+        raise HTTPException(status_code=401, detail="Invalid credentials.")
+    if not user.is_active:
+        cookie_auth.login_rate_limiter.record_failure(username)
+        log_event(
+            db, EventType.AUTH_LOGIN_FAILURE,
+            request=request,
+            payload={"username_attempted": username, "reason": "account_disabled"},
+        )
+        db.commit()
+        await asyncio.sleep(0.25)
+        raise HTTPException(status_code=401, detail="Invalid credentials.")
+    if not cookie_auth.verify_password(payload.password, user.password_hash):
+        cookie_auth.login_rate_limiter.record_failure(username)
+        log_event(
+            db, EventType.AUTH_LOGIN_FAILURE,
+            request=request,
+            payload={"username_attempted": username, "reason": "wrong_password"},
+        )
+        db.commit()
         await asyncio.sleep(0.25)
         raise HTTPException(status_code=401, detail="Invalid credentials.")
 
@@ -40,6 +73,13 @@ async def login(
     db.commit()
 
     sid = cookie_auth.create_session(db, user.id)
+    log_event(
+        db, EventType.AUTH_LOGIN_SUCCESS,
+        user=user,
+        request=request,
+        payload={},
+    )
+    db.commit()
     response.set_cookie(
         cookie_auth.COOKIE_NAME,
         sid,
@@ -65,7 +105,20 @@ def logout(
 ):
     sid = request.cookies.get(cookie_auth.COOKIE_NAME)
     if sid:
+        session_row = db.query(models.AuthSession).filter_by(id=sid).first()
+        user = (
+            db.query(models.User).filter_by(id=session_row.user_id).first()
+            if session_row else None
+        )
         cookie_auth.invalidate_session(db, sid)
+        if user is not None:
+            log_event(
+                db, EventType.AUTH_LOGOUT,
+                user=user,
+                request=request,
+                payload={},
+            )
+            db.commit()
     response.delete_cookie(cookie_auth.COOKIE_NAME, path="/")
     return {"ok": True}
 
@@ -88,6 +141,12 @@ def change_password(
         models.AuthSession.user_id == user.id,
         models.AuthSession.id != current_sid,
     ).delete(synchronize_session=False)
+    log_event(
+        db, EventType.AUTH_PASSWORD_CHANGED,
+        user=user,
+        request=request,
+        payload={"invalidated_other_sessions": True},
+    )
     db.commit()
     return {"ok": True}
 
