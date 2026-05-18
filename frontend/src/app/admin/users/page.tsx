@@ -14,6 +14,17 @@ interface AdminUser {
   last_login_at: string | null;
 }
 
+interface WorkspaceTemplate {
+  id: string;
+  slug: string;
+  display_name: string;
+}
+
+interface StarterTemplateSelection {
+  template_id: string;
+  owner_can_edit: boolean;
+}
+
 const PASSWORD_MIN = 4;
 
 export default function AdminUsersPage() {
@@ -26,6 +37,10 @@ export default function AdminUsersPage() {
   const [password, setPassword] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(true);
+  const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
+  const [selectedTemplates, setSelectedTemplates] = useState<
+    Record<string, StarterTemplateSelection>
+  >({});
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSuccess, setFormSuccess] = useState<string | null>(null);
@@ -53,6 +68,35 @@ export default function AdminUsersPage() {
     loadUsers();
   }, [loadUsers]);
 
+  useEffect(() => {
+    apiFetch("/api/admin/templates")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((body: WorkspaceTemplate[]) => setTemplates(Array.isArray(body) ? body : []))
+      .catch(() => setTemplates([]));
+  }, []);
+
+  const toggleTemplate = (id: string) => {
+    setSelectedTemplates((prev) => {
+      const next = { ...prev };
+      if (next[id]) {
+        delete next[id];
+      } else {
+        next[id] = { template_id: id, owner_can_edit: false };
+      }
+      return next;
+    });
+  };
+
+  const toggleOwnerCanEdit = (id: string) => {
+    setSelectedTemplates((prev) => {
+      if (!prev[id]) return prev;
+      return {
+        ...prev,
+        [id]: { ...prev[id], owner_can_edit: !prev[id].owner_can_edit },
+      };
+    });
+  };
+
   const onSubmit = async (ev: FormEvent) => {
     ev.preventDefault();
     setFormError(null);
@@ -77,7 +121,7 @@ export default function AdminUsersPage() {
           password,
           is_admin: isAdmin,
           can_create_workspaces: canCreateWorkspaces,
-          starter_templates: [],
+          starter_templates: Object.values(selectedTemplates),
         }),
       });
       if (!r.ok) {
@@ -92,11 +136,17 @@ export default function AdminUsersPage() {
         return;
       }
       const created = await r.json();
-      setFormSuccess(`Created user ${created.username}.`);
+      const seededCount = Object.keys(selectedTemplates).length;
+      setFormSuccess(
+        seededCount > 0
+          ? `Created ${created.username} with ${seededCount} starter workspace${seededCount === 1 ? "" : "s"}.`
+          : `Created ${created.username}.`
+      );
       // Reset only the secret/sensitive bits; keep the role toggles as the
       // admin probably wants to make several users of the same shape.
       setUsername("");
       setPassword("");
+      setSelectedTemplates({});
       await loadUsers();
     } catch (e) {
       setFormError(String(e));
@@ -154,6 +204,51 @@ export default function AdminUsersPage() {
               onChange={setCanCreateWorkspaces}
               hint="Allowed to add new workspaces in the chat sidebar"
             />
+          </div>
+
+          <div>
+            <div className="text-xs text-gray-400 mb-2">Starter workspaces</div>
+            {templates.length === 0 ? (
+              <div className="text-xs text-gray-500">
+                No workspace templates exist yet. The new user will start with
+                no workspaces and won&apos;t be able to use the AI until they
+                create one (requires &quot;Can create workspaces&quot; checked above).
+              </div>
+            ) : (
+              <div className="space-y-1.5 border border-[#2a2a2c] rounded p-3 bg-[#131314]">
+                {templates.map((t) => {
+                  const selected = !!selectedTemplates[t.id];
+                  return (
+                    <div
+                      key={t.id}
+                      className="flex items-center justify-between gap-3"
+                    >
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleTemplate(t.id)}
+                        />
+                        <span className="text-sm">{t.display_name}</span>
+                        <span className="text-xs text-gray-500 font-mono">
+                          {t.slug}
+                        </span>
+                      </label>
+                      {selected && (
+                        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={selectedTemplates[t.id].owner_can_edit}
+                            onChange={() => toggleOwnerCanEdit(t.id)}
+                          />
+                          Owner can edit
+                        </label>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {formError && (

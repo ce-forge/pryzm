@@ -71,6 +71,37 @@ def test_workspace_created_emits_event(db_session):
         assert payload["color"] == "orange"
         assert payload["cloned_from_slug"] is None
         assert events[0].workspace_id is not None
+
+        # Sanity: created workspace is tied to the creator and is therefore
+        # visible to them via GET /workspaces.
+        created = db_session.query(models.Workspace).filter_by(
+            id=events[0].workspace_id
+        ).first()
+        assert created.user_id == user.id
+
+        list_r = c.get("/workspaces")
+        assert list_r.status_code == 200, list_r.text
+        slugs = [w["slug"] for w in list_r.json()]
+        assert created.slug in slugs
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_create_workspace_rejects_duplicate_display_name_per_user(db_session):
+    try:
+        c, user = _user_client(db_session)
+        first = c.post("/workspaces", json={"display_name": "Project X"})
+        assert first.status_code in (200, 201), first.text
+
+        dup = c.post("/workspaces", json={"display_name": "Project X"})
+        assert dup.status_code == 409, dup.text
+        assert "already" in dup.json()["detail"].lower()
+
+        # No second audit event for the rejected create.
+        events = db_session.query(models.AuditEvent).filter_by(
+            event_type="workspace.created", user_id=user.id,
+        ).all()
+        assert len(events) == 1
     finally:
         app.dependency_overrides.clear()
 
