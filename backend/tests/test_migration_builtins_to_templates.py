@@ -19,7 +19,7 @@ def test_builtins_marked_as_templates(db_at_revision, alembic_cfg):
     engine.dispose()
 
     # Upgrade through this migration
-    command.upgrade(alembic_cfg, "head")
+    command.upgrade(alembic_cfg, "8cd618b90038")
     engine = create_engine(_test_database_url(), poolclass=NullPool)
     with engine.connect() as conn:
         result = conn.execute(text(

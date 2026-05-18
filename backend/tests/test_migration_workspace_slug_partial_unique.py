@@ -6,6 +6,9 @@ from sqlalchemy.pool import NullPool
 from tests.conftest import _test_database_url
 
 
+_MIGRATION_REVISION = "a65df9990a35"
+
+
 def _index_names(engine, table: str) -> set[str]:
     inspector = inspect(engine)
     return {ix["name"] for ix in inspector.get_indexes(table)}
@@ -16,8 +19,8 @@ def _unique_constraint_names(engine, table: str) -> set[str]:
     return {uc["name"] for uc in inspector.get_unique_constraints(table)}
 
 
-def test_partial_unique_indexes_present_at_head(db_at_head):
-    engine = db_at_head
+def test_partial_unique_indexes_present(db_at_revision):
+    engine = db_at_revision(_MIGRATION_REVISION)
     names = _index_names(engine, "workspaces")
     assert "ix_workspaces_slug_template_unique" in names
     assert "ix_workspaces_user_slug_unique" in names
@@ -27,7 +30,7 @@ def test_partial_unique_indexes_present_at_head(db_at_head):
 
 def test_downgrade_restores_global_unique(reset_test_db, alembic_cfg):
     command.downgrade(alembic_cfg, "base")
-    command.upgrade(alembic_cfg, "head")
+    command.upgrade(alembic_cfg, _MIGRATION_REVISION)
     command.downgrade(alembic_cfg, "dc1f669b872e")
 
     engine = create_engine(reset_test_db, poolclass=NullPool)
@@ -41,15 +44,13 @@ def test_downgrade_restores_global_unique(reset_test_db, alembic_cfg):
 
 
 def _clear_workspaces(engine):
-    """Wipe workspaces (and users) so the next `downgrade base` in another
-    test's setup doesn't trip the restored UNIQUE(slug) constraint."""
     with engine.begin() as conn:
         conn.execute(text("DELETE FROM workspaces"))
         conn.execute(text("DELETE FROM users"))
 
 
-def test_per_user_slug_uniqueness_enforced_in_db(db_at_head):
-    engine = db_at_head
+def test_per_user_slug_uniqueness_enforced_in_db(db_at_revision):
+    engine = db_at_revision(_MIGRATION_REVISION)
     _clear_workspaces(engine)
     user_id = "u-1"
     try:
@@ -77,8 +78,8 @@ def test_per_user_slug_uniqueness_enforced_in_db(db_at_head):
         _clear_workspaces(engine)
 
 
-def test_cross_user_same_slug_allowed_in_db(db_at_head):
-    engine = db_at_head
+def test_cross_user_same_slug_allowed_in_db(db_at_revision):
+    engine = db_at_revision(_MIGRATION_REVISION)
     _clear_workspaces(engine)
     try:
         with engine.begin() as conn:
@@ -102,8 +103,8 @@ def test_cross_user_same_slug_allowed_in_db(db_at_head):
         _clear_workspaces(engine)
 
 
-def test_template_slug_globally_unique_in_db(db_at_head):
-    engine = db_at_head
+def test_template_slug_globally_unique_in_db(db_at_revision):
+    engine = db_at_revision(_MIGRATION_REVISION)
     _clear_workspaces(engine)
     try:
         with engine.begin() as conn:

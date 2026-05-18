@@ -139,8 +139,9 @@ def test_reset_rejects_non_builtin_400(client_and_session):
     client, session = client_and_session
     ws = models.Workspace(
         id="non-builtin", slug="non-builtin", display_name="x",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
+        user_id=SMOKE_ADMIN_ID,
     )
     session.add(ws)
     session.commit()
@@ -158,15 +159,15 @@ def test_message_edit_cross_workspace_404(client_and_session):
     # workspace check, not from the per-user workspace filter.
     ws_a = models.Workspace(
         id="ws-a", slug="ws-a", display_name="A",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
-        user_id=SMOKE_ADMIN_ID, is_template=False,
+        user_id=SMOKE_ADMIN_ID,
     )
     ws_b = models.Workspace(
         id="ws-b", slug="ws-b", display_name="B",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
-        user_id=SMOKE_ADMIN_ID, is_template=False,
+        user_id=SMOKE_ADMIN_ID,
     )
     sess_a = models.Session(
         id="sess-a", workspace_id="ws-a", title="t", user_id=SMOKE_ADMIN_ID,
@@ -189,9 +190,9 @@ def test_message_edit_missing_returns_404(client_and_session):
     client, session = client_and_session
     ws = models.Workspace(
         id="ws-x", slug="ws-x", display_name="X",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
-        user_id=SMOKE_ADMIN_ID, is_template=False,
+        user_id=SMOKE_ADMIN_ID,
     )
     session.add(ws)
     session.commit()

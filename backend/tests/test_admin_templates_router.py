@@ -24,10 +24,9 @@ def _admin_client(db_session, monkeypatch):
 def test_list_templates(db_session, monkeypatch):
     try:
         c, _ = _admin_client(db_session, monkeypatch)
-        t = models.Workspace(
+        t = models.WorkspaceTemplate(
             id="t-1", slug="t-1", display_name="T1", system_prompt="",
-            enabled_tools=[], is_builtin=False, is_template=True, user_id=None,
-            engine_config={"backend": "llama_cpp"},
+            enabled_tools=[], engine_config={"backend": "llama_cpp"},
         )
         db_session.add(t); db_session.commit()
         r = c.get("/api/admin/templates")
@@ -39,8 +38,7 @@ def test_list_templates(db_session, monkeypatch):
         admin = db_session.query(models.User).filter_by(username="admin").one()
         ws = models.Workspace(
             id="ws-1", slug="ws-1", display_name="W1", system_prompt="",
-            enabled_tools=[], is_builtin=False, is_template=False,
-            user_id=admin.id, engine_config={"backend": "llama_cpp"},
+            enabled_tools=[], user_id=admin.id, engine_config={"backend": "llama_cpp"},
         )
         db_session.add(ws); db_session.commit()
         r = c.get("/api/admin/templates")
@@ -63,9 +61,8 @@ def test_create_template(db_session, monkeypatch):
         assert r.status_code == 200, r.text
         body = r.json()
         assert body["slug"] == "new-tmpl"
-        assert body["is_template"] is True
-        t = db_session.query(models.Workspace).filter_by(slug="new-tmpl", is_template=True).one()
-        assert t.user_id is None
+        t = db_session.query(models.WorkspaceTemplate).filter_by(slug="new-tmpl").one()
+        assert t.display_name == "New Template"
     finally:
         app.dependency_overrides.clear()
 
@@ -73,10 +70,9 @@ def test_create_template(db_session, monkeypatch):
 def test_instantiate_template_for_user(db_session, monkeypatch):
     try:
         c, _ = _admin_client(db_session, monkeypatch)
-        t = models.Workspace(
+        t = models.WorkspaceTemplate(
             id="t-instn", slug="t-instn", display_name="T", system_prompt="",
-            enabled_tools=[], is_builtin=False, is_template=True, user_id=None,
-            engine_config={"backend": "llama_cpp"},
+            enabled_tools=[], engine_config={"backend": "llama_cpp"},
         )
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add_all([t, bob]); db_session.commit(); db_session.refresh(bob)
@@ -97,10 +93,9 @@ def test_instantiate_template_for_user(db_session, monkeypatch):
 def test_instantiate_duplicate_blocks(db_session, monkeypatch):
     try:
         c, _ = _admin_client(db_session, monkeypatch)
-        t = models.Workspace(
+        t = models.WorkspaceTemplate(
             id="t-dup", slug="t-dup", display_name="T", system_prompt="",
-            enabled_tools=[], is_builtin=False, is_template=True, user_id=None,
-            engine_config={"backend": "llama_cpp"},
+            enabled_tools=[], engine_config={"backend": "llama_cpp"},
         )
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add_all([t, bob]); db_session.commit(); db_session.refresh(bob)
@@ -114,16 +109,15 @@ def test_instantiate_duplicate_blocks(db_session, monkeypatch):
 def test_push_updates_all_instances(db_session, monkeypatch):
     try:
         c, _ = _admin_client(db_session, monkeypatch)
-        t = models.Workspace(
+        t = models.WorkspaceTemplate(
             id="t-push", slug="t-push", display_name="T", system_prompt="OLD",
-            enabled_tools=["get_local_time"], is_builtin=False, is_template=True, user_id=None,
-            engine_config={"backend": "llama_cpp"},
+            enabled_tools=["get_local_time"], engine_config={"backend": "llama_cpp"},
         )
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add_all([t, bob]); db_session.commit(); db_session.refresh(bob)
         instance = models.Workspace(
             slug="t-push", display_name="T", system_prompt="OLD",
-            enabled_tools=["get_local_time"], is_builtin=False, is_template=False,
+            enabled_tools=["get_local_time"],
             template_id="t-push", user_id=bob.id, owner_can_edit=False,
             engine_config={"backend": "llama_cpp"},
         )
@@ -147,16 +141,15 @@ def test_push_updates_all_instances(db_session, monkeypatch):
 def test_delete_template_nulls_template_id_on_instances(db_session, monkeypatch):
     try:
         c, _ = _admin_client(db_session, monkeypatch)
-        t = models.Workspace(
+        t = models.WorkspaceTemplate(
             id="t-del", slug="t-del", display_name="T", system_prompt="",
-            enabled_tools=[], is_builtin=False, is_template=True, user_id=None,
-            engine_config={"backend": "llama_cpp"},
+            enabled_tools=[], engine_config={"backend": "llama_cpp"},
         )
         bob = models.User(username="bob", password_hash="x", is_admin=False, is_active=True)
         db_session.add_all([t, bob]); db_session.commit(); db_session.refresh(bob)
         instance = models.Workspace(
             slug="t-del", display_name="T", system_prompt="",
-            enabled_tools=[], is_builtin=False, is_template=False,
+            enabled_tools=[],
             template_id="t-del", user_id=bob.id,
             engine_config={"backend": "llama_cpp"},
         )
@@ -164,7 +157,7 @@ def test_delete_template_nulls_template_id_on_instances(db_session, monkeypatch)
 
         r = c.delete("/api/admin/templates/t-del")
         assert r.status_code == 200
-        assert db_session.query(models.Workspace).filter_by(id="t-del").first() is None
+        assert db_session.query(models.WorkspaceTemplate).filter_by(id="t-del").first() is None
         db_session.expire_all()
         instance = db_session.query(models.Workspace).filter_by(id=instance.id).one()
         assert instance.template_id is None

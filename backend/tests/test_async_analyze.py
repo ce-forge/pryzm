@@ -158,14 +158,12 @@ def test_engine_error_emits_error_envelope(db_at_head, monkeypatch):
                 is_admin=True, is_active=True, can_create_workspaces=True,
             )
             seed_db.add(admin); seed_db.commit(); seed_db.refresh(admin)
-        # Check for the user-instance (not the template seeded by migrations)
         existing_ws = seed_db.query(models.Workspace).filter_by(
-            slug="personal", is_template=False, user_id=admin.id,
+            slug="personal", user_id=admin.id,
         ).first()
         if existing_ws is None:
             seed_db.add(models.Workspace(
                 slug="personal", display_name="Personal", user_id=admin.id,
-                is_template=False,
             ))
             seed_db.commit()
 

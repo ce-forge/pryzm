@@ -40,23 +40,18 @@ def ensure_bootstrap_admin(db: DbSession) -> models.User | None:
 
 
 def _instantiate_templates_for(db: DbSession, user: models.User) -> None:
-    # Per the partial unique indexes on workspaces, a user-owned instance
-    # may share a template's slug — templates are unique only within
-    # is_template=TRUE, and per-user instances are unique within
-    # (user_id, slug). So the instance gets the template's literal slug.
-    templates = db.query(models.Workspace).filter_by(is_template=True).all()
+    templates = db.query(models.WorkspaceTemplate).all()
     for tmpl in templates:
         instance = models.Workspace(
             slug=tmpl.slug,
             display_name=tmpl.display_name,
             system_prompt=tmpl.system_prompt,
             enabled_tools=list(tmpl.enabled_tools or []),
-            is_builtin=tmpl.is_builtin,
-            is_template=False,
             template_id=tmpl.id,
             user_id=user.id,
             owner_can_edit=True,
             engine_config=dict(tmpl.engine_config or {}),
+            color=tmpl.color,
         )
         db.add(instance)
     db.commit()
@@ -73,6 +68,5 @@ def _backfill_orphan_data(db: DbSession, user: models.User) -> None:
     )
     db.query(models.Workspace).filter(
         models.Workspace.user_id.is_(None),
-        models.Workspace.is_template.is_(False),
     ).update({"user_id": user.id}, synchronize_session=False)
     db.commit()

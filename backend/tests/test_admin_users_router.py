@@ -65,9 +65,9 @@ def test_admin_create_user_with_no_templates(db_session, monkeypatch):
 def test_admin_create_user_instantiates_starter_templates(db_session, monkeypatch):
     try:
         c, _ = _admin_client(db_session, monkeypatch)
-        tmpl = models.Workspace(
+        tmpl = models.WorkspaceTemplate(
             id="tmpl-x", slug="tmpl-x", display_name="X", system_prompt="x",
-            enabled_tools=[], is_builtin=False, is_template=True, user_id=None,
+            enabled_tools=[],
             engine_config={"backend": "llama_cpp"},
         )
         db_session.add(tmpl); db_session.commit()

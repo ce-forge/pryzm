@@ -8,7 +8,7 @@ at request time.
 """
 import os
 import re
-from typing import Optional, Tuple
+from typing import Tuple
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -28,29 +28,6 @@ def get_by_slug(db: Session, slug: str) -> models.Workspace:
     ws = db.query(models.Workspace).filter(models.Workspace.slug == slug).first()
     if not ws:
         raise HTTPException(status_code=404, detail=f"Workspace not found: {slug}")
-    return ws
-
-
-def get_or_default(db: Session, slug: Optional[str]) -> models.Workspace:
-    """Resolve a slug to its Workspace. Behavior depends on the input:
-
-      - slug is None or empty: fall back to the oldest workspace
-        (typically it_copilot post-migration). This preserves the
-        historical default for endpoints whose `workspace` query
-        parameter was optional with a built-in default.
-      - slug is provided but does NOT exist: 404. We deliberately do
-        NOT silently reroute to the default — that would mask stale
-        URLs and let user-visible operations land in the wrong
-        workspace without notice.
-    """
-    if slug:
-        ws = db.query(models.Workspace).filter(models.Workspace.slug == slug).first()
-        if ws:
-            return ws
-        raise HTTPException(status_code=404, detail=f"Workspace not found: {slug}")
-    ws = db.query(models.Workspace).order_by(models.Workspace.created_at.asc()).first()
-    if not ws:
-        raise HTTPException(status_code=500, detail="No workspaces exist. Database is empty.")
     return ws
 
 

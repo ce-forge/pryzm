@@ -12,7 +12,7 @@ async def test_partial_chunks_rolled_back_on_embedding_failure(db_session, monke
     )
     ws = models.Workspace(
         id="ws-ing", slug="ws-ing", display_name="ING",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "llama_cpp"},
         user_id="user-ing",
     )

@@ -33,7 +33,6 @@ def _seed_workspace(db, slug="img-test") -> models.Workspace:
         display_name="Image Test",
         system_prompt="",
         enabled_tools=[],
-        is_builtin=False,
         engine_config={"backend": "llama_cpp"},
     )
     db.add(ws)

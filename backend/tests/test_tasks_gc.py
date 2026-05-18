@@ -14,7 +14,7 @@ def test_gc_removes_orphan_document_and_its_storage_file(db_session):
 
     ws = models.Workspace(
         id="ws-gc", slug="ws-gc", display_name="GC",
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
     )
     cutoff_old = datetime.now(timezone.utc) - timedelta(hours=48)

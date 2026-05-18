@@ -22,7 +22,6 @@ def _seed_workspace(db, slug="fnmention"):
         display_name="FN Test",
         system_prompt="",
         enabled_tools=[],
-        is_builtin=False,
         engine_config={"backend": "llama_cpp"},
         user_id=f"user-{slug}",
     )

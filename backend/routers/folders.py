@@ -39,7 +39,6 @@ def create_folder(
         .filter(
             models.Workspace.slug == folder.workspace,
             models.Workspace.user_id == user.id,
-            models.Workspace.is_template.is_(False),
         )
         .first()
     )

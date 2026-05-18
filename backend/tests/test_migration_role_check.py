@@ -16,8 +16,8 @@ def _seed_session(engine) -> str:
         """))
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
-                                    enabled_tools, is_builtin)
-            VALUES ('ws-c', 'ws-c', 'x', '', '[]'::jsonb, false)
+                                    enabled_tools)
+            VALUES ('ws-c', 'ws-c', 'x', '', '[]'::jsonb)
         """))
         conn.execute(text("""
             INSERT INTO sessions (id, title, workspace_id, user_id)

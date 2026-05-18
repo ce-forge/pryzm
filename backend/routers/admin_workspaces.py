@@ -36,7 +36,6 @@ def _ws_dict(w: models.Workspace) -> dict:
         "color": getattr(w, "color", None),
         "engine_config": dict(w.engine_config or {}),
         "user_id": w.user_id,
-        "is_template": w.is_template,
         "template_id": w.template_id,
         "owner_can_edit": w.owner_can_edit,
     }
@@ -48,7 +47,7 @@ def list_user_workspaces(user_id: str, db: DbSession = Depends(database.get_db))
     if user is None:
         raise HTTPException(status_code=404, detail="User not found.")
     workspaces = db.query(models.Workspace).filter_by(
-        user_id=user_id, is_template=False,
+        user_id=user_id,
     ).all()
     return [_ws_dict(w) for w in workspaces]
 

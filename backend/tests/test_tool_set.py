@@ -14,7 +14,6 @@ def _make_workspace(enabled_tools: list[str]):
         display_name="x",
         system_prompt="",
         enabled_tools=enabled_tools,
-        is_builtin=False,
         engine_config={"backend": "ollama", "model": "gemma4:e4b"},
     )
 

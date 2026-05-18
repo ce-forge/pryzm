@@ -67,9 +67,9 @@ def test_downgrade_backfills_preferred_model_from_engine_config(reset_test_db, a
     with seed_engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
-                                    enabled_tools, engine_config, is_builtin)
+                                    enabled_tools, engine_config)
             VALUES ('ws-f', 'ws-f', 'WS F', '', '[]'::jsonb,
-                    '{"backend": "llama_cpp"}'::jsonb, false)
+                    '{"backend": "llama_cpp"}'::jsonb)
         """))
     seed_engine.dispose()
 

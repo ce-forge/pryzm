@@ -36,10 +36,8 @@ def test_document_raw_has_private_cache_and_etag(db_session, monkeypatch):
         display_name="H",
         system_prompt="",
         enabled_tools=[],
-        is_builtin=False,
         engine_config={"backend": "llama_cpp"},
         user_id=admin.id,
-        is_template=False,
     )
     doc = models.Document(
         id="doc-h",

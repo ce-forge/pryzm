@@ -19,7 +19,7 @@ def test_folder_create_assigns_user_id(db_session, monkeypatch):
     # Create a workspace owned by the user
     ws = models.Workspace(
         slug="ws-folder", display_name="F", system_prompt="",
-        enabled_tools=[], is_builtin=False, is_template=False,
+        enabled_tools=[],
         user_id=u.id, engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws)

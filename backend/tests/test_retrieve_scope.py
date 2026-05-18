@@ -24,7 +24,7 @@ def _seed_workspace_and_session(db, ws_slug, sess_slug):
     )
     ws = models.Workspace(
         id=f"ws-{ws_slug}", slug=ws_slug, display_name=ws_slug.upper(),
-        system_prompt="", enabled_tools=[], is_builtin=False,
+        system_prompt="", enabled_tools=[],
         engine_config={"backend": "llama_cpp"}, user_id=f"user-{ws_slug}",
     )
     sess = models.Session(

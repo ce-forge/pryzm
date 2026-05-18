@@ -10,8 +10,8 @@ def _seed_workspace(engine, slug: str = "ws-e") -> str:
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
-                                    enabled_tools, is_builtin)
-            VALUES (:id, :slug, 'x', '', '[]'::jsonb, false)
+                                    enabled_tools)
+            VALUES (:id, :slug, 'x', '', '[]'::jsonb)
         """), {"id": slug, "slug": slug})
     return slug
 

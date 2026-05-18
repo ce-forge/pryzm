@@ -6,12 +6,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import NullPool
 
 
-def _seed_workspace(engine, slug: str) -> str:
+def _seed_workspace_pre_split(engine, slug: str) -> str:
+    """Pre-split schema seed. Use for db_at_revision targeting any revision
+    before 5f645f0d5313."""
     with engine.begin() as conn:
         conn.execute(text("""
             INSERT INTO workspaces (id, slug, display_name, system_prompt,
                                     enabled_tools, is_builtin)
             VALUES (:id, :slug, 'x', '', '[]'::jsonb, false)
+        """), {"id": slug, "slug": slug})
+    return slug
+
+
+def _seed_workspace(engine, slug: str) -> str:
+    """Head-schema seed (post-split: no is_builtin column)."""
+    with engine.begin() as conn:
+        conn.execute(text("""
+            INSERT INTO workspaces (id, slug, display_name, system_prompt,
+                                    enabled_tools)
+            VALUES (:id, :slug, 'x', '', '[]'::jsonb)
         """), {"id": slug, "slug": slug})
     return slug
 
@@ -28,7 +41,7 @@ def _seed_document(engine, doc_id: str, workspace_id: str) -> str:
 def test_workspace_id_backfilled_from_parent_document(db_at_revision, alembic_cfg):
     # Start at T1's head (engine_config exists, but no workspace_id on chunks yet).
     engine = db_at_revision("78445f9618d3")
-    ws = _seed_workspace(engine, "ws-backfill")
+    ws = _seed_workspace_pre_split(engine, "ws-backfill")
     doc = _seed_document(engine, "doc-1", ws)
     with engine.begin() as conn:
         conn.execute(text("""

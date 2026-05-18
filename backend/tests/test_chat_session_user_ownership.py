@@ -18,7 +18,7 @@ def test_chat_session_creation_assigns_user_id(db_session, monkeypatch):
     db_session.add(u); db_session.commit(); db_session.refresh(u)
     ws = models.Workspace(
         slug="ws-chat", display_name="Chat", system_prompt="",
-        enabled_tools=[], is_builtin=False, is_template=False,
+        enabled_tools=[],
         user_id=u.id, engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws); db_session.commit(); db_session.refresh(ws)
@@ -39,7 +39,7 @@ def test_chat_session_creation_without_user_id_fails_at_db(db_session, monkeypat
     db_session.add(u); db_session.commit(); db_session.refresh(u)
     ws = models.Workspace(
         slug="ws-chat2", display_name="Chat", system_prompt="",
-        enabled_tools=[], is_builtin=False, is_template=False,
+        enabled_tools=[],
         user_id=u.id, engine_config={"backend": "llama_cpp"},
     )
     db_session.add(ws); db_session.commit(); db_session.refresh(ws)
