@@ -70,9 +70,9 @@ export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
               </button>
               {user?.is_admin && (
                 <Link
-                  href="/dashboard"
+                  href="/admin"
                   className="p-1.5 rounded text-gray-400 hover:text-[#e3e3e3] hover:bg-[#282a2c] transition-colors"
-                  title="Dashboard"
+                  title="Admin dashboard"
                   aria-label="Open admin dashboard"
                 >
                   <DashboardIcon className="w-4 h-4" />
