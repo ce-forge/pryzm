@@ -442,6 +442,7 @@ async def analyze_data(
         # `chat_session` after the local `db` is closed below.
         session_id = chat_session.id
         workspace_id = workspace.id
+        user_id = user.id
     finally:
         db.close()
 
@@ -476,6 +477,7 @@ async def analyze_data(
                 session_id=session_id,
                 is_disconnected=http_request.is_disconnected,
                 modes=request.modes,
+                user_id=user_id,
             ):
                 if await http_request.is_disconnected():
                     disconnected = True
