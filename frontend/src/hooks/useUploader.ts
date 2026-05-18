@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { FileUpload } from "@/types/chat";
 import { APP_CONFIG } from "@/utils/constants";
-import { getToken } from "@/utils/apiClient";
 
 /**
  * Upload a single file via XMLHttpRequest so the caller gets real
@@ -28,8 +27,6 @@ function uploadWithProgress(
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${APP_CONFIG.API_URL}/upload`);
     xhr.withCredentials = true;
-    const token = getToken();
-    if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
 
     xhr.upload.addEventListener("progress", (e) => {
       if (e.lengthComputable) {
@@ -65,10 +62,8 @@ function subscribeToIngestionStatus(
   workspace: string,
   setUploads: Dispatch<SetStateAction<FileUpload[]>>,
 ): void {
-  const token = getToken();
   const url = new URL(`${APP_CONFIG.API_URL}/uploads/${documentId}/events`);
   url.searchParams.set("workspace", workspace);
-  if (token) url.searchParams.set("token", token);
   const es = new EventSource(url.toString(), { withCredentials: true });
 
   es.onmessage = (e) => {

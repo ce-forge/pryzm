@@ -15,7 +15,6 @@
 import { useSearchParams } from "next/navigation";
 import type { ReferencedFile } from "@/types/chat";
 import { APP_CONFIG } from "@/utils/constants";
-import { getToken } from "@/utils/apiClient";
 
 
 export default function ReferencedFilesPreview({ files }: { files: ReferencedFile[] }) {
@@ -23,14 +22,12 @@ export default function ReferencedFilesPreview({ files }: { files: ReferencedFil
   const searchParams = useSearchParams();
   if (images.length === 0) return null;
 
-  const token = getToken();
   const workspace = searchParams.get("workspace") || APP_CONFIG.DEFAULT_WORKSPACE;
 
   return (
     <div className="mt-2 flex flex-col gap-2 w-full max-w-2xl">
       {images.map((f) => {
         const qs = new URLSearchParams({ workspace });
-        if (token) qs.set("token", token);
         const url = `${APP_CONFIG.API_URL}/documents/${f.id}/raw?${qs.toString()}`;
         return (
           <a
