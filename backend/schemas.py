@@ -85,7 +85,6 @@ class WorkspaceResponse(BaseModel):
     display_name: str
     system_prompt: str
     enabled_tools: List[str]
-    is_builtin: bool
     color: Optional[str] = None
     created_at: datetime
 
@@ -104,6 +103,10 @@ class WorkspaceUpdate(BaseModel):
     system_prompt: Optional[str] = Field(None, max_length=50_000)
     enabled_tools: Optional[List[str]] = None
     color: Optional[WORKSPACE_COLOR] = None
+
+
+class PositionUpdate(BaseModel):
+    position: int
 
 
 class WorkspaceDeleteResponse(BaseModel):

@@ -8,32 +8,16 @@ from schemas import (
     WorkspaceCreate,
     WorkspaceUpdate,
     WorkspaceDeleteResponse,
+    PositionUpdate,
 )
-from services.builtins import get_builtin
 from services.workspaces import (
     get_by_slug,
     slugify_unique,
-    read_default_prompt,
 )
 from tools.registry import AVAILABLE_TOOLS
 
 
 router = APIRouter(tags=["Workspaces"])
-
-
-def _validate_resettable(workspace: models.Workspace) -> None:
-    """Raise 400 if the workspace is not a builtin.
-
-    Reset re-seeds display_name, system_prompt, enabled_tools, etc. from the
-    BUILTIN_WORKSPACES registry — only meaningful for rows we own the source
-    of truth for. User-created workspaces have no canonical defaults to reset
-    to, so we reject the operation.
-    """
-    if not workspace.is_builtin:
-        raise HTTPException(
-            status_code=400,
-            detail="Reset is only allowed for builtin workspaces.",
-        )
 
 
 def _validate_enabled_tools(names: List[str]) -> None:
@@ -54,7 +38,6 @@ def _to_response(workspace) -> WorkspaceResponse:
         display_name=workspace.display_name,
         system_prompt=workspace.system_prompt,
         enabled_tools=workspace.enabled_tools or [],
-        is_builtin=workspace.is_builtin,
         color=workspace.color,
         created_at=workspace.created_at,
     )
@@ -67,11 +50,8 @@ def list_workspaces(
 ):
     rows = (
         db.query(models.Workspace)
-        .filter(
-            models.Workspace.user_id == user.id,
-            models.Workspace.is_template.is_(False),
-        )
-        .order_by(models.Workspace.created_at.asc())
+        .filter(models.Workspace.user_id == user.id)
+        .order_by(models.Workspace.position.asc(), models.Workspace.created_at.asc())
         .all()
     )
     return [_to_response(ws) for ws in rows]
@@ -88,7 +68,6 @@ def get_workspace(
         .filter(
             models.Workspace.slug == slug,
             models.Workspace.user_id == user.id,
-            models.Workspace.is_template.is_(False),
         )
         .first()
     )
@@ -125,7 +104,6 @@ def create_workspace(
         enabled_tools=enabled_tools,
         engine_config=engine_config,
         color=payload.color,
-        is_builtin=False,
     )
     db.add(ws)
     db.commit()
@@ -200,26 +178,80 @@ def delete_workspace(slug: str, db: Session = Depends(database.get_db)):
 
 
 @router.post("/workspaces/{slug}/reset", response_model=WorkspaceResponse)
-def reset_workspace(slug: str, db: Session = Depends(database.get_db)):
-    ws = get_by_slug(db, slug)
-    _validate_resettable(ws)
-    builtin = get_builtin(slug)
-    if builtin is None:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Builtin registry entry missing for: {slug}",
+def reset_workspace(
+    slug: str,
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
+):
+    ws = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.slug == slug,
+            models.Workspace.user_id == user.id,
         )
-    try:
-        ws.system_prompt = read_default_prompt(slug)
-    except FileNotFoundError:
+        .first()
+    )
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    if ws.template_id is None:
         raise HTTPException(
-            status_code=500,
-            detail=f"Default prompt file missing for builtin: core/prompts/{slug}.txt",
+            status_code=400,
+            detail="Workspace has no template to reset from.",
         )
-    ws.enabled_tools = list(builtin.enabled_tools)
-    ws.engine_config = dict(builtin.engine_config)
-    ws.display_name = builtin.display_name
-    ws.color = builtin.color
+    tmpl = db.query(models.WorkspaceTemplate).filter_by(id=ws.template_id).first()
+    if tmpl is None:
+        raise HTTPException(status_code=404, detail="Template no longer exists.")
+    ws.system_prompt = tmpl.system_prompt
+    ws.enabled_tools = list(tmpl.enabled_tools or [])
+    ws.color = tmpl.color
+    ws.engine_config = dict(tmpl.engine_config or {})
+    db.commit()
+    db.refresh(ws)
+    return _to_response(ws)
+
+
+@router.patch("/workspaces/{slug}/position", response_model=WorkspaceResponse)
+def update_workspace_position(
+    slug: str,
+    payload: PositionUpdate,
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
+):
+    if payload.position < 0:
+        raise HTTPException(status_code=400, detail="position must be non-negative")
+    ws = (
+        db.query(models.Workspace)
+        .filter(
+            models.Workspace.slug == slug,
+            models.Workspace.user_id == user.id,
+        )
+        .first()
+    )
+    if ws is None:
+        raise HTTPException(status_code=404, detail="Workspace not found.")
+    new_pos = payload.position
+    old_pos = ws.position
+    if new_pos == old_pos:
+        return _to_response(ws)
+
+    if new_pos < old_pos:
+        # Moving up: bump everything in [new_pos, old_pos) down by 1
+        db.query(models.Workspace).filter(
+            models.Workspace.user_id == user.id,
+            models.Workspace.id != ws.id,
+            models.Workspace.position >= new_pos,
+            models.Workspace.position < old_pos,
+        ).update({"position": models.Workspace.position + 1}, synchronize_session=False)
+    else:
+        # Moving down: bump everything in (old_pos, new_pos] up by 1
+        db.query(models.Workspace).filter(
+            models.Workspace.user_id == user.id,
+            models.Workspace.id != ws.id,
+            models.Workspace.position > old_pos,
+            models.Workspace.position <= new_pos,
+        ).update({"position": models.Workspace.position - 1}, synchronize_session=False)
+
+    ws.position = new_pos
     db.commit()
     db.refresh(ws)
     return _to_response(ws)
