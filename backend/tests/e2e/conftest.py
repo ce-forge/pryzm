@@ -9,6 +9,7 @@ dev servers (backend on :8000, frontend on :3000). The conftest provides:
 - A `dev_servers_ready` fixture that fails fast if either server is unreachable.
 - A `session_cookie` fixture that logs in via /api/auth/login and returns the
   pryzm_session cookie value for tests that hit the backend directly.
+- A `login_via_ui` fixture for UI tests that drives the LoginPage flow.
 - A `screenshot` helper that writes captures to `backend/tests/e2e/_artifacts/`.
 
 These tests are LOCAL ONLY today — no CI integration. Run them while the dev
@@ -21,7 +22,7 @@ from __future__ import annotations
 import os
 import urllib.request
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import httpx
 import pytest
@@ -31,6 +32,13 @@ from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 FRONTEND_URL = "http://127.0.0.1:3000"
 BACKEND_URL = "http://127.0.0.1:8000"
 ARTIFACTS_DIR = Path(__file__).parent / "_artifacts"
+
+
+def _e2e_credentials() -> tuple[str, str]:
+    return (
+        os.environ.get("PRYZM_E2E_USERNAME", "admin"),
+        os.environ.get("PRYZM_E2E_PASSWORD", "admin"),
+    )
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -78,30 +86,6 @@ def page(context: BrowserContext) -> Page:
     return context.new_page()
 
 
-@pytest.fixture
-def api_token() -> str:
-    """Read PRYZM_API_TOKEN from .env. Used by legacy e2e tests that still
-    drive the localStorage-based TokenGate flow. New backend-direct tests
-    should depend on `session_cookie` instead."""
-    env_path = Path(__file__).parent.parent.parent.parent / ".env"
-    for line in env_path.read_text().splitlines():
-        if line.startswith("PRYZM_API_TOKEN="):
-            return line.split("=", 1)[1].strip()
-    pytest.fail("PRYZM_API_TOKEN missing from .env", pytrace=False)
-
-
-@pytest.fixture
-def inject_token(page: Page, api_token: str):
-    """Returns a callable that pre-seeds the token in localStorage, skipping
-    TokenGate. Used by legacy e2e tests that drive the browser UI."""
-    def _do() -> None:
-        page.goto(f"{FRONTEND_URL}/")
-        page.evaluate(
-            f'() => localStorage.setItem("pryzm_api_token", "{api_token}")'
-        )
-    return _do
-
-
 @pytest.fixture(scope="session")
 def session_cookie() -> str:
     """Log in to the running backend and return the pryzm_session cookie value.
@@ -109,8 +93,7 @@ def session_cookie() -> str:
     Credentials come from env vars PRYZM_E2E_USERNAME / PRYZM_E2E_PASSWORD
     (default admin / admin). Configure these in .env if your bootstrap admin
     uses other credentials."""
-    username = os.environ.get("PRYZM_E2E_USERNAME", "admin")
-    password = os.environ.get("PRYZM_E2E_PASSWORD", "admin")
+    username, password = _e2e_credentials()
     resp = httpx.post(
         f"{BACKEND_URL}/api/auth/login",
         json={"username": username, "password": password},
@@ -126,6 +109,31 @@ def session_cookie() -> str:
     if not sid:
         pytest.fail("Login succeeded but no pryzm_session cookie was returned.", pytrace=False)
     return sid
+
+
+@pytest.fixture
+def login_via_ui(page: Page) -> Callable[[], None]:
+    """Returns a callable that navigates to the LoginPage and signs in.
+
+    Drives the real LoginPage form: types the credentials into the
+    username/password inputs and clicks Sign in. Waits until the form
+    is no longer visible (signal that the redirect to the app shell
+    completed). Credentials come from PRYZM_E2E_USERNAME /
+    PRYZM_E2E_PASSWORD (default admin/admin).
+    """
+    username, password = _e2e_credentials()
+
+    def _do() -> None:
+        page.goto(f"{FRONTEND_URL}/")
+        page.locator("#username").wait_for(state="visible", timeout=10_000)
+        page.locator("#username").fill(username)
+        page.locator("#password").fill(password)
+        page.get_by_role("button", name="Sign in").click()
+        # Wait until the login form is gone — the app shell has taken over.
+        page.locator("#username").wait_for(state="detached", timeout=10_000)
+        page.wait_for_load_state("networkidle", timeout=10_000)
+
+    return _do
 
 
 @pytest.fixture

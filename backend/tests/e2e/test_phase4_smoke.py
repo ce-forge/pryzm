@@ -39,13 +39,6 @@ _ASSISTANT_HAS_CONTENT = """
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _open_app_with_token(page: Page, token: str) -> None:
-    """Navigate to / and inject the token, then reload so the app initialises."""
-    page.goto(FRONTEND_URL)
-    page.evaluate(f'() => localStorage.setItem("pryzm_api_token", "{token}")')
-    page.reload()
-    page.wait_for_load_state("networkidle", timeout=10_000)
-
 
 def _send_chat_message(page: Page, text: str) -> None:
     """Fill the chat textarea, press Enter, and wait for the user bubble to
@@ -66,14 +59,14 @@ def _send_chat_message(page: Page, text: str) -> None:
 # Test 1: workspace switch isolates history
 # ---------------------------------------------------------------------------
 
-def test_workspace_switch_isolates_history(page: Page, api_token: str, screenshot):
+def test_workspace_switch_isolates_history(page: Page, login_via_ui, screenshot):
     """Send a message in `personal`, switch to `it_copilot` via URL, verify the
     message isn't visible in `it_copilot`'s chat area.
 
     This exercises cache key namespacing (personal:<id> vs it_copilot:<id>):
     the unique phrase must NOT bleed into the other workspace's view.
     """
-    _open_app_with_token(page, api_token)
+    login_via_ui()
 
     # Navigate to personal workspace and send a unique message.
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
@@ -102,14 +95,14 @@ def test_workspace_switch_isolates_history(page: Page, api_token: str, screensho
 # Test 2: workspace switch preserves history on roundtrip
 # ---------------------------------------------------------------------------
 
-def test_workspace_switch_preserves_history(page: Page, api_token: str, screenshot):
+def test_workspace_switch_preserves_history(page: Page, login_via_ui, screenshot):
     """After sending a message in `personal`, switching to `it_copilot` and
     back should restore `personal`'s history (reloaded from DB on mount).
 
     The in-memory cache is cleared on each full navigation but useSession
     calls loadSessionData() on mount which re-fetches from /sessions/<id>.
     """
-    _open_app_with_token(page, api_token)
+    login_via_ui()
 
     page.goto(f"{FRONTEND_URL}/?workspace=personal")
     page.wait_for_load_state("networkidle", timeout=10_000)
@@ -144,14 +137,14 @@ def test_workspace_switch_preserves_history(page: Page, api_token: str, screensh
 # Test 3: chat works in each builtin workspace
 # ---------------------------------------------------------------------------
 
-def test_chat_works_in_each_builtin(page: Page, api_token: str, screenshot):
+def test_chat_works_in_each_builtin(page: Page, login_via_ui, screenshot):
     """Smoke: both `personal` and `it_copilot` can send a chat and receive a
     streamed assistant reply via the ?workspace= query-param shape.
 
     Verifies that workspace identity is correctly propagated to /analyze so
     the LLM engine picks the right engine_config for each workspace.
     """
-    _open_app_with_token(page, api_token)
+    login_via_ui()
 
     for ws_slug in ("personal", "it_copilot"):
         page.goto(f"{FRONTEND_URL}/?workspace={ws_slug}")
