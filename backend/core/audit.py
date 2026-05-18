@@ -70,6 +70,15 @@ class EventType:
     DOCUMENT_DELETED = "document.deleted"
     DOCUMENT_PROCESSING_FAILED = "document.processing_failed"
 
+    # chat.*
+    CHAT_SESSION_CREATED = "chat.session_created"
+    CHAT_SESSION_DELETED = "chat.session_deleted"
+    CHAT_MESSAGE_SENT = "chat.message_sent"
+    CHAT_MESSAGE_RECEIVED = "chat.message_received"
+    CHAT_TOOL_INVOKED = "chat.tool_invoked"
+    CHAT_RAG_RETRIEVED = "chat.rag_retrieved"
+    CHAT_WEB_SEARCH = "chat.web_search"
+
 
 def log_event(
     db: Session,
