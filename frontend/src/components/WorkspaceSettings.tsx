@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { apiFetch } from "@/utils/apiClient";
@@ -168,7 +169,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
     }
   };
 
-  return (
+  const modalContent = (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
       <div className="bg-[#1e1f20] w-full max-w-2xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
 
@@ -360,4 +361,9 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       )}
     </div>
   );
+
+  // Portal to document.body so the modal escapes the sidebar's transform
+  // containing block and overlays the full viewport.
+  if (typeof document === "undefined") return null;
+  return createPortal(modalContent, document.body);
 }
