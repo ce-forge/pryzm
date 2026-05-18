@@ -138,8 +138,10 @@ def test_session_patch_rejects_cross_workspace_folder_id(db_session, monkeypatch
     from db import database
     from main import app
 
+    # Bearer auth resolves to the oldest admin user; make this user admin so
+    # workspace_query_dep's per-user filter matches the seeded workspace owner.
     user = models.User(
-        id="user-patch", username="patch", password_hash="hash", is_admin=False
+        id="user-patch", username="patch", password_hash="hash", is_admin=True
     )
     ws_a = models.Workspace(
         id="ws-pa", slug="ws-pa", display_name="A",
