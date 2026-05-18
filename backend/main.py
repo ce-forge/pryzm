@@ -15,7 +15,7 @@ from routers import admin_users as admin_users_router
 from routers import admin_templates as admin_templates_router
 from routers import admin_workspaces as admin_workspaces_router
 from core.auth import require_token
-from core import llm_router
+from core import cookie_auth, llm_router
 from services import model_prewarm
 from services.tasks import garbage_collection_task
 
@@ -169,8 +169,8 @@ app.include_router(workspaces.router, dependencies=[Depends(require_token)])
 app.include_router(chat.router, dependencies=[Depends(require_token)])
 app.include_router(folders.router, dependencies=[Depends(require_token)])
 app.include_router(documents.router, dependencies=[Depends(require_token)])
-app.include_router(settings_router.router, dependencies=[Depends(require_token)])
-app.include_router(admin.router, dependencies=[Depends(require_token)])
+app.include_router(settings_router.router, dependencies=[Depends(cookie_auth.require_admin)])
+app.include_router(admin.router, dependencies=[Depends(cookie_auth.require_admin)])
 app.include_router(admin_users_router.router)
 app.include_router(admin_templates_router.router)
 app.include_router(admin_workspaces_router.router)
