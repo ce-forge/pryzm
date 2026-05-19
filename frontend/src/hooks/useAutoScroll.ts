@@ -25,6 +25,11 @@ export function useAutoScroll({ messages, streamingText, isProcessing }: UseAuto
   // loop. When the user scrolls away from the bottom we disable auto-scroll
   // until they return.
   const isAutoScrollEnabled = useRef(true);
+  // Tracks the last observed scrollTop so we can tell whether the latest
+  // scroll event was the user moving up (scrollTop decreased) vs. our own
+  // programmatic scrollTo at the end of a chunk (scrollTop increased).
+  // Null on first call — we wait one event to establish the baseline.
+  const lastScrollTop = useRef<number | null>(null);
 
   const scrollToBottom = useCallback((force = false) => {
     if (scrollRef.current && (isAutoScrollEnabled.current || force)) {
@@ -54,15 +59,23 @@ export function useAutoScroll({ messages, streamingText, isProcessing }: UseAuto
     }
   }, [streamingText, isProcessing, scrollToBottom]);
 
+  // Disable as soon as the user scrolls up by ANY amount — the previous
+  // position-threshold-only check let small wheel/touch movements get
+  // swallowed by the next chunk's programmatic scrollTo, which felt like
+  // the page was fighting the user. Re-enable only when they're back at
+  // the very bottom (tight 30px threshold).
   const onScroll = () => {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 250;
-    if (!isAtBottom && isAutoScrollEnabled.current) {
+    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+    const userScrolledUp =
+      lastScrollTop.current !== null && scrollTop < lastScrollTop.current;
+    if (userScrolledUp) {
       isAutoScrollEnabled.current = false;
-    } else if (isAtBottom && !isAutoScrollEnabled.current) {
+    } else if (distanceFromBottom < 30) {
       isAutoScrollEnabled.current = true;
     }
+    lastScrollTop.current = scrollTop;
   };
 
   return { scrollRef, onScroll, scrollToBottom };
