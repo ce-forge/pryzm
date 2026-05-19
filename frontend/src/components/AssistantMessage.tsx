@@ -49,8 +49,15 @@ const CodeBlock = ({ language, value }: { language: string, value: string }) => 
         language={language}
         style={oneDark}
         customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '13px' }}
+        codeTagProps={{ style: { background: 'transparent', textShadow: 'none' } }}
         wrapLines={true}
         wrapLongLines={true}
+        // oneDark's `style` paints each line span with a subtle backdrop,
+        // which combined with wrapLines (needed for wrapLongLines) shows
+        // up as visible grey strips behind the code. Override the per-line
+        // span back to transparent so the only background is the outer
+        // CodeBlock's solid surface.
+        lineProps={{ style: { display: 'block', background: 'transparent' } }}
       >
         {value || ""}
       </SyntaxHighlighter>
