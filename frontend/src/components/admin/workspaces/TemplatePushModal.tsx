@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
-import { ModalShell } from "./ModalShell";
+import { ModalShell } from "@/components/admin/ModalShell";
 import type { AdminTemplate } from "./types";
 
 export function TemplatePushModal({

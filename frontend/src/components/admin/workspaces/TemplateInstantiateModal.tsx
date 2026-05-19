@@ -2,8 +2,8 @@
 
 import { FormEvent, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
-import { ModalShell } from "./ModalShell";
-import { Field } from "./Field";
+import { ModalShell } from "@/components/admin/ModalShell";
+import { Field } from "@/components/admin/Field";
 import type { AdminTemplate, AdminUserRow } from "./types";
 
 export function TemplateInstantiateModal({
