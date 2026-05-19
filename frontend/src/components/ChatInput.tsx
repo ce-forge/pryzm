@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import { FileUpload } from "@/types/chat";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
+import { useAuth } from "@/context/AuthContext";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
@@ -70,7 +71,9 @@ export default function ChatInput({
   processUploadQueue, totalTokens, inputRef,
   webSearchAvailable, webSearchEnabled, setWebSearchEnabled,
 }: ChatInputProps) {
-  
+  const { user } = useAuth();
+  const isAdmin = !!user?.is_admin;
+
   const [isDragging, setIsDragging] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
   const dragCounter = useRef(0);
@@ -280,22 +283,26 @@ export default function ChatInput({
                       </button>
                     )}
 
-                    <button type="button" onClick={(e) => {
-                        e.stopPropagation();
-                        if (isAutoTesting) stopAutoTest();
-                        else setShowTestMenu(!showTestMenu);
-                      }}
-                      className={`p-2.5 rounded-full transition-all ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:bg-[#333537]'}`}>
-                      {isAutoTesting ? <StopIcon className="w-4 h-4 fill-white" /> : <TerminalIcon className="w-4 h-4" />}
-                    </button>
+                    {(isAdmin || isAutoTesting) && (
+                      <>
+                        <button type="button" onClick={(e) => {
+                            e.stopPropagation();
+                            if (isAutoTesting) stopAutoTest();
+                            else setShowTestMenu(!showTestMenu);
+                          }}
+                          className={`p-2.5 rounded-full transition-all ${isAutoTesting ? 'bg-red-500 text-white animate-pulse' : 'text-gray-500 hover:bg-[#333537]'}`}>
+                          {isAutoTesting ? <StopIcon className="w-4 h-4 fill-white" /> : <TerminalIcon className="w-4 h-4" />}
+                        </button>
 
-                    {showTestMenu && !isAutoTesting && (
-                      <div className="absolute bottom-[110%] left-0 mb-2 w-48 bg-[#282a2c] border border-[#333537] rounded-2xl shadow-2xl z-50 py-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
-                        <div className="px-4 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 mb-1">Diagnostics</div>
-                        <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('it_demo'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run IT Demo</button>
-                        <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('memory_test'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Context Test</button>
-                        <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('tool_chain'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Tool Chain</button>
-                      </div>
+                        {showTestMenu && !isAutoTesting && (
+                          <div className="absolute bottom-[110%] left-0 mb-2 w-48 bg-[#282a2c] border border-[#333537] rounded-2xl shadow-2xl z-50 py-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
+                            <div className="px-4 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 mb-1">Diagnostics</div>
+                            <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('it_demo'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run IT Demo</button>
+                            <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('memory_test'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Context Test</button>
+                            <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('tool_chain'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Tool Chain</button>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     <span className="text-[10px] text-gray-600 ml-2 font-mono select-none">~{totalTokens} / {APP_CONFIG.VISIBLE_TOKEN_LIMIT}</span>
