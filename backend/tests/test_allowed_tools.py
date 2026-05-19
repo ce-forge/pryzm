@@ -436,3 +436,56 @@ class TestInstantiateClamp:
             assert r.status_code == 200, r.text
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# PUT /admin/workspaces/{id} clamp
+# ---------------------------------------------------------------------------
+
+class TestAdminDirectEditClamp:
+    def _make_ws(self, db_session, owner_id, slug, enabled_tools):
+        ws = models.Workspace(
+            slug=slug,
+            display_name=slug,
+            system_prompt="",
+            enabled_tools=enabled_tools,
+            engine_config={"backend": "llama_cpp"},
+            user_id=owner_id,
+            owner_can_edit=False,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+        return ws
+
+    def test_admin_can_edit_within_recipient_cap(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            target = _seed_user(db_session, "alice", allowed_tools=["web_search"])
+            ws = self._make_ws(db_session, target.id, "alice-ws-1", [])
+            r = c.put(f"/api/admin/workspaces/{ws.id}",
+                json={"enabled_tools": ["web_search"]})
+            assert r.status_code == 200, r.text
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_admin_cannot_edit_beyond_recipient_cap(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            target = _seed_user(db_session, "bob", allowed_tools=["web_search"])
+            ws = self._make_ws(db_session, target.id, "bob-ws-1", [])
+            r = c.put(f"/api/admin/workspaces/{ws.id}",
+                json={"enabled_tools": ["execute_ping"]})
+            assert r.status_code == 400
+            assert "execute_ping" in r.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_admin_can_edit_non_tool_fields_on_grandfathered(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            target = _seed_user(db_session, "carol", allowed_tools=["web_search"])
+            ws = self._make_ws(db_session, target.id, "carol-ws-1", ["execute_ping"])
+            r = c.put(f"/api/admin/workspaces/{ws.id}",
+                json={"owner_can_edit": True})
+            assert r.status_code == 200, r.text
+        finally:
+            app.dependency_overrides.clear()

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
 from core.audit import EventType, log_event
+from core.tool_permissions import enforce_allowed_tools, validate_tool_names
 from db import database, models
 
 
@@ -132,6 +133,9 @@ def update_workspace(
     if w is None:
         raise HTTPException(status_code=404, detail="Workspace not found.")
     changes = payload.model_dump(exclude_unset=True)
+    if "enabled_tools" in changes:
+        validate_tool_names(changes["enabled_tools"])
+        enforce_allowed_tools(w.user, changes["enabled_tools"])
     changed_fields = [k for k, v in changes.items() if getattr(w, k, None) != v]
     for k, v in changes.items():
         if k == "color" and not hasattr(models.Workspace, "color"):
