@@ -6,6 +6,7 @@ import { apiFetch } from "@/utils/apiClient";
 import { AuditEventDetailModal } from "@/components/admin/AuditEventDetailModal";
 import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
 import Identicon from "@/components/Identicon";
+import { StatsPanel } from "@/components/admin/StatsPanel";
 
 interface AuditEvent {
   id: string;
@@ -155,7 +156,8 @@ export default function AdminAuditPage() {
   }, [eventTypes]);
 
   return (
-    <div className="max-w-6xl">
+    <div className="flex gap-6 max-w-7xl">
+      <div className="flex-1 min-w-0">
       <div className="flex flex-wrap gap-3 items-end mb-4">
         <FilterColumn label="Event type">
           <select
@@ -301,6 +303,18 @@ export default function AdminAuditPage() {
           onClose={() => setSelectedEventId(null)}
         />
       )}
+      </div>
+
+      <aside className="hidden xl:block w-72 shrink-0 space-y-4">
+        <StatsPanel
+          title="At a glance"
+          rows={[
+            { label: "Events loaded", value: events.length },
+            { label: "Event types", value: eventTypes.length },
+            { label: "Users", value: users.length },
+          ]}
+        />
+      </aside>
     </div>
   );
 }

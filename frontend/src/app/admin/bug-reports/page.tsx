@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 import Identicon from "@/components/Identicon";
+import { StatsPanel } from "@/components/admin/StatsPanel";
 
 interface AdminBugReport {
   id: string;
@@ -103,8 +104,16 @@ export default function AdminBugReportsPage() {
       );
   }, []);
 
+  const byStatus = {
+    open: bugs.filter((b) => b.status === "open").length,
+    acknowledged: bugs.filter((b) => b.status === "acknowledged").length,
+    resolved: bugs.filter((b) => b.status === "resolved").length,
+    dismissed: bugs.filter((b) => b.status === "dismissed").length,
+  };
+
   return (
-    <div className="max-w-6xl">
+    <div className="flex gap-6 max-w-7xl">
+      <div className="flex-1 min-w-0">
       <div className="flex flex-wrap items-end gap-3 mb-4">
         <FilterColumn label="Status">
           <select
@@ -224,6 +233,20 @@ export default function AdminBugReportsPage() {
           }}
         />
       )}
+      </div>
+
+      <aside className="hidden xl:block w-72 shrink-0 space-y-4">
+        <StatsPanel
+          title="At a glance"
+          rows={[
+            { label: "Visible", value: bugs.length },
+            { label: "Open", value: byStatus.open },
+            { label: "Acknowledged", value: byStatus.acknowledged },
+            { label: "Resolved", value: byStatus.resolved },
+            { label: "Dismissed", value: byStatus.dismissed },
+          ]}
+        />
+      </aside>
     </div>
   );
 }

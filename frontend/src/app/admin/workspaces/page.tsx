@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
 import { ToolPicker } from "@/components/ToolPicker";
 import Identicon from "@/components/Identicon";
+import { StatsPanel } from "@/components/admin/StatsPanel";
 
 interface AdminWorkspace {
   id: string;
@@ -38,7 +39,7 @@ type SubTab = "templates" | "workspaces";
 export default function AdminWorkspacesPage() {
   const [subTab, setSubTab] = useState<SubTab>("workspaces");
   return (
-    <div className="max-w-6xl">
+    <div className="max-w-7xl">
       <div className="flex justify-end mb-4">
         <div className="flex gap-1 border border-[#2a2a2c] rounded p-0.5 bg-[#1e1e1f]">
           <SubTabButton
@@ -170,8 +171,11 @@ function AllWorkspacesView() {
     await load();
   };
 
+  const withTemplate = workspaces.filter((w) => w.template_id).length;
+
   return (
-    <div className="space-y-4">
+    <div className="flex gap-6">
+      <div className="flex-1 min-w-0 space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex flex-col gap-1">
           <span className="text-xs text-gray-400">Owner</span>
@@ -332,6 +336,19 @@ function AllWorkspacesView() {
           onDone={() => setPromoteWorkspace(null)}
         />
       )}
+      </div>
+
+      <aside className="hidden xl:block w-72 shrink-0 space-y-4">
+        <StatsPanel
+          title="At a glance"
+          rows={[
+            { label: "Visible", value: workspaces.length },
+            { label: "Orphaned", value: orphanCount },
+            { label: "From template", value: withTemplate },
+            { label: "User-created", value: workspaces.length - withTemplate },
+          ]}
+        />
+      </aside>
     </div>
   );
 }
@@ -401,7 +418,8 @@ function TemplatesView() {
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex gap-6">
+      <div className="flex-1 min-w-0 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-400">
           Templates seed new users&apos; starter workspaces. Push to overwrite
@@ -524,6 +542,17 @@ function TemplatesView() {
           onDone={() => setInstantiateTemplate(null)}
         />
       )}
+      </div>
+
+      <aside className="hidden xl:block w-72 shrink-0 space-y-4">
+        <StatsPanel
+          title="At a glance"
+          rows={[
+            { label: "Templates", value: templates.length },
+            { label: "Users", value: users.length },
+          ]}
+        />
+      </aside>
     </div>
   );
 }
