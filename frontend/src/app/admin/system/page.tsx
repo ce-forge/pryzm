@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import ModelsSection from "@/components/SettingsModels";
-import MicroPromptsSection from "@/components/MicroPromptsSection";
+import ModelsSection from "@/components/admin/system/SettingsModels";
+import MicroPromptsSection from "@/components/admin/system/MicroPromptsSection";
 import { StatsPanel } from "@/components/admin/StatsPanel";
 import { apiFetch } from "@/utils/apiClient";
 

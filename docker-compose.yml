@@ -43,9 +43,19 @@ services:
     container_name: pryzm_llama_swap
     ports:
       - "127.0.0.1:8080:8080"
+    # Container runs as root (image default). llama-server needs to create
+    # /root/.cache/llama.cpp/ for its own scratch cache; non-root users can't
+    # write under /root/ in the image. Files it writes into the bind-mounted
+    # cache below come out root-owned on the host, but umask 022 keeps them
+    # world-readable — the backend (running as the host user) only needs to
+    # stat() partial blob sizes for the progress feed, not write the cache.
     volumes:
       - ./infra/llama-swap-config.yaml:/app/config.yaml:ro
-      - llama_models:/root/.cache/huggingface
+      # Bind-mounted (was: named volume `llama_models`). The host directory
+      # is gitignored. Backend reads it directly to surface real download
+      # progress; llama-swap's HF downloader writes here. Migration from the
+      # named volume: see infra/migrate-llama-cache.sh.
+      - ./infra/llama_models:/root/.cache/huggingface
     deploy:
       resources:
         reservations:
@@ -54,6 +64,3 @@ services:
               count: 1
               capabilities: [gpu]
     restart: always
-
-volumes:
-  llama_models:

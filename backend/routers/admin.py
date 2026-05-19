@@ -43,9 +43,41 @@ _logger = logging.getLogger("pryzm.admin")
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 _YAML_PATH = _REPO_ROOT / "infra" / "llama-swap-config.yaml"
+_LLAMA_CACHE = _REPO_ROOT / "infra" / "llama_models"
 _yaml = ruamel.yaml.YAML()
 _yaml.preserve_quotes = True
 _yaml_lock = asyncio.Lock()
+
+# In-memory map of model_id → download tracking metadata. Populated by
+# add_model() when the request carries the HF picker's hints; consumed
+# by the status SSE to emit real {bytes, total} progress events. Cleared
+# on health pass or model delete. Lost on backend restart — by design,
+# admin can just stop watching and re-open the panel.
+_active_downloads: dict[str, dict] = {}
+
+
+def _blobs_dir_for_repo(repo: str) -> pathlib.Path:
+    """Map an HF repo like `bartowski/foo-GGUF` to the cache's blobs path."""
+    if "/" not in repo:
+        return _LLAMA_CACHE / "hub" / f"models--{repo}" / "blobs"
+    org, name = repo.split("/", 1)
+    return _LLAMA_CACHE / "hub" / f"models--{org}--{name}" / "blobs"
+
+
+def _partial_blob_size(blobs_dir: pathlib.Path, blob_hash: str) -> int:
+    """Return current on-disk size of the blob, picking up partial/incomplete
+    variants llama.cpp might write during download. 0 if nothing is present yet."""
+    if not blobs_dir.is_dir():
+        return 0
+    try:
+        for path in blobs_dir.glob(f"{blob_hash}*"):
+            try:
+                return path.stat().st_size
+            except OSError:
+                pass
+    except OSError:
+        pass
+    return 0
 
 # Match `-hf <repo>:<quant>` and `--ctx-size <n>` inside the multi-line cmd string.
 _HF_RE = re.compile(r"-hf\s+(\S+):(\S+)")
@@ -100,7 +132,7 @@ def _build_cmd_block(repo: str, quant: str, ngl: int, ctx_size: int, group: str)
         f"-hf {repo}:{quant}\n"
         f"-ngl {ngl} --ctx-size {ctx_size} --jinja --flash-attn on"
     )
-    if group == "chat":
+    if group == "on-demand":
         base += "\n--cache-type-k q8_0 --cache-type-v q8_0"
     return base
 
@@ -111,8 +143,14 @@ class AddModelRequest(BaseModel):
     quant: Optional[str] = None  # Optional: if `repo` already contains `:quant`, this is ignored
     ngl: int = 99
     ctx_size: int = 8192
-    group: str = "chat"
+    group: str = "on-demand"
     tags: list[str] = Field(default_factory=list)
+    # Optional progress-tracking hints from the HF picker — when present,
+    # the status SSE emits real {bytes, total} events instead of just a
+    # spinner. None of these are required: manual entries still work.
+    expected_filename: Optional[str] = None
+    expected_size: Optional[int] = None
+    expected_blob_hash: Optional[str] = None
 
 
 class UpdateModelRequest(BaseModel):
@@ -198,8 +236,8 @@ async def add_model(
         raise HTTPException(status_code=400, detail=f"repo:quant looks malformed: {repo_full!r}")
     repo, quant = repo_full.split(":", 1)
 
-    if req.group not in {"chat", "always-on"}:
-        raise HTTPException(status_code=400, detail="group must be 'chat' or 'always-on'")
+    if req.group not in {"on-demand", "always-on", "inactive"}:
+        raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
         data = _read_yaml()
@@ -221,6 +259,17 @@ async def add_model(
                 "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
             # Don't fail the request — the YAML is written; SIGHUP can be retried manually.
         llm_router.reload_router_from_yaml(_YAML_PATH)
+
+    # Stash progress-tracking metadata for the status SSE. Only populated
+    # when the HF picker passes hints; manual adds skip and fall back to
+    # the indeterminate spinner.
+    if req.expected_blob_hash and req.expected_size:
+        _active_downloads[req.id] = {
+            "blob_hash": req.expected_blob_hash,
+            "expected_size": int(req.expected_size),
+            "blobs_dir": _blobs_dir_for_repo(repo),
+            "filename": req.expected_filename,
+        }
 
     _logger.info("admin.model_added id=%s repo=%s", req.id, repo_full)
     log_event(
@@ -249,8 +298,8 @@ async def update_model(
     db: DbSession = Depends(database.get_db),
     admin: models.User = Depends(cookie_auth.require_admin),
 ) -> dict:
-    if req.group is not None and req.group not in {"chat", "always-on"}:
-        raise HTTPException(status_code=400, detail="group must be 'chat' or 'always-on'")
+    if req.group is not None and req.group not in {"on-demand", "always-on", "inactive"}:
+        raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
         data = _read_yaml()
@@ -270,7 +319,7 @@ async def update_model(
 
         new_ngl = req.ngl if req.ngl is not None else (current["ngl"] or 99)
         new_ctx = req.ctx_size if req.ctx_size is not None else (current["ctx_size"] or 8192)
-        new_group = req.group if req.group is not None else (current["group"] or "chat")
+        new_group = req.group if req.group is not None else (current["group"] or "on-demand")
         new_tags = req.tags if req.tags is not None else list(current["tags"])
 
         changed_fields = []
@@ -335,6 +384,7 @@ async def delete_model(
         db.commit()
         del models_cfg[model_id]
         _write_yaml(data)
+        _active_downloads.pop(model_id, None)
         try:
             _reload_llama_swap()
         except subprocess.CalledProcessError as e:
@@ -348,18 +398,61 @@ async def delete_model(
 
 @router.get("/models/{model_id}/status")
 async def model_status(model_id: str) -> StreamingResponse:
+    """Live SSE feed for the watch-while-loading panel.
+
+    Three concurrent sources pump events into a shared queue:
+      - log_producer: forwards llama-swap's /api/events log lines
+      - progress_producer: stat()s the partial blob on disk every 2s and
+        emits {progress: {bytes, total}} — gives a real percentage for
+        downloads tracked via the HF picker
+      - health_producer: polls /upstream/<id>/health and signals completion
+    """
     base = settings.LLM_SERVER_URL.rstrip("/")
     events_url = f"{base}/api/events"
     health_url = f"{base}/upstream/{model_id}/health"
-    deadline = time.monotonic() + 300  # 5-minute cap on total wait
+    deadline = time.monotonic() + 600  # 10-minute cap; multi-GB downloads need headroom
 
     async def gen():
-        # Yield an immediate ping so the client knows the stream is alive.
         yield json.dumps({"status": "subscribed", "id": model_id}) + "\n"
         timeout = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        loaded = False
+
         async with httpx.AsyncClient(timeout=timeout) as client:
-            async def health_poller() -> bool:
-                """Return True once /upstream/<id>/health passes (or deadline)."""
+
+            async def log_producer() -> None:
+                try:
+                    async with client.stream("GET", events_url) as resp:
+                        async for line in resp.aiter_lines():
+                            if not line.startswith("data:"):
+                                continue
+                            try:
+                                evt = json.loads(line[len("data:"):].strip())
+                            except json.JSONDecodeError:
+                                continue
+                            if evt.get("type") != "logData":
+                                continue
+                            for log_line in (evt.get("data") or "").splitlines():
+                                if log_line.strip():
+                                    await queue.put(json.dumps({"log": log_line}) + "\n")
+                except Exception:
+                    # llama-swap dropped the SSE — let the main loop time out on health
+                    pass
+
+            async def progress_producer() -> None:
+                while True:
+                    entry = _active_downloads.get(model_id)
+                    if entry:
+                        current = _partial_blob_size(entry["blobs_dir"], entry["blob_hash"])
+                        await queue.put(json.dumps({
+                            "progress": {
+                                "bytes": current,
+                                "total": entry["expected_size"],
+                            }
+                        }) + "\n")
+                    await asyncio.sleep(2.0)
+
+            async def health_producer() -> bool:
                 while time.monotonic() < deadline:
                     try:
                         r = await client.get(health_url, timeout=2.0)
@@ -370,38 +463,129 @@ async def model_status(model_id: str) -> StreamingResponse:
                     await asyncio.sleep(1.0)
                 return False
 
-            health_task = asyncio.create_task(health_poller())
+            log_task = asyncio.create_task(log_producer())
+            progress_task = asyncio.create_task(progress_producer())
+            health_task = asyncio.create_task(health_producer())
+
             try:
-                async with client.stream("GET", events_url) as resp:
-                    async for line in resp.aiter_lines():
-                        if health_task.done() and health_task.result():
-                            break
-                        if not line.startswith("data:"):
-                            continue
+                while True:
+                    if health_task.done():
                         try:
-                            evt = json.loads(line[len("data:"):].strip())
-                        except json.JSONDecodeError:
-                            continue
-                        if evt.get("type") != "logData":
-                            continue
-                        log_chunk = evt.get("data", "")
-                        # Forward log lines that mention the model id. Errs on
-                        # the side of inclusion — devs prefer too much output
-                        # to too little when watching a download.
-                        for log_line in log_chunk.splitlines():
-                            if model_id in log_line:
-                                yield json.dumps({"log": log_line}) + "\n"
-                        if time.monotonic() > deadline:
-                            break
+                            loaded = health_task.result()
+                        except Exception:
+                            loaded = False
+                        break
+                    if time.monotonic() > deadline:
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=0.5)
+                        yield event
+                    except asyncio.TimeoutError:
+                        continue
             finally:
-                health_task.cancel()
-                try:
-                    loaded = await health_task
-                except (asyncio.CancelledError, Exception):
-                    loaded = False
+                for t in (log_task, progress_task, health_task):
+                    t.cancel()
+                # Drain any final queued events so the client sees them.
+                while not queue.empty():
+                    try:
+                        yield queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        break
+
+        _active_downloads.pop(model_id, None)
         if loaded:
             yield json.dumps({"status": "loaded", "id": model_id}) + "\n"
         else:
             yield json.dumps({"status": "error", "id": model_id, "detail": "load timed out"}) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
+# ---------------------------------------------------------------------------
+# HuggingFace search proxy
+#
+# Admins shouldn't need to leave the dashboard to find a GGUF to add. These
+# two endpoints proxy the public HF API: search returns matching repos with
+# the `gguf` library filter; files returns the GGUF blobs in a specific repo
+# so the admin can pick a quant. The backend's IP is what gets rate-limited
+# (not every admin's browser), and routing through here means HF auth could
+# be added centrally later if private repos ever matter.
+# ---------------------------------------------------------------------------
+
+_HF_API_BASE = "https://huggingface.co/api"
+_HF_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
+
+
+@router.get("/hf-search")
+async def hf_search(q: str, limit: int = 20) -> list[dict]:
+    """Search HuggingFace for GGUF repos matching `q`."""
+    q = (q or "").strip()
+    if not q:
+        return []
+    limit = max(1, min(limit, 50))
+    params = {
+        "search": q,
+        "filter": "gguf",
+        "limit": str(limit),
+        "sort": "downloads",
+        "direction": "-1",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_HF_TIMEOUT) as client:
+            r = await client.get(f"{_HF_API_BASE}/models", params=params)
+            r.raise_for_status()
+            body = r.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"HuggingFace search failed: {e}")
+    return [
+        {
+            "id": m.get("id") or m.get("modelId"),
+            "downloads": m.get("downloads", 0),
+            "likes": m.get("likes", 0),
+            "tags": list(m.get("tags") or []),
+            "last_modified": m.get("lastModified"),
+        }
+        for m in body
+        if (m.get("id") or m.get("modelId"))
+    ]
+
+
+@router.get("/hf-files")
+async def hf_files(repo: str) -> list[dict]:
+    """List GGUF files in a HuggingFace repo so the admin can pick a quant."""
+    repo = (repo or "").strip()
+    if not repo or "/" not in repo:
+        raise HTTPException(status_code=400, detail="repo must look like 'org/name'")
+    try:
+        async with httpx.AsyncClient(timeout=_HF_TIMEOUT) as client:
+            r = await client.get(f"{_HF_API_BASE}/models/{repo}/tree/main")
+            if r.status_code == 404:
+                raise HTTPException(status_code=404, detail=f"repo not found: {repo}")
+            r.raise_for_status()
+            body = r.json()
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"HuggingFace tree fetch failed: {e}")
+    files = []
+    for entry in body:
+        if entry.get("type") != "file":
+            continue
+        path = entry.get("path")
+        if not isinstance(path, str) or not path.lower().endswith(".gguf"):
+            continue
+        # mmproj-*.gguf is the vision projection file, not a model weight.
+        # Loading it standalone fails — exclude from the pickable file list.
+        if path.lower().startswith("mmproj"):
+            continue
+        # The lfs.oid is the SHA256 used as the blob filename in HF's
+        # cache. The backend later watches `blobs/<oid>` to compute real
+        # download progress.
+        lfs = entry.get("lfs") or {}
+        files.append({
+            "path": path,
+            "size": int(lfs.get("size") or entry.get("size") or 0),
+            "blob_hash": lfs.get("oid"),
+        })
+    files.sort(key=lambda f: f["path"])
+    return files

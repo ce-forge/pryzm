@@ -1,6 +1,7 @@
 .env
 
 ollama_models/
+infra/llama_models/
 pgdata/
 router_config.txt
 backend/venv/

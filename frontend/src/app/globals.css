@@ -43,3 +43,20 @@ input[type="checkbox"]:disabled,
 input[type="radio"]:disabled {
   cursor: not-allowed;
 }
+
+/* Indeterminate progress bar: a stripe slides across the container so the
+   admin sees something is happening even when we can't extract a real
+   percentage from the log stream. Used by DownloadLogPane during the
+   streaming status. */
+@keyframes indeterminate-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+.indeterminate-bar {
+  width: 25%;
+  animation: indeterminate-slide 1.4s ease-in-out infinite;
+}

@@ -117,13 +117,18 @@ class HeuristicRouter:
 
 def build_catalog_from_yaml(path: str | pathlib.Path) -> dict[str, set[str]]:
     """Parses `infra/llama-swap-config.yaml` into {model_id -> set(tags)}.
-    Missing or null `tags:` becomes an empty set."""
+    Missing or null `tags:` becomes an empty set. Models in the `inactive`
+    group are excluded — they stay registered (cache survives) but the
+    chat router will never pick them."""
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
-    return {
-        model_id: set(model_cfg.get("tags") or [])
-        for model_id, model_cfg in (cfg.get("models") or {}).items()
-    }
+    catalog: dict[str, set[str]] = {}
+    for model_id, model_cfg in (cfg.get("models") or {}).items():
+        groups = set(model_cfg.get("groups") or [])
+        if "inactive" in groups:
+            continue
+        catalog[model_id] = set(model_cfg.get("tags") or [])
+    return catalog
 
 
 def models_to_prewarm_from_yaml(
@@ -132,23 +137,28 @@ def models_to_prewarm_from_yaml(
     """Return `[(model_id, tags), ...]` for models the startup pre-warmer
     should load before the first user request.
 
-    Includes anything in the `always-on` group (those need an initial
-    load — `persistent: true` only prevents eviction) AND anything
-    tagged `vision`, so image-upload captioning doesn't pay cold-load
-    cost on the first image of a session.
+    Includes only members of the `always-on` group — those need an initial
+    load because `persistent: true` prevents eviction but not initial
+    absence. Authoritative source is the group-side `members:` list; the
+    model-side `groups:` field is silently ignored by llama-swap.
 
-    Dedup is by model_id; a model that's both always-on and vision
-    appears once.
+    Vision-tagged models are intentionally NOT prewarmed. They typically
+    carry a short ttl so they unload quickly when idle, which makes a
+    startup prewarm useless after the first minute. The first image
+    upload of a session pays a small cold-load cost; subsequent ones
+    within the ttl window are warm.
     """
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
-    seen: dict[str, set[str]] = {}
+    always_on_members: set[str] = set(
+        ((cfg.get("groups") or {}).get("always-on") or {}).get("members") or []
+    )
+    out: list[tuple[str, set[str]]] = []
     for model_id, model_cfg in (cfg.get("models") or {}).items():
-        tags = set(model_cfg.get("tags") or [])
-        groups = set(model_cfg.get("groups") or [])
-        if "always-on" in groups or "vision" in tags:
-            seen[model_id] = tags
-    return list(seen.items())
+        if model_id not in always_on_members:
+            continue
+        out.append((model_id, set(model_cfg.get("tags") or [])))
+    return out
 
 
 _router_singleton: Optional[HeuristicRouter] = None
