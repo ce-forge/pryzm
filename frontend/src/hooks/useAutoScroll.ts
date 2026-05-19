@@ -75,11 +75,17 @@ export function useAutoScroll({ messages }: UseAutoScrollArgs) {
     if (!scrollRef.current) return;
     const { scrollTop, scrollHeight, clientHeight } = scrollRef.current;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    const userScrolledUp =
-      lastScrollTop.current !== null && scrollTop < lastScrollTop.current;
-    if (userScrolledUp) {
+    const last = lastScrollTop.current;
+    const scrolledUp = last !== null && scrollTop < last;
+    const scrolledDown = last !== null && scrollTop > last;
+    // Independent checks so a user scrolling DOWN into the bottom zone
+    // re-engages even if they don't reach within 30px of the absolute
+    // bottom (the old too-tight threshold). Scrolling UP always disables.
+    // Being right at the bottom always enables.
+    if (scrolledUp) {
       isAutoScrollEnabled.current = false;
-    } else if (distanceFromBottom < 30) {
+    }
+    if ((scrolledDown && distanceFromBottom < 150) || distanceFromBottom < 5) {
       isAutoScrollEnabled.current = true;
     }
     lastScrollTop.current = scrollTop;
