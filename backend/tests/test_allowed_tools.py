@@ -669,3 +669,24 @@ class TestPushFilter:
             ]
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# /api/tools is reachable by non-admin users
+# Regression: settings_router was mounted with require_admin, breaking the
+# user-facing workspace settings tool picker.
+# ---------------------------------------------------------------------------
+
+class TestToolsEndpointAccess:
+    def test_non_admin_user_can_list_tools(self, db_session):
+        try:
+            u = _seed_user(db_session, "tools_reader")
+            c = _user_client(db_session, u)
+            r = c.get("/api/tools")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert isinstance(body, list)
+            assert len(body) > 0
+            assert all("name" in t and "description" in t for t in body)
+        finally:
+            app.dependency_overrides.clear()
