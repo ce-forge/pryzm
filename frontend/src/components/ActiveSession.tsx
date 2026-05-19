@@ -41,6 +41,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const activeSessionKey = session.currentSession || "temp_new_chat";
   const myStreamingText = ai.streamingContent[activeSessionKey];
   const myStreamingReasoning = ai.streamingReasoning[activeSessionKey];
+  const myIsReasoning = ai.streamingIsReasoning[activeSessionKey] ?? false;
 
   const currentIsProcessing =
     session.streamingSessionIdsRef.current.has(activeSessionKey);
@@ -217,7 +218,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
           })}
 
           {currentIsProcessing && messages.length > 0 && !myStreamingText && (
-            <ProcessingAnimation />
+            <ProcessingAnimation isReasoning={myIsReasoning} />
           )}
         </div>
       </div>

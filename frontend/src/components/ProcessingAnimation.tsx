@@ -1,5 +1,16 @@
 import React, { useState } from "react";
 
+interface ProcessingAnimationProps {
+  /**
+   * True when the routed model carries the `reasoning` catalog tag —
+   * the backend's `route` SSE event signals this before any reasoning
+   * chunks arrive, so the label can read `Thinking…` from the first
+   * paint. False (the default) keeps the prism-themed phrase pool,
+   * which fits non-reasoning chat turns.
+   */
+  isReasoning?: boolean;
+}
+
 const PRISM_PHRASES = [
   "Refracting…",
   "Splitting light…",
@@ -17,8 +28,9 @@ function pickPhrase() {
   return PRISM_PHRASES[Math.floor(Math.random() * PRISM_PHRASES.length)];
 }
 
-export default function ProcessingAnimation() {
-  const [phrase] = useState(pickPhrase);
+export default function ProcessingAnimation({ isReasoning = false }: ProcessingAnimationProps) {
+  const [themedPhrase] = useState(pickPhrase);
+  const label = isReasoning ? "Thinking…" : themedPhrase;
 
   return (
     <div className="flex items-center mt-4 mb-2 pl-4">
@@ -32,7 +44,7 @@ export default function ProcessingAnimation() {
           animation: 'textShimmer 5s infinite linear'
         }}
       >
-        {phrase}
+        {label}
       </span>
       <style>{`
         @keyframes textShimmer {
