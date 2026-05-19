@@ -83,10 +83,18 @@ def _adapt_chat_response(data: dict) -> dict:
     prompt_ms = float(timings.get("prompt_ms", 0))
     predicted_ms = float(timings.get("predicted_ms", 0))
 
+    # llama-server's streaming terminal event ships `timings` but NOT the
+    # standard `usage` block — so when chat_stream() adapts the final
+    # event for metrics, `usage.prompt_tokens` is missing. Fall back to
+    # `timings.prompt_n` / `timings.predicted_n` (same token counts under
+    # different names) so audit + metrics actually see non-zero token
+    # numbers on streaming turns.
+    prompt_tokens = int(usage.get("prompt_tokens", timings.get("prompt_n", 0)))
+    completion_tokens = int(usage.get("completion_tokens", timings.get("predicted_n", 0)))
     return {
         "message": message,
-        "prompt_eval_count": int(usage.get("prompt_tokens", 0)),
-        "eval_count": int(usage.get("completion_tokens", 0)),
+        "prompt_eval_count": prompt_tokens,
+        "eval_count": completion_tokens,
         "prompt_eval_duration": int(prompt_ms * 1_000_000),
         "eval_duration": int(predicted_ms * 1_000_000),
         "total_duration": int((prompt_ms + predicted_ms) * 1_000_000),
