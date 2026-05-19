@@ -42,7 +42,7 @@ Real test suite — ~466 unit + integration tests. Run from `/backend`:
 ./venv/bin/pytest tests/test_<name>.py  # one file
 ```
 
-Uses a separate `pryzm_test` PostgreSQL database created per-session by `tests/conftest.py`. Frontend has no formal test framework yet — `frontend/src/data/test_suite.json` is a data-driven tool-use scenario runner, not a unit-test framework.
+Uses a separate `pryzm_test` PostgreSQL database created per-session by `tests/conftest.py`. Frontend has no unit-test framework — end-to-end UI smoke tests live in `tests/smoke/` (Playwright via the backend venv). Run before merging any UI-touching PR; see `tests/smoke/README.md`.
 
 ## Environment
 
