@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import PrismIndicator from "./PrismIndicator";
 
 interface ThinkingPanelProps {
   /** Reasoning_content accumulated so far. Empty/null is valid during the
@@ -42,21 +43,24 @@ export default function ThinkingPanel({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-[13px] text-gray-400 hover:text-gray-200 transition-colors"
+        className="flex items-center gap-2 text-[13px] text-gray-400 hover:text-gray-200 transition-colors"
       >
         <span className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}>▸</span>
         {isStreaming ? (
-          <span
-            style={{
-              background: "linear-gradient(90deg, #9ca3af 0%, #9ca3af 40%, #ffffff 50%, #9ca3af 60%, #9ca3af 100%)",
-              backgroundSize: "200% 100%",
-              WebkitBackgroundClip: "text",
-              color: "transparent",
-              animation: "thinkingShimmer 5s infinite linear",
-            }}
-          >
-            {labelText}
-          </span>
+          <>
+            <span
+              style={{
+                background: "linear-gradient(90deg, #9ca3af 0%, #9ca3af 40%, #ffffff 50%, #9ca3af 60%, #9ca3af 100%)",
+                backgroundSize: "200% 100%",
+                WebkitBackgroundClip: "text",
+                color: "transparent",
+                animation: "thinkingShimmer 5s infinite linear",
+              }}
+            >
+              {labelText}
+            </span>
+            <PrismIndicator />
+          </>
         ) : (
           <span>{labelText}</span>
         )}
