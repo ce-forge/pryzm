@@ -3,6 +3,7 @@ import json
 import inspect
 import logging
 import re
+import time
 from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -578,6 +579,30 @@ async def stream_chat(
                 content = message.get("content")
                 if content is None:
                     content = ""
+
+                # Gemma 4's thinking mode and other reasoning-aware chat
+                # templates put internal deliberation in a separate
+                # `reasoning_content` field, leaving `content` for the
+                # final answer. Fake-stream the reasoning as its own
+                # event type so the UI can render it in a collapsible
+                # panel; models without reasoning produce an empty string
+                # here and the block is a no-op.
+                reasoning = (message.get("reasoning_content") or "").strip()
+                if reasoning:
+                    reasoning_start = time.perf_counter()
+                    reasoning_words = reasoning.split(" ")
+                    for i, word in enumerate(reasoning_words):
+                        if is_disconnected and await is_disconnected():
+                            return
+                        yield {
+                            "type": "reasoning_chunk",
+                            "chunk": word + (" " if i < len(reasoning_words) - 1 else ""),
+                        }
+                        await asyncio.sleep(0.01)
+                    yield {
+                        "type": "reasoning_done",
+                        "duration_s": round(time.perf_counter() - reasoning_start, 1),
+                    }
 
                 content = _THINK_BLOCK_RE.sub('', content).strip()
 
