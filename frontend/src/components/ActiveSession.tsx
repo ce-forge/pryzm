@@ -54,10 +54,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const promptState = usePrompt(messages);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const { scrollRef, onScroll } = useAutoScroll({
-    messages,
-    streamingText: myStreamingText ?? myStreamingReasoning ?? "",
-  });
+  const { scrollRef, bottomRef, onScroll } = useAutoScroll({ messages });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
@@ -231,6 +228,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
           {currentIsProcessing && messages.length > 0 && !myStreamingText && !myIsReasoning && (
             <ProcessingAnimation />
           )}
+          {/* Zero-height sentinel useAutoScroll scrolls into view. Always
+              the final child so the bottom of the feed is the bottom of
+              this element. */}
+          <div ref={bottomRef} aria-hidden="true" />
         </div>
       </div>
 

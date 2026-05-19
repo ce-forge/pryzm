@@ -65,15 +65,7 @@ export default function ThinkingPanel({
         {isThinking ? (
           <>
             <span
-              className="font-medium"
-              style={{
-                background:
-                  "linear-gradient(90deg, #9ca3af 0%, #9ca3af 35%, #ffffff 50%, #9ca3af 65%, #9ca3af 100%)",
-                backgroundSize: "200% 100%",
-                WebkitBackgroundClip: "text",
-                color: "transparent",
-                animation: "thinkingShimmer 3.5s infinite linear",
-              }}
+              className="font-medium thinking-shimmer"
             >
               {labelText}
               <span className="thinking-dots">…</span>
@@ -84,15 +76,35 @@ export default function ThinkingPanel({
           <span className="font-medium text-gray-300">{labelText}</span>
         )}
         <style>{`
-          @keyframes thinkingShimmer {
-            0% { background-position: 200% 0; }
-            100% { background-position: -200% 0; }
+          /* Prismatic shimmer — the highlight passing across the text
+             splits into pink-white-blue (chromatic aberration / dispersion),
+             tying back to the prism's rainbow theme. Smooth 2.8s cycle. */
+          .thinking-shimmer {
+            background-image: linear-gradient(
+              90deg,
+              rgba(156, 163, 175, 1) 0%,
+              rgba(156, 163, 175, 1) 38%,
+              rgba(244, 114, 182, 0.85) 46%,
+              rgba(255, 255, 255, 1) 50%,
+              rgba(96, 165, 250, 0.85) 54%,
+              rgba(156, 163, 175, 1) 62%,
+              rgba(156, 163, 175, 1) 100%
+            );
+            background-size: 220% 100%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: thinkingShimmer 2.8s infinite linear;
           }
-          /* Soft pulse on the trailing ellipsis so even if the shimmer
-             is hard to see against the background, motion is obvious. */
+          @keyframes thinkingShimmer {
+            0% { background-position: 220% 0; }
+            100% { background-position: -120% 0; }
+          }
+          /* Soft pulse on the trailing ellipsis so motion is obvious
+             even if the shimmer isn't catching on a particular monitor. */
           .thinking-dots {
             display: inline-block;
-            animation: dotsPulse 1.8s ease-in-out infinite;
+            animation: dotsPulse 1.6s ease-in-out infinite;
           }
           @keyframes dotsPulse {
             0%, 100% { opacity: 0.4; }

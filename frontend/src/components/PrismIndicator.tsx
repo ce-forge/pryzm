@@ -9,18 +9,20 @@ interface PrismIndicatorProps {
 }
 
 /**
- * Animated prism + lighthouse beam. The single live-activity indicator
- * across the chat surface — used inside the ThinkingPanel pill on
- * reasoning turns and inline with the themed phrase on regular turns.
+ * Animated prism + lighthouse beam, the single live-activity indicator
+ * across the chat surface. Used inside ThinkingPanel (reasoning turns)
+ * and ProcessingAnimation (non-reasoning turns).
  *
- * Three layered animations on independent clocks so something is always
+ * Layered animations on independent clocks so something is always
  * happening:
  *   - prismSpin / shootWhite / shootColor / flareAnim (5s) — the main
- *     beam-in-rainbow-out lighthouse cycle.
- *   - prismFloat / prismBreathe (3.2s) — subtle float + stroke-opacity
- *     pulse so the prism reads as "alive" even between beam events.
- *   - raysSweep (5s, in sync with shootColor) — small angular sweep on
- *     the rainbow rays so they pan slightly as they exit.
+ *     lighthouse cycle. White beam in from left, white→rainbow burst,
+ *     prism snaps through 120°.
+ *   - prismFloat / prismBreathe / haloPulse (3.4s) — float + stroke
+ *     pulse + halo glow on a slightly off-tempo clock so the prism
+ *     reads as a suspended, living object even between beam events.
+ *   - raysSweep (5s, in sync with shootColor) — small angular sweep
+ *     on the rainbow rays so they pan as they exit, lighthouse-style.
  */
 export default function PrismIndicator({ size = "pill" }: PrismIndicatorProps) {
   const dims = size === "pill" ? "w-14 h-7" : "w-20 h-10";
@@ -37,14 +39,22 @@ export default function PrismIndicator({ size = "pill" }: PrismIndicatorProps) {
           <feGaussianBlur stdDeviation="1" result="blur" />
           <feComposite in="SourceGraphic" in2="blur" operator="over" />
         </filter>
+        {/* Soft halo behind the prism — radial gradient white→transparent
+            so the centre glows and fades out smoothly to nothing. */}
+        <radialGradient id="prism-halo" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor="rgba(255,255,255,0.35)" />
+          <stop offset="55%" stopColor="rgba(168,180,250,0.12)" />
+          <stop offset="100%" stopColor="rgba(255,255,255,0)" />
+        </radialGradient>
       </defs>
 
       <style>
         {`
-          /* Vertical float on the whole SVG. ~3px peak is plainly visible
-             but doesn't slosh — the prism reads as suspended, like Claude's. */
-          .prism-svg { animation: prismFloat 3.2s ease-in-out infinite; }
+          /* Float on the whole SVG. Off-tempo from the 5s beam cycle so
+             nothing locks into a repetitive looking rhythm. */
+          .prism-svg { animation: prismFloat 3.4s ease-in-out infinite; }
 
+          .halo { transform-origin: 20px 17px; animation: haloPulse 3.4s ease-in-out infinite; }
           .rays { transform-origin: 20px 17px; animation: raysSweep 5s infinite cubic-bezier(0.2, 1, 0.3, 1); }
           .beam-white { stroke-dasharray: 12 50; animation: shootWhite 5s infinite linear; }
           .beam-color { stroke-dasharray: 10 50; animation: shootColor 5s infinite cubic-bezier(0.2, 1, 0.3, 1); }
@@ -52,7 +62,7 @@ export default function PrismIndicator({ size = "pill" }: PrismIndicatorProps) {
           .prism-glass {
             transform-origin: 20px 17px;
             animation: prismSpin 5s infinite cubic-bezier(0.34, 1.56, 0.64, 1),
-                       prismBreathe 3.2s ease-in-out infinite;
+                       prismBreathe 3.4s ease-in-out infinite;
           }
 
           @keyframes prismFloat {
@@ -60,11 +70,16 @@ export default function PrismIndicator({ size = "pill" }: PrismIndicatorProps) {
             50% { transform: translateY(-3px); }
           }
 
-          /* Opacity range tightened against the dark backdrop — the
-             prism brightens noticeably in its breathe peak. */
           @keyframes prismBreathe {
             0%, 100% { stroke-opacity: 0.45; }
             50% { stroke-opacity: 1.0; }
+          }
+
+          /* Halo grows + brightens with the breathe — the prism appears
+             to inhale and exhale light. */
+          @keyframes haloPulse {
+            0%, 100% { transform: scale(0.85); opacity: 0.35; }
+            50% { transform: scale(1.15); opacity: 0.95; }
           }
 
           @keyframes raysSweep {
@@ -102,6 +117,9 @@ export default function PrismIndicator({ size = "pill" }: PrismIndicatorProps) {
           }
         `}
       </style>
+
+      {/* Halo first so it sits behind everything else. */}
+      <circle cx="20" cy="17" r="16" fill="url(#prism-halo)" className="halo" />
 
       <polygon points="20,5 30.39,23 9.61,23" strokeWidth="1.5" strokeLinejoin="round" className="prism-glass" />
       <circle cx="20" cy="17" r="3" fill="#ffffff" className="flare" filter="url(#prism-glow)" />
