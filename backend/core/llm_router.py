@@ -137,30 +137,28 @@ def models_to_prewarm_from_yaml(
     """Return `[(model_id, tags), ...]` for models the startup pre-warmer
     should load before the first user request.
 
-    Includes anything in the `always-on` group (those need an initial
-    load — `persistent: true` only prevents eviction) AND anything
-    tagged `vision`, so image-upload captioning doesn't pay cold-load
-    cost on the first image of a session.
+    Includes only members of the `always-on` group — those need an initial
+    load because `persistent: true` prevents eviction but not initial
+    absence. Authoritative source is the group-side `members:` list; the
+    model-side `groups:` field is silently ignored by llama-swap.
 
-    Authoritative source for always-on membership is the group-side
-    `members:` list — the model-side `groups:` field is silently ignored
-    by llama-swap per upstream docs. We read it the same way here so
-    the prewarmer agrees with llama-swap's actual loading rules.
-
-    Dedup is by model_id; a model that's both always-on and vision
-    appears once.
+    Vision-tagged models are intentionally NOT prewarmed. They typically
+    carry a short ttl so they unload quickly when idle, which makes a
+    startup prewarm useless after the first minute. The first image
+    upload of a session pays a small cold-load cost; subsequent ones
+    within the ttl window are warm.
     """
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
     always_on_members: set[str] = set(
         ((cfg.get("groups") or {}).get("always-on") or {}).get("members") or []
     )
-    seen: dict[str, set[str]] = {}
+    out: list[tuple[str, set[str]]] = []
     for model_id, model_cfg in (cfg.get("models") or {}).items():
-        tags = set(model_cfg.get("tags") or [])
-        if model_id in always_on_members or "vision" in tags:
-            seen[model_id] = tags
-    return list(seen.items())
+        if model_id not in always_on_members:
+            continue
+        out.append((model_id, set(model_cfg.get("tags") or [])))
+    return out
 
 
 _router_singleton: Optional[HeuristicRouter] = None
