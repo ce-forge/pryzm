@@ -521,8 +521,8 @@ healthCheckTimeout: 3600
 startPort: 9000
 
 groups:
-  "chat":
-    swap: true
+  "on-demand":
+    swap: false
     exclusive: false
   "always-on":
     swap: false
@@ -536,7 +536,7 @@ models:
       -hf bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
-    groups: ["chat"]
+    groups: ["on-demand"]
     tags: []
 
   "gemma-4-E4B-it":
@@ -545,7 +545,7 @@ models:
       -hf bartowski/google_gemma-4-E4B-it-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
-    groups: ["chat"]
+    groups: ["on-demand"]
     tags: []
 
   "nomic-embed-text-v1.5":
@@ -590,7 +590,7 @@ def test_admin_system_model_added_emits_event(db_session, model_admin_client):
         "repo": "org/repo:Q4_K_M",
         "ngl": 50,
         "ctx_size": 4096,
-        "group": "chat",
+        "group": "on-demand",
         "tags": ["code"],
     })
     assert r.status_code == 201, r.text
@@ -604,7 +604,7 @@ def test_admin_system_model_added_emits_event(db_session, model_admin_client):
     assert payload["repo"] == "org/repo:Q4_K_M"
     assert payload["ctx_size"] == 4096
     assert payload["ngl"] == 50
-    assert payload["group"] == "chat"
+    assert payload["group"] == "on-demand"
     assert payload["tags"] == ["code"]
     assert payload["vision"] is False
 

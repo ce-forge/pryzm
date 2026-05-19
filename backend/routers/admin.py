@@ -79,12 +79,22 @@ def _partial_blob_size(blobs_dir: pathlib.Path, blob_hash: str) -> int:
         pass
     return 0
 
-# Match `-hf <repo>:<quant>` and `--ctx-size <n>` inside the multi-line cmd string.
-_HF_RE = re.compile(r"-hf\s+(\S+):(\S+)")
+# Match the bits we care about inside the multi-line cmd string.
+# `-hf <repo>` with `:quant` optional, since the `-hff <filename>` form replaces
+# the colon shortcut for repos that don't expose preset metadata on the HF API.
+_HF_RE = re.compile(r"-hf\s+(\S+?)(?::(\S+))?(?=\s|$)")
+_HFF_RE = re.compile(r"-hff\s+(\S+)")
 _NGL_RE = re.compile(r"-ngl\s+(\d+)")
 _CTX_RE = re.compile(r"--ctx-size\s+(\d+)")
 _ID_VALID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REPO_QUANT_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
+# Extract a quant tag from a GGUF filename for display (e.g. "Q4_K_M" from
+# "model-Q4_K_M.gguf"). Used only when the cmd uses `-hff` instead of `:quant`,
+# so the admin UI can still show "Q4_K_M" alongside the repo.
+_QUANT_FROM_FILE_RE = re.compile(
+    r"-((?:IQ|Q|UD-Q|UD-IQ)\d+(?:_[A-Z]+)*|F\d+|BF\d+)\.gguf$",
+    re.IGNORECASE,
+)
 
 
 def _read_yaml() -> dict:
@@ -110,13 +120,26 @@ def _reload_llama_swap() -> None:
 def _parse_model_row(model_id: str, cfg: dict) -> dict:
     cmd = " ".join((cfg.get("cmd") or "").split())  # collapse newlines/whitespace
     hf_match = _HF_RE.search(cmd)
+    hff_match = _HFF_RE.search(cmd)
     ngl_match = _NGL_RE.search(cmd)
     ctx_match = _CTX_RE.search(cmd)
     groups = cfg.get("groups") or []
+
+    repo = hf_match.group(1) if hf_match else None
+    quant = hf_match.group(2) if hf_match else None
+    filename = hff_match.group(1) if hff_match else None
+    # Newer entries omit `:quant` from `-hf` and use `-hff <filename>` instead
+    # — derive a display quant from the filename so the UI keeps its label.
+    if filename and not quant:
+        m = _QUANT_FROM_FILE_RE.search(filename)
+        if m:
+            quant = m.group(1)
+
     return {
         "id": model_id,
-        "repo": hf_match.group(1) if hf_match else None,
-        "quant": hf_match.group(2) if hf_match else None,
+        "repo": repo,
+        "quant": quant,
+        "filename": filename,
         "ngl": int(ngl_match.group(1)) if ngl_match else None,
         "ctx_size": int(ctx_match.group(1)) if ctx_match else None,
         "group": groups[0] if groups else None,
@@ -124,12 +147,27 @@ def _parse_model_row(model_id: str, cfg: dict) -> dict:
     }
 
 
-def _build_cmd_block(repo: str, quant: str, ngl: int, ctx_size: int, group: str) -> str:
+def _build_cmd_block(
+    repo: str,
+    quant: str,
+    filename: str | None,
+    ngl: int,
+    ctx_size: int,
+    group: str,
+) -> str:
     """Render a multi-line `cmd:` value matching the style of existing entries.
+    When `filename` is provided (HF picker path), emit the explicit-filename
+    form which bypasses the HF API's preset metadata lookup — some repos
+    (e.g. bartowski's larger Gemma variants) don't expose it and return 404.
+    Falls back to the `:quant` shortcut for manual entries without a filename.
     Chat models get k/v cache quantisation; embedding doesn't."""
+    if filename:
+        hf_lines = f"-hf {repo}\n-hff {filename}"
+    else:
+        hf_lines = f"-hf {repo}:{quant}"
     base = (
         f"/app/llama-server --port ${{PORT}}\n"
-        f"-hf {repo}:{quant}\n"
+        f"{hf_lines}\n"
         f"-ngl {ngl} --ctx-size {ctx_size} --jinja --flash-attn on"
     )
     if group == "on-demand":
@@ -246,7 +284,10 @@ async def add_model(
             raise HTTPException(status_code=409, detail=f"model id already exists: {req.id}")
         models_cfg[req.id] = {
             "cmd": ruamel.yaml.scalarstring.PreservedScalarString(
-                _build_cmd_block(repo, quant, req.ngl, req.ctx_size, req.group),
+                _build_cmd_block(
+                    repo, quant, req.expected_filename,
+                    req.ngl, req.ctx_size, req.group,
+                ),
             ),
             "groups": [req.group],
             "tags": list(req.tags),
@@ -308,13 +349,13 @@ async def update_model(
             raise HTTPException(status_code=404, detail=f"model not found: {model_id}")
 
         existing = models_cfg[model_id]
-        # Re-extract identity (repo:quant) from the existing cmd; identity is
-        # not editable through this endpoint.
+        # Re-extract identity (repo + quant-or-filename) from the existing cmd;
+        # identity is not editable through this endpoint.
         current = _parse_model_row(model_id, existing)
-        if not current["repo"] or not current["quant"]:
+        if not current["repo"] or not (current["quant"] or current["filename"]):
             raise HTTPException(
                 status_code=500,
-                detail=f"existing model {model_id} has no parseable repo:quant in cmd; refusing to overwrite",
+                detail=f"existing model {model_id} has no parseable repo + quant/filename in cmd; refusing to overwrite",
             )
 
         new_ngl = req.ngl if req.ngl is not None else (current["ngl"] or 99)
@@ -333,7 +374,10 @@ async def update_model(
             changed_fields.append("tags")
 
         existing["cmd"] = ruamel.yaml.scalarstring.PreservedScalarString(
-            _build_cmd_block(current["repo"], current["quant"], new_ngl, new_ctx, new_group),
+            _build_cmd_block(
+                current["repo"], current["quant"], current["filename"],
+                new_ngl, new_ctx, new_group,
+            ),
         )
         existing["groups"] = [new_group]
         existing["tags"] = list(new_tags)
