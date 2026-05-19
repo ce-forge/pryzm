@@ -308,6 +308,68 @@ class TestPostWorkspacesClamp:
             app.dependency_overrides.clear()
 
 
+class TestSlugScoping:
+    """Slugs are not unique per-user — every user has their own
+    `it_copilot` / `personal` / etc. PATCH and DELETE must scope their
+    lookup to the caller's own workspace; without that, one user's
+    request mutates whichever workspace the DB happens to return first.
+    """
+
+    def _make_ws(self, db_session, owner_id, slug, enabled_tools):
+        ws = models.Workspace(
+            slug=slug, display_name=slug, system_prompt="",
+            enabled_tools=enabled_tools,
+            engine_config={"backend": "llama_cpp"},
+            user_id=owner_id, owner_can_edit=True,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+        return ws
+
+    def test_patch_does_not_leak_across_users_with_same_slug(self, db_session):
+        """Two users both own a workspace with slug 'it_copilot'.
+        User A PATCHes their own; user B's record must be unchanged."""
+        try:
+            alice = _seed_user(db_session, "alice_slug")
+            bob = _seed_user(db_session, "bob_slug")
+            alice_ws = self._make_ws(db_session, alice.id, "it_copilot", ["dns_lookup"])
+            bob_ws = self._make_ws(db_session, bob.id, "it_copilot", ["execute_ping"])
+
+            c = _user_client(db_session, alice)
+            r = c.patch("/workspaces/it_copilot", json={"enabled_tools": ["dns_lookup", "web_search"]})
+            assert r.status_code == 200, r.text
+
+            db_session.refresh(alice_ws)
+            db_session.refresh(bob_ws)
+            assert sorted(alice_ws.enabled_tools) == ["dns_lookup", "web_search"]
+            assert bob_ws.enabled_tools == ["execute_ping"], (
+                f"bob's workspace was mutated by alice's PATCH: {bob_ws.enabled_tools}"
+            )
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_delete_does_not_remove_other_users_workspace_with_same_slug(self, db_session):
+        """Without per-user scoping on the DELETE lookup, alice could
+        delete bob's workspace by issuing DELETE /workspaces/it_copilot."""
+        try:
+            alice = _seed_user(db_session, "alice_del")
+            bob = _seed_user(db_session, "bob_del")
+            # Each user needs a second workspace so the last-workspace
+            # guard doesn't intercept the delete.
+            self._make_ws(db_session, alice.id, "it_copilot", [])
+            self._make_ws(db_session, alice.id, "personal", [])
+            bob_ws = self._make_ws(db_session, bob.id, "it_copilot", [])
+
+            c = _user_client(db_session, alice)
+            r = c.delete("/workspaces/it_copilot")
+            assert r.status_code in (200, 204), r.text
+
+            db_session.refresh(bob_ws)
+            # Bob's record still exists with its original id.
+            assert db_session.query(models.Workspace).filter_by(id=bob_ws.id).first() is not None
+        finally:
+            app.dependency_overrides.clear()
+
+
 # ---------------------------------------------------------------------------
 # PATCH /workspaces/{slug} clamp + grandfathering
 # ---------------------------------------------------------------------------

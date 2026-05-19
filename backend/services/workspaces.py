@@ -23,9 +23,24 @@ PROMPTS_DIR = os.path.join(
 )
 
 
-def get_by_slug(db: Session, slug: str) -> models.Workspace:
-    """Resolve a slug to a Workspace, 404 if missing."""
-    ws = db.query(models.Workspace).filter(models.Workspace.slug == slug).first()
+def get_by_slug(
+    db: Session,
+    slug: str,
+    user_id: str | None = None,
+) -> models.Workspace:
+    """Resolve a slug to a Workspace, 404 if missing.
+
+    `slug` is NOT unique in the DB — every user has their own
+    `it_copilot` / `personal` / etc. row. Always pass `user_id` for
+    user-facing endpoints so PATCH/DELETE/clone hit the caller's own
+    workspace; otherwise the first row returned by the DB (any user's)
+    is the one mutated. Leaving `user_id=None` is only correct for
+    admin paths that intentionally scope across all users.
+    """
+    q = db.query(models.Workspace).filter(models.Workspace.slug == slug)
+    if user_id is not None:
+        q = q.filter(models.Workspace.user_id == user_id)
+    ws = q.first()
     if not ws:
         raise HTTPException(status_code=404, detail=f"Workspace not found: {slug}")
     return ws

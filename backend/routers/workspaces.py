@@ -104,6 +104,10 @@ def create_workspace(
     engine_config = {"backend": "llama_cpp"}
 
     if payload.clone_from:
+        # NOTE: clone_from currently looks up by slug across all users —
+        # tests exercise cross-user cloning intentionally. Whether that
+        # leak is acceptable is a separate design question from the
+        # PATCH/DELETE scoping fix in this commit.
         source = get_by_slug(db, payload.clone_from)
         system_prompt = source.system_prompt
         enabled_tools = list(source.enabled_tools or [])
@@ -156,7 +160,8 @@ def update_workspace(
     db: Session = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
 ):
-    ws = get_by_slug(db, slug)
+    # Scope to the caller's own workspace — slugs aren't unique per user.
+    ws = get_by_slug(db, slug, user_id=user.id)
 
     # Locked workspaces (admin-instantiated templates with owner_can_edit
     # cleared) reject edits from the recipient. Admins bypass — they have
@@ -237,8 +242,15 @@ def update_workspace(
 
 
 @router.delete("/workspaces/{slug}", response_model=WorkspaceDeleteResponse)
-def delete_workspace(slug: str, db: Session = Depends(database.get_db)):
-    ws = get_by_slug(db, slug)
+def delete_workspace(
+    slug: str,
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(cookie_auth.current_user),
+):
+    # Scope to the caller's own workspace — without this any authed user
+    # could DELETE the first row in the DB matching the slug regardless
+    # of owner. Slugs are not unique per-user.
+    ws = get_by_slug(db, slug, user_id=user.id)
 
     # Last-workspace guard.
     total = db.query(models.Workspace).count()
