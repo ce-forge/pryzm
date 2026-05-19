@@ -47,6 +47,7 @@ groups:
     exclusive: false
     members:
     - "gemma-4-E4B-it"
+    - "gemma-4-26B-A4B-it"
     - "qwen2-vl-2B-it"
 
 models:
@@ -80,6 +81,27 @@ models:
     - code
     groups:
     - on-demand
+  # Tier-2 escalation (large). Used when the router's lexical heuristic or
+  # tool-error / max-iterations triggers fire. 17 GB Q4_K_M with partial
+  # MoE expert offload: experts in layers 0-7 stay on GPU; layers 8-29 go
+  # to system RAM via the -ot regex below. Resident VRAM ~7-8 GB for the
+  # 26B portion, ~60 tok/s generate. Emits to reasoning_content (Gemma 4
+  # thinking mode on by default); backend surfaces that as a separate SSE
+  # event stream.
+  "gemma-4-26B-A4B-it":
+    cmd: |-
+      /app/llama-server --port ${PORT}
+      -hf bartowski/google_gemma-4-26B-A4B-it-GGUF
+      -hff google_gemma-4-26B-A4B-it-Q4_K_M.gguf
+      -ngl 99 --ctx-size 32768 --jinja --flash-attn on
+      --cache-type-k q8_0 --cache-type-v q8_0
+      -ot "blk\.([8-9]|1[0-9]|2[0-9])\.ffn_.*_exps\.weight=CPU"
+    tags:
+    - code
+    - reasoning
+    groups:
+    - on-demand
+
   "qwen2-vl-2B-it":
     cmd: |-
       /app/llama-server --port ${PORT}

@@ -3,6 +3,7 @@ import json
 import inspect
 import logging
 import re
+import time
 from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -334,6 +335,12 @@ async def stream_chat(
     else:
         routed_model = router.small if tier is Tier.SMALL else router.large
 
+    # Only models tagged `reasoning` in the catalog have their
+    # `reasoning_content` surfaced to the UI. Small chat models emit
+    # short, low-signal chain-of-thought that adds noise on regular
+    # turns; gating here keeps the pill (and DB column) empty for them.
+    surface_reasoning = "reasoning" in router.catalog.get(routed_model, set())
+
     if memory_content:
         system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
 
@@ -578,6 +585,30 @@ async def stream_chat(
                 content = message.get("content")
                 if content is None:
                     content = ""
+
+                # Gemma 4's thinking mode and other reasoning-aware chat
+                # templates put internal deliberation in a separate
+                # `reasoning_content` field, leaving `content` for the
+                # final answer. Fake-stream the reasoning as its own
+                # event type so the UI can render it in a collapsible
+                # panel; models without reasoning produce an empty string
+                # here and the block is a no-op.
+                reasoning = (message.get("reasoning_content") or "").strip()
+                if reasoning and surface_reasoning:
+                    reasoning_start = time.perf_counter()
+                    reasoning_words = reasoning.split(" ")
+                    for i, word in enumerate(reasoning_words):
+                        if is_disconnected and await is_disconnected():
+                            return
+                        yield {
+                            "type": "reasoning_chunk",
+                            "chunk": word + (" " if i < len(reasoning_words) - 1 else ""),
+                        }
+                        await asyncio.sleep(0.01)
+                    yield {
+                        "type": "reasoning_done",
+                        "duration_s": round(time.perf_counter() - reasoning_start, 1),
+                    }
 
                 content = _THINK_BLOCK_RE.sub('', content).strip()
 

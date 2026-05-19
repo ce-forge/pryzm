@@ -1,12 +1,29 @@
-import React from "react";
+import React, { useState } from "react";
+
+const PRISM_PHRASES = [
+  "Refracting…",
+  "Splitting light…",
+  "Tracing rays…",
+  "Bending photons…",
+  "Resolving spectra…",
+  "Dispersing thoughts…",
+  "Catching wavelengths…",
+  "Filtering light…",
+  "Decomposing the question…",
+  "Reading the prism…",
+] as const;
+
+function pickPhrase() {
+  return PRISM_PHRASES[Math.floor(Math.random() * PRISM_PHRASES.length)];
+}
 
 export default function ProcessingAnimation() {
+  const [phrase] = useState(pickPhrase);
+
   return (
     <div className="flex items-center mt-4 mb-2 pl-4">
-      
-      {/* 1. TEXT ON THE LEFT */}
-      <span 
-        className="text-[12px] tracking-[0.2em] font-semibold uppercase mr-4"
+      <span
+        className="text-sm tracking-wide font-medium mr-4"
         style={{
           background: 'linear-gradient(90deg, #4b5563 0%, #4b5563 40%, #ffffff 50%, #4b5563 60%, #4b5563 100%)',
           backgroundSize: '200% 100%',
@@ -15,7 +32,7 @@ export default function ProcessingAnimation() {
           animation: 'textShimmer 5s infinite linear'
         }}
       >
-        Processing
+        {phrase}
       </span>
       <style>{`
         @keyframes textShimmer {
@@ -24,7 +41,6 @@ export default function ProcessingAnimation() {
         }
       `}</style>
 
-      {/* 2. SVG ON THE RIGHT */}
       <svg viewBox="0 0 60 30" className="w-12 h-6 overflow-visible" fill="none" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <filter id="premium-glow" filterUnits="userSpaceOnUse" x="-10" y="-10" width="80" height="50">
@@ -32,16 +48,14 @@ export default function ProcessingAnimation() {
             <feComposite in="SourceGraphic" in2="blur" operator="over" />
           </filter>
         </defs>
-        
+
         <style>
           {`
-            /* All elements share the exact same 5s master clock */
             .beam-white { stroke-dasharray: 12 50; animation: shootWhite 5s infinite linear; }
             .beam-color { stroke-dasharray: 10 50; animation: shootColor 5s infinite cubic-bezier(0.2, 1, 0.3, 1); }
             .flare { transform-origin: 20px 17px; animation: flareAnim 5s infinite ease-out; }
             .prism-glass { transform-origin: 20px 17px; animation: prismSpin 5s infinite cubic-bezier(0.34, 1.56, 0.64, 1); }
 
-            /* 50% to 60%: White beam travels from left to center */
             @keyframes shootWhite {
               0%, 50% { stroke-dashoffset: 12; opacity: 0; }
               51% { stroke-dashoffset: 9; opacity: 1; }
@@ -49,7 +63,6 @@ export default function ProcessingAnimation() {
               60.1%, 100% { stroke-dashoffset: -8; opacity: 0; }
             }
 
-            /* 60% to 75%: Rainbows shoot out immediately as white beam hits */
             @keyframes shootColor {
               0%, 59.9% { stroke-dashoffset: 10; opacity: 0; }
               60% { stroke-dashoffset: 10; opacity: 1; }
@@ -57,14 +70,12 @@ export default function ProcessingAnimation() {
               72%, 100% { stroke-dashoffset: -37; opacity: 0; }
             }
 
-            /* 60% to 65%: Center impact flash */
             @keyframes flareAnim {
               0%, 59.9% { transform: scale(0); opacity: 0; }
               60% { transform: scale(1.5); opacity: 1; }
               65%, 100% { transform: scale(0); opacity: 0; }
             }
 
-            /* 60% to 75%: Prism flashes and does a snappy 120-degree spin */
             @keyframes prismSpin {
               0%, 59.9% { transform: rotate(0deg); fill: rgba(255,255,255,0); stroke: #4b5563; }
               60% { fill: rgba(255,255,255,0.4); stroke: #ffffff; transform: rotate(0deg); }
@@ -74,16 +85,10 @@ export default function ProcessingAnimation() {
           `}
         </style>
 
-        {/* Perfect Equilateral Prism */}
         <polygon points="20,5 30.39,23 9.61,23" strokeWidth="1.5" strokeLinejoin="round" className="prism-glass" />
-
-        {/* Center Impact Flare */}
         <circle cx="20" cy="17" r="3" fill="#ffffff" className="flare" filter="url(#premium-glow)" />
-
-        {/* White Beam Packet In */}
         <path d="M0 17 L20 17" stroke="#ffffff" strokeWidth="1.5" className="beam-white" filter="url(#premium-glow)" strokeLinecap="round" />
 
-        {/* Vibrant Rainbow Packets Out */}
         <g filter="url(#premium-glow)">
           <path d="M20 17 L55 5" stroke="#ff4757" strokeWidth="1.5" className="beam-color" strokeLinecap="round" />
           <path d="M20 17 L55 11" stroke="#ffa502" strokeWidth="1.5" className="beam-color" strokeLinecap="round" />

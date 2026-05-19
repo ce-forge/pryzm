@@ -1,5 +1,5 @@
 import sqlalchemy as sa
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum, Computed, Integer, JSON, text
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Enum, Computed, Integer, JSON, Float, text
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
@@ -101,6 +101,13 @@ class Message(Base):
     # ([{name, args, result}, ...]). NULL on rows with no tool use;
     # history-rebuild treats a NULL value as "no tool calls".
     tool_calls = Column(JSONB, nullable=True)
+    # Reasoning/thinking output from reasoning-aware chat models (e.g.
+    # Gemma 4's thinking mode emits to `reasoning_content` separately from
+    # `content`). NULL on rows from models that don't emit reasoning.
+    # `reasoning_duration_s` is wall-clock fake-stream time, useful for
+    # the "Thinking (Ns)" display in the collapsible UI panel.
+    reasoning_content = Column(Text, nullable=True)
+    reasoning_duration_s = Column(Float, nullable=True)
     session = relationship("Session", back_populates="messages")
 
 

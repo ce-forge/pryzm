@@ -9,6 +9,13 @@ type SessionApi = ReturnType<typeof useSessionContext>;
 export interface InferenceApi {
   isProcessing: boolean;
   streamingContent: Record<string, string>;
+  /**
+   * Per-session live reasoning_content from reasoning-aware chat models
+   * (Gemma 4 thinking mode etc.). Populated incrementally during stream;
+   * cleared at the end of the turn — the finished message reads its
+   * frozen reasoning from the persisted Message row.
+   */
+  streamingReasoning: Record<string, string>;
   streamingToolCalls: Record<string, ToolCall[]>;
   sendMessage: (
     text: string,
@@ -34,6 +41,7 @@ export interface InferenceApi {
 export function useInference(workspaceSlug: string, sessionApi: SessionApi): InferenceApi {
   const [isProcessing, setIsProcessing] = useState(false);
   const [streamingContent, setStreamingContent] = useState<Record<string, string>>({});
+  const [streamingReasoning, setStreamingReasoning] = useState<Record<string, string>>({});
   const [streamingToolCalls, setStreamingToolCalls] = useState<Record<string, ToolCall[]>>({});
 
   // Mirror isProcessing into a ref so sendMessage can early-return on a
@@ -78,8 +86,11 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       sessionApi.streamingSessionIdsRef.current.add(optimisticId);
 
       setStreamingContent((prev) => ({ ...prev, [optimisticId]: "" }));
+      setStreamingReasoning((prev) => ({ ...prev, [optimisticId]: "" }));
 
       let fullAssistantMessage = "";
+      let fullReasoning = "";
+      let reasoningDurationS: number | null = null;
       let referencedFiles: ReferencedFile[] | undefined;
       const pendingToolCalls: ToolCall[] = [];
       let pendingUserMessageId: string | null = null;
@@ -202,6 +213,10 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                     ...prev,
                     [newDbId]: prev[optimisticId] ?? "",
                   }));
+                  setStreamingReasoning((prev) => ({
+                    ...prev,
+                    [newDbId]: prev[optimisticId] ?? "",
+                  }));
 
                   linkSessionRef.current?.(optimisticId, newDbId);
 
@@ -249,13 +264,32 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                   }
                 }
 
-                if (parsed.chunk) {
+                // Plain content chunks have shape {chunk: "..."} with no
+                // `type` field. Typed events (reasoning_chunk, tool_call,
+                // tool_result, files_referenced) also carry a `chunk` field
+                // in some cases — they must NOT be folded into the content
+                // accumulator, or reasoning text duplicates inside the
+                // assistant message body.
+                if (parsed.chunk && !parsed.type) {
                   fullAssistantMessage += parsed.chunk;
                   setStreamingContent((prev) => {
                     const next = { ...prev, [optimisticId]: fullAssistantMessage };
                     if (realDbId !== null) next[realDbId] = fullAssistantMessage;
                     return next;
                   });
+                }
+
+                if (parsed.type === "reasoning_chunk" && parsed.chunk) {
+                  fullReasoning += parsed.chunk;
+                  setStreamingReasoning((prev) => {
+                    const next = { ...prev, [optimisticId]: fullReasoning };
+                    if (realDbId !== null) next[realDbId] = fullReasoning;
+                    return next;
+                  });
+                }
+
+                if (parsed.type === "reasoning_done" && typeof parsed.duration_s === "number") {
+                  reasoningDurationS = parsed.duration_s;
                 }
               } catch {
                 /* malformed line, skip */
@@ -270,7 +304,15 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
         setIsProcessing(false);
 
         const finalKeySid = realDbId ?? optimisticId;
-        sessionApi.finalizeAssistantMessage(ws, finalKeySid, fullAssistantMessage, referencedFiles, pendingToolCalls.length > 0 ? pendingToolCalls : undefined);
+        sessionApi.finalizeAssistantMessage(
+          ws,
+          finalKeySid,
+          fullAssistantMessage,
+          referencedFiles,
+          pendingToolCalls.length > 0 ? pendingToolCalls : undefined,
+          fullReasoning || null,
+          reasoningDurationS,
+        );
         // Swap optimistic temp ids for the real DB UUIDs that came back in the
         // stream. No post-stream /sessions/{id} refetch = no race against the
         // next send.
@@ -282,6 +324,13 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
         );
 
         setStreamingContent((prev) => {
+          const next = { ...prev };
+          delete next[optimisticId];
+          if (realDbId !== null) delete next[realDbId];
+          return next;
+        });
+
+        setStreamingReasoning((prev) => {
           const next = { ...prev };
           delete next[optimisticId];
           if (realDbId !== null) delete next[realDbId];
@@ -327,6 +376,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
   return {
     isProcessing,
     streamingContent,
+    streamingReasoning,
     streamingToolCalls,
     sendMessage,
     stopInference,

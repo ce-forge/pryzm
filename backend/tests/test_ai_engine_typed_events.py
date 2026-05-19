@@ -153,3 +153,175 @@ async def test_live_loop_tool_message_has_tool_call_id():
     tool_msgs = [m for m in second_call_messages if m.get("role") == "tool"]
     assert len(tool_msgs) == 1
     assert tool_msgs[0].get("tool_call_id") == "call_abc123"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_content_yields_typed_events():
+    """When the LLM returns a `reasoning_content` field alongside `content`,
+    stream_chat fake-streams the reasoning as {type: reasoning_chunk} events
+    BEFORE any content words, and emits a {type: reasoning_done} terminator
+    with a duration_s. Models without reasoning_content produce neither event."""
+
+    async def fake_chat(*_args, **_kwargs):
+        return {
+            "message": {
+                "role": "assistant",
+                "content": "The answer is forty-two.",
+                "reasoning_content": "Step one: consider the question. Step two: answer it.",
+            }
+        }
+
+    mock_workspace = models.Workspace(
+        id="ws-test", slug="it_copilot", display_name="IT Copilot",
+        system_prompt="You are a test.", enabled_tools=[],
+        engine_config={"backend": "llama_cpp"},
+    )
+
+    mock_router = MagicMock()
+    mock_router.small = "small-model"
+    mock_router.large = "large-model"
+    mock_router.pick.return_value = ("small-model", Tier.SMALL, "test")
+    mock_router.catalog = {"small-model": {"reasoning"}, "large-model": {"reasoning"}}
+
+    tool_set = ResolvedToolSet(callables={}, definitions=[], per_tool_config={})
+
+    yields: list = []
+    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+         patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
+         patch("core.ai_engine.get_router", return_value=mock_router):
+        mock_db = mock_db_local.return_value
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_workspace
+
+        async for item in stream_chat(
+            client=None,
+            messages=[{"role": "user", "content": "hi"}],
+            workspace_id="ws-test",
+            engine_config={"backend": "llama_cpp"},
+            tool_set=tool_set,
+            session_id="s-reasoning",
+        ):
+            yields.append(item)
+
+    reasoning_chunks = [y for y in yields if isinstance(y, dict) and y.get("type") == "reasoning_chunk"]
+    reasoning_done = [y for y in yields if isinstance(y, dict) and y.get("type") == "reasoning_done"]
+    text_chunks = [y for y in yields if isinstance(y, str)]
+
+    assert reasoning_chunks, "expected reasoning_chunk events"
+    assembled = "".join(c["chunk"] for c in reasoning_chunks).strip()
+    assert assembled == "Step one: consider the question. Step two: answer it."
+
+    assert len(reasoning_done) == 1
+    assert isinstance(reasoning_done[0]["duration_s"], (int, float))
+    assert reasoning_done[0]["duration_s"] >= 0
+
+    # Final answer still streams as plain text chunks AFTER reasoning_done.
+    assert "forty-two" in "".join(text_chunks)
+    first_text_index = next(i for i, y in enumerate(yields) if isinstance(y, str))
+    last_reasoning_index = max(
+        i for i, y in enumerate(yields)
+        if isinstance(y, dict) and y.get("type") in {"reasoning_chunk", "reasoning_done"}
+    )
+    assert last_reasoning_index < first_text_index
+
+
+@pytest.mark.asyncio
+async def test_absent_reasoning_content_emits_nothing_extra():
+    """A response with no `reasoning_content` field (or empty string) should
+    NOT emit reasoning_chunk or reasoning_done events. Older / non-thinking
+    models flow through unchanged."""
+
+    async def fake_chat(*_args, **_kwargs):
+        return {"message": {"role": "assistant", "content": "Plain answer."}}
+
+    mock_workspace = models.Workspace(
+        id="ws-test", slug="it_copilot", display_name="IT Copilot",
+        system_prompt="You are a test.", enabled_tools=[],
+        engine_config={"backend": "llama_cpp"},
+    )
+
+    mock_router = MagicMock()
+    mock_router.small = "small-model"
+    mock_router.large = "large-model"
+    mock_router.pick.return_value = ("small-model", Tier.SMALL, "test")
+
+    tool_set = ResolvedToolSet(callables={}, definitions=[], per_tool_config={})
+
+    yields: list = []
+    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+         patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
+         patch("core.ai_engine.get_router", return_value=mock_router):
+        mock_db = mock_db_local.return_value
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_workspace
+
+        async for item in stream_chat(
+            client=None,
+            messages=[{"role": "user", "content": "hi"}],
+            workspace_id="ws-test",
+            engine_config={"backend": "llama_cpp"},
+            tool_set=tool_set,
+            session_id="s-no-reasoning",
+        ):
+            yields.append(item)
+
+    reasoning_events = [
+        y for y in yields
+        if isinstance(y, dict) and y.get("type") in {"reasoning_chunk", "reasoning_done"}
+    ]
+    assert reasoning_events == []
+    assert "Plain answer" in "".join(y for y in yields if isinstance(y, str))
+
+
+@pytest.mark.asyncio
+async def test_reasoning_content_suppressed_for_unreasoning_models():
+    """Models NOT tagged `reasoning` in the catalog must not surface their
+    reasoning_content as typed SSE events — small chat models emit short,
+    low-signal CoT that adds noise on regular turns. Gating happens at the
+    backend so DB rows stay empty too."""
+
+    async def fake_chat(*_args, **_kwargs):
+        return {
+            "message": {
+                "role": "assistant",
+                "content": "Plain answer.",
+                "reasoning_content": "Thinking Process: 1. Read. 2. Respond.",
+            }
+        }
+
+    mock_workspace = models.Workspace(
+        id="ws-test", slug="it_copilot", display_name="IT Copilot",
+        system_prompt="You are a test.", enabled_tools=[],
+        engine_config={"backend": "llama_cpp"},
+    )
+
+    mock_router = MagicMock()
+    mock_router.small = "small-model"
+    mock_router.large = "large-model"
+    mock_router.pick.return_value = ("small-model", Tier.SMALL, "test")
+    # small-model has no `reasoning` tag — gate must suppress emission.
+    mock_router.catalog = {"small-model": set(), "large-model": {"reasoning"}}
+
+    tool_set = ResolvedToolSet(callables={}, definitions=[], per_tool_config={})
+
+    yields: list = []
+    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+         patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
+         patch("core.ai_engine.get_router", return_value=mock_router):
+        mock_db = mock_db_local.return_value
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_workspace
+
+        async for item in stream_chat(
+            client=None,
+            messages=[{"role": "user", "content": "hi"}],
+            workspace_id="ws-test",
+            engine_config={"backend": "llama_cpp"},
+            tool_set=tool_set,
+            session_id="s-gated",
+        ):
+            yields.append(item)
+
+    reasoning_events = [
+        y for y in yields
+        if isinstance(y, dict) and y.get("type") in {"reasoning_chunk", "reasoning_done"}
+    ]
+    assert reasoning_events == [], "reasoning_chunk/done must not fire for untagged models"
+    assert "Plain answer" in "".join(y for y in yields if isinstance(y, str))

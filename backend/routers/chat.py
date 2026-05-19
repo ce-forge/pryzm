@@ -278,6 +278,8 @@ def get_session_history(
             timestamp=m.created_at.isoformat() if m.created_at else None,
             referenced_files=m.referenced_docs or None,
             tool_calls=m.tool_calls or None,
+            reasoning_content=m.reasoning_content or None,
+            reasoning_duration_s=m.reasoning_duration_s,
         )
         for m in messages
     ]
@@ -461,6 +463,8 @@ async def analyze_data(
         }) + "\n"
 
         full_response = ""
+        full_reasoning = ""
+        reasoning_duration_s: Optional[float] = None
         completed = False
         disconnected = False
         assistant_message_id: Optional[str] = None
@@ -498,6 +502,12 @@ async def analyze_data(
                                 merged.append(f)
                                 seen.add(f["id"])
                         referenced_docs = merged or None
+                    elif ctype == "reasoning_chunk":
+                        full_reasoning += chunk.get("chunk") or ""
+                    elif ctype == "reasoning_done":
+                        d = chunk.get("duration_s")
+                        if isinstance(d, (int, float)):
+                            reasoning_duration_s = float(d)
                     yield json.dumps(chunk) + "\n"
                     continue
                 full_response += chunk
@@ -517,6 +527,8 @@ async def analyze_data(
                             status="complete",
                             tool_calls=_finalize_tool_calls(tool_calls_acc) or None,
                             referenced_docs=referenced_docs,
+                            reasoning_content=full_reasoning.strip() or None,
+                            reasoning_duration_s=reasoning_duration_s,
                         )
                         save_db.add(ai_msg)
                         save_db.commit()
@@ -589,6 +601,8 @@ async def analyze_data(
                             role="assistant",
                             content=full_response,
                             status=status,
+                            reasoning_content=full_reasoning.strip() or None,
+                            reasoning_duration_s=reasoning_duration_s,
                         )
                         background_db.add(ai_msg)
                         background_db.commit()

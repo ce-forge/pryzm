@@ -55,6 +55,10 @@ class MessageHistory(BaseModel):
     # Tool calls executed during this assistant turn. NULL on rows with
     # no tool use.
     tool_calls: Optional[List[ToolCall]] = None
+    # Reasoning/thinking output for reasoning-aware models. NULL on rows
+    # from models that don't emit reasoning_content.
+    reasoning_content: Optional[str] = None
+    reasoning_duration_s: Optional[float] = None
 
 class FolderCreate(BaseModel):
     name: str

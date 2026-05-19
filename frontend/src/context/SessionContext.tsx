@@ -30,6 +30,8 @@ interface SessionContextValue {
     content: string,
     referencedFiles?: ReferencedFile[],
     toolCalls?: ToolCall[],
+    reasoningContent?: string | null,
+    reasoningDurationS?: number | null,
   ) => void;
   replaceMessages: (
     workspaceSlug: string,
@@ -85,7 +87,15 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   );
 
   const finalizeAssistantMessage = useCallback(
-    (ws: string, sid: string, content: string, referencedFiles?: ReferencedFile[], toolCalls?: ToolCall[]) => {
+    (
+      ws: string,
+      sid: string,
+      content: string,
+      referencedFiles?: ReferencedFile[],
+      toolCalls?: ToolCall[],
+      reasoningContent?: string | null,
+      reasoningDurationS?: number | null,
+    ) => {
       const key = cacheKey(ws, sid);
       setMessageCache((prev) => {
         const msgs = prev[key];
@@ -97,6 +107,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           content,
           referencedFiles: referencedFiles ?? last.referencedFiles,
           toolCalls: toolCalls ?? last.toolCalls,
+          reasoningContent: reasoningContent ?? last.reasoningContent,
+          reasoningDurationS: reasoningDurationS ?? last.reasoningDurationS,
         };
         return { ...prev, [key]: next };
       });
