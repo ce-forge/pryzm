@@ -50,11 +50,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const promptState = usePrompt(messages);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const { scrollRef, onScroll } = useAutoScroll({
-    messages,
-    streamingText: myStreamingText ?? "",
-    isProcessing: currentIsProcessing,
-  });
+  const { scrollRef, onScroll } = useAutoScroll({ messages });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
