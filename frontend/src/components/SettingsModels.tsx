@@ -339,6 +339,53 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
+function formatEta(secondsRemaining: number): string {
+  if (!isFinite(secondsRemaining) || secondsRemaining < 0) return "—";
+  if (secondsRemaining < 60) return `~${Math.ceil(secondsRemaining)}s left`;
+  const m = Math.floor(secondsRemaining / 60);
+  const s = Math.ceil(secondsRemaining % 60);
+  return `~${m}m ${s}s left`;
+}
+
+/**
+ * Compute ETA in seconds based on observed download speed.
+ * Anchors at the first non-zero progress event so the initial latency
+ * (waiting for the download to start) doesn't poison the speed estimate.
+ * Returns null until we have at least 2 seconds and 1 MiB of samples — early
+ * speed numbers are noisy and would give wildly wrong ETAs.
+ */
+function useDownloadEta(
+  progress: { bytes: number; total: number } | null,
+): number | null {
+  const [anchor, setAnchor] = useState<{ time: number; bytes: number } | null>(null);
+  const [eta, setEta] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!progress || progress.total === 0 || progress.bytes >= progress.total) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (anchor !== null) setAnchor(null);
+       
+      if (eta !== null) setEta(null);
+      return;
+    }
+    if (anchor === null && progress.bytes > 0) {
+       
+      setAnchor({ time: Date.now(), bytes: progress.bytes });
+      return;
+    }
+    if (anchor === null) return;
+    const elapsedSec = (Date.now() - anchor.time) / 1000;
+    const bytesSince = progress.bytes - anchor.bytes;
+    if (elapsedSec < 2 || bytesSince < 1024 * 1024) return;
+    const speedBps = bytesSince / elapsedSec;
+    if (speedBps <= 0) return;
+     
+    setEta((progress.total - progress.bytes) / speedBps);
+  }, [progress, anchor, eta]);
+
+  return eta;
+}
+
 function DownloadLogPane({
   id, log, status, error, progress, onClose, logEndRef,
 }: {
@@ -354,6 +401,7 @@ function DownloadLogPane({
   const elapsed = useElapsed(status === "streaming");
   const hasRealProgress = progress !== null && progress.total > 0 && progress.bytes < progress.total;
   const pct = hasRealProgress ? Math.min(100, (progress!.bytes / progress!.total) * 100) : 0;
+  const etaSec = useDownloadEta(status === "streaming" ? progress : null);
   return (
     <div className="mb-3 bg-[#0e0e0f] border border-[#333537] rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-[#131314] border-b border-[#333537]">
@@ -377,7 +425,9 @@ function DownloadLogPane({
                 </span>
               )}
             </span>
-            <span className="text-gray-500 font-mono">{formatElapsed(elapsed)}</span>
+            <span className="text-gray-500 font-mono">
+              {etaSec !== null ? formatEta(etaSec) : formatElapsed(elapsed)}
+            </span>
           </div>
           <div className="h-2 rounded bg-[#2a2a2c] overflow-hidden">
             {hasRealProgress ? (
