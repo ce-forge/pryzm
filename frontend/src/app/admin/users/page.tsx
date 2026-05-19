@@ -324,11 +324,11 @@ export default function AdminUsersPage() {
         {listError && (
           <div className="mb-3 text-sm text-red-400">{listError}</div>
         )}
-        <div className="border border-[#2a2a2c] rounded overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+          <table className="w-full text-sm min-w-[800px]">
             <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
               <tr>
-                <th className="px-3 py-2 font-medium">Username</th>
+                <th className="px-3 py-2 font-medium max-md:sticky max-md:left-0 max-md:bg-[#1e1e1f]">Username</th>
                 <th className="px-3 py-2 font-medium w-20">Admin</th>
                 <th className="px-3 py-2 font-medium w-20">Active</th>
                 <th className="px-3 py-2 font-medium w-32">Can create WS</th>
@@ -350,7 +350,7 @@ export default function AdminUsersPage() {
               )}
               {users.map((u) => (
                 <tr key={u.id} className="border-t border-[#2a2a2c]">
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2 max-md:sticky max-md:left-0 max-md:bg-[#131314]">
                     <Link
                       href={`/admin/users/${encodeURIComponent(u.id)}`}
                       className="inline-flex items-center gap-2 text-sky-400 hover:underline"

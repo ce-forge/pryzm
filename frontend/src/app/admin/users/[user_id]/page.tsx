@@ -162,11 +162,11 @@ export default function AdminUserDetailPage() {
         {workspaces.length === 0 ? (
           <EmptyHint>This user has no workspaces.</EmptyHint>
         ) : (
-          <div className="border border-[#2a2a2c] rounded overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium max-md:sticky max-md:left-0 max-md:bg-[#1e1e1f]">Name</th>
                   <th className="px-3 py-2 font-medium w-32">Slug</th>
                   <th className="px-3 py-2 font-medium w-28">Owner edits</th>
                   <th className="px-3 py-2 font-medium w-40">Template</th>
@@ -183,7 +183,7 @@ export default function AdminUserDetailPage() {
                   return (
                     <React.Fragment key={w.id}>
                       <tr className="border-t border-[#2a2a2c]">
-                        <td className="px-3 py-2">{w.display_name}</td>
+                        <td className="px-3 py-2 max-md:sticky max-md:left-0 max-md:bg-[#131314]">{w.display_name}</td>
                         <td className="px-3 py-2 font-mono text-xs text-gray-400">
                           {w.slug}
                         </td>
@@ -235,8 +235,8 @@ export default function AdminUserDetailPage() {
         {openBugs.length === 0 ? (
           <EmptyHint>No open bug reports from this user.</EmptyHint>
         ) : (
-          <div className="border border-[#2a2a2c] rounded overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium w-40">When</th>
@@ -296,8 +296,8 @@ export default function AdminUserDetailPage() {
         {activity.length === 0 ? (
           <EmptyHint>No audit events yet for this user.</EmptyHint>
         ) : (
-          <div className="border border-[#2a2a2c] rounded overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium w-40">When</th>
