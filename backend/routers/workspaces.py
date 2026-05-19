@@ -199,6 +199,7 @@ def update_workspace(
 
     if "enabled_tools" in data:
         validate_tool_names(data["enabled_tools"])
+        enforce_allowed_tools(ws.user, data["enabled_tools"])
         if list(ws.enabled_tools or []) != list(data["enabled_tools"]):
             previous_values["enabled_tools"] = list(ws.enabled_tools or [])
             new_values["enabled_tools"] = list(data["enabled_tools"])

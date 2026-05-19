@@ -306,3 +306,74 @@ class TestPostWorkspacesClamp:
             assert r.json()["enabled_tools"] == ["web_search"]
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# PATCH /workspaces/{slug} clamp + grandfathering
+# ---------------------------------------------------------------------------
+
+class TestPatchWorkspacesClamp:
+    def _make_ws(self, db_session, owner_id, slug, enabled_tools):
+        ws = models.Workspace(
+            slug=slug,
+            display_name=slug,
+            system_prompt="",
+            enabled_tools=enabled_tools,
+            engine_config={"backend": "llama_cpp"},
+            user_id=owner_id,
+            owner_can_edit=True,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+        return ws
+
+    def test_owner_can_patch_within_cap(self, db_session):
+        try:
+            u = _seed_user(db_session, "alice", allowed_tools=["web_search"])
+            ws = self._make_ws(db_session, u.id, "alice-ws", [])
+            c = _user_client(db_session, u)
+            r = c.patch(f"/workspaces/{ws.slug}",
+                json={"enabled_tools": ["web_search"]})
+            assert r.status_code == 200, r.text
+            assert r.json()["enabled_tools"] == ["web_search"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_owner_cannot_patch_to_disallowed(self, db_session):
+        try:
+            u = _seed_user(db_session, "bob", allowed_tools=["web_search"])
+            ws = self._make_ws(db_session, u.id, "bob-ws", [])
+            c = _user_client(db_session, u)
+            r = c.patch(f"/workspaces/{ws.slug}",
+                json={"enabled_tools": ["execute_ping"]})
+            assert r.status_code == 400
+            assert "execute_ping" in r.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_grandfathered_workspace_patch_other_field_succeeds(self, db_session):
+        try:
+            # Pre-existing workspace with execute_ping before the cap was set
+            u = _seed_user(db_session, "carol", allowed_tools=["web_search"])
+            ws = self._make_ws(db_session, u.id, "carol-ws", ["execute_ping"])
+            c = _user_client(db_session, u)
+            r = c.patch(f"/workspaces/{ws.slug}",
+                json={"display_name": "Renamed"})
+            assert r.status_code == 200, r.text
+            assert r.json()["enabled_tools"] == ["execute_ping"]  # untouched
+            assert r.json()["display_name"] == "Renamed"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_grandfathered_workspace_patch_resending_disallowed_fails(self, db_session):
+        try:
+            u = _seed_user(db_session, "dave", allowed_tools=["web_search"])
+            ws = self._make_ws(db_session, u.id, "dave-ws", ["execute_ping"])
+            c = _user_client(db_session, u)
+            # Re-sending the disallowed list — even though it's the current
+            # stored value — should fail
+            r = c.patch(f"/workspaces/{ws.slug}",
+                json={"enabled_tools": ["execute_ping"]})
+            assert r.status_code == 400
+            assert "execute_ping" in r.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
