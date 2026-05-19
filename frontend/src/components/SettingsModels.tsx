@@ -287,6 +287,33 @@ function detectPhase(log: string[]): string {
   return "Preparing";
 }
 
+/**
+ * Tick a seconds counter while `active` is true. Freezes (doesn't reset) when
+ * active flips to false, so the final elapsed time persists if the caller
+ * wants to render it after completion.
+ */
+function useElapsed(active: boolean): number {
+  const [seconds, setSeconds] = useState(0);
+  const startRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    if (startRef.current === null) startRef.current = Date.now();
+    const t = setInterval(() => {
+      if (startRef.current !== null) {
+        setSeconds(Math.floor((Date.now() - startRef.current) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return seconds;
+}
+
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
 function DownloadLogPane({
   id, log, status, error, onClose, logEndRef,
 }: {
@@ -298,6 +325,7 @@ function DownloadLogPane({
   logEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const phase = status === "streaming" ? detectPhase(log) : null;
+  const elapsed = useElapsed(status === "streaming");
   return (
     <div className="mb-3 bg-[#0e0e0f] border border-[#333537] rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-[#131314] border-b border-[#333537]">
@@ -314,11 +342,18 @@ function DownloadLogPane({
         <div className="px-3 py-2 bg-[#131314] border-b border-[#333537]">
           <div className="flex items-center justify-between mb-1.5 text-[11px]">
             <span className="text-gray-300">{phase}…</span>
-            <span className="text-gray-500">{log.length} log line{log.length === 1 ? "" : "s"}</span>
+            <span className="text-gray-500 font-mono">{formatElapsed(elapsed)}</span>
           </div>
           <div className="h-2 rounded bg-[#2a2a2c] overflow-hidden">
             <div className="indeterminate-bar h-full bg-blue-500" />
           </div>
+          {phase === "Fetching from HuggingFace" && (
+            <p className="text-[10px] text-gray-500 mt-1.5 leading-relaxed">
+              llama-server&apos;s HF downloader runs silently. Multi-GB GGUFs
+              can take a few minutes on a typical home connection. The cache
+              is shared, so future loads of this same file are instant.
+            </p>
+          )}
         </div>
       )}
       <div className="px-3 py-2 max-h-48 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-5 text-gray-400">
