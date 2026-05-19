@@ -117,6 +117,12 @@ async def lifespan(app: FastAPI):
     from services.audit_retention_scheduler import audit_retention_loop
     audit_retention_task = asyncio.create_task(audit_retention_loop())
 
+    # Reap orphaned blobs from the llama-swap HuggingFace cache (partial
+    # downloads from cancelled or crashed loads that nothing references).
+    # Runs daily; only deletes blobs whose mtime is quiescent for 6h+.
+    from services.llama_cache_cleanup import llama_cache_cleanup_loop
+    llama_cache_cleanup_task = asyncio.create_task(llama_cache_cleanup_loop())
+
     # Shared httpx client — one connection pool for the process lifetime.
     app.state.http_client = httpx.AsyncClient(
         timeout=httpx.Timeout(
@@ -153,6 +159,7 @@ async def lifespan(app: FastAPI):
         # Shutdown
         gc_task.cancel()
         audit_retention_task.cancel()
+        llama_cache_cleanup_task.cancel()
 
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)

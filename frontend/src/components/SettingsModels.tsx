@@ -147,6 +147,35 @@ export default function ModelsSection() {
     setDownloadId(null);
   };
 
+  // Hard-cancel: abort the watcher AND delete the model entry so the
+  // partial download stops on the llama-swap side. SIGHUP kills the
+  // running llama-server process for that model id, which kills its
+  // curl child — actual bytes stop flowing. Partial blob stays on disk
+  // (the daily cleanup task reaps it).
+  const abortDownload = async (id: string) => {
+    const ok = window.confirm(
+      `Cancel the download of "${id}"?\n\n` +
+        `This removes the model entry from llama-swap. Any partial bytes ` +
+        `stay cached on disk and resume if you re-add the same file later.`,
+    );
+    if (!ok) return;
+    sseRef.current?.abort();
+    sseRef.current = null;
+    try {
+      const res = await apiFetch(`/api/admin/models/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `HTTP ${res.status}`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setDownloadId(null);
+    refresh();
+  };
+
   const handleAdded = (newId: string) => {
     setShowAddForm(false);
     refresh();
@@ -204,6 +233,7 @@ export default function ModelsSection() {
           error={downloadErr}
           progress={downloadProgress}
           onClose={cancelDownload}
+          onCancel={() => abortDownload(downloadId)}
           logEndRef={logEndRef}
         />
       )}
@@ -387,7 +417,7 @@ function useDownloadEta(
 }
 
 function DownloadLogPane({
-  id, log, status, error, progress, onClose, logEndRef,
+  id, log, status, error, progress, onClose, onCancel, logEndRef,
 }: {
   id: string;
   log: string[];
@@ -395,6 +425,7 @@ function DownloadLogPane({
   error: string | null;
   progress: { bytes: number; total: number } | null;
   onClose: () => void;
+  onCancel: () => void;
   logEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const phase = status === "streaming" ? detectPhase(log) : null;
@@ -402,6 +433,10 @@ function DownloadLogPane({
   const hasRealProgress = progress !== null && progress.total > 0 && progress.bytes < progress.total;
   const pct = hasRealProgress ? Math.min(100, (progress!.bytes / progress!.total) * 100) : 0;
   const etaSec = useDownloadEta(status === "streaming" ? progress : null);
+  // Local collapse: the log scroller hides but the header + progress bar
+  // stay visible so the admin can still see "Cancel" + ETA. Toggle with
+  // Hide/Show; the pane only fully disappears via Cancel or post-load Close.
+  const [collapsed, setCollapsed] = useState(false);
   return (
     <div className="mb-3 bg-[#0e0e0f] border border-[#333537] rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-[#131314] border-b border-[#333537]">
@@ -410,9 +445,28 @@ function DownloadLogPane({
           {status === "loaded" && <>Loaded <span className="font-mono text-emerald-400">{id}</span> ✓</>}
           {status === "error" && <>Error loading <span className="font-mono text-red-400">{id}</span>: {error}</>}
         </div>
-        <button onClick={onClose} className="text-xs text-gray-500 hover:text-white">
-          {status === "streaming" ? "Stop watching" : "Close"}
-        </button>
+        <div className="flex items-center gap-2">
+          {status === "streaming" && (
+            <button
+              onClick={onCancel}
+              className="text-xs px-2 py-0.5 rounded border border-red-500/30 text-red-300 hover:bg-red-500/15"
+            >
+              Cancel download
+            </button>
+          )}
+          {status === "streaming" ? (
+            <button
+              onClick={() => setCollapsed((c) => !c)}
+              className="text-xs text-gray-500 hover:text-white"
+            >
+              {collapsed ? "Show logs" : "Hide logs"}
+            </button>
+          ) : (
+            <button onClick={onClose} className="text-xs text-gray-500 hover:text-white">
+              Close
+            </button>
+          )}
+        </div>
       </div>
       {status === "streaming" && (
         <div className="px-3 py-2 bg-[#131314] border-b border-[#333537]">
@@ -448,15 +502,17 @@ function DownloadLogPane({
           )}
         </div>
       )}
-      <div className="px-3 py-2 max-h-48 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-5 text-gray-400">
-        {log.length === 0 && status === "streaming" && (
-          <div className="text-gray-600">Waiting for llama-swap output…</div>
-        )}
-        {log.map((line, i) => (
-          <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
-        ))}
-        <div ref={logEndRef} />
-      </div>
+      {!collapsed && (
+        <div className="px-3 py-2 max-h-48 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-5 text-gray-400">
+          {log.length === 0 && status === "streaming" && (
+            <div className="text-gray-600">Waiting for llama-swap output…</div>
+          )}
+          {log.map((line, i) => (
+            <div key={i} className="whitespace-pre-wrap break-all">{line}</div>
+          ))}
+          <div ref={logEndRef} />
+        </div>
+      )}
     </div>
   );
 }
