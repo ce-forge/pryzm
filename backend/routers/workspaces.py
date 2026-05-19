@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from core import cookie_auth
 from core.audit import EventType, log_event
-from core.tool_permissions import validate_tool_names
+from core.tool_permissions import enforce_allowed_tools, validate_tool_names
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -108,6 +108,8 @@ def create_workspace(
         system_prompt = source.system_prompt
         enabled_tools = list(source.enabled_tools or [])
         engine_config = dict(source.engine_config or engine_config)
+
+    enforce_allowed_tools(user, enabled_tools)
 
     ws = models.Workspace(
         slug=slug,

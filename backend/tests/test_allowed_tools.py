@@ -207,3 +207,102 @@ class TestAdminUsersAllowedTools:
             assert "definitely_not_a_real_tool" in r.json()["detail"]
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# POST /workspaces clamp
+# ---------------------------------------------------------------------------
+
+def _seed_user(db_session, username, allowed_tools=None, can_create=True):
+    u = models.User(
+        username=username,
+        password_hash=cookie_auth.hash_password(f"{username}-pw-12chars"),
+        is_admin=False,
+        is_active=True,
+        can_create_workspaces=can_create,
+        allowed_tools=allowed_tools or [],
+    )
+    db_session.add(u); db_session.commit(); db_session.refresh(u)
+    return u
+
+
+def _user_client(db_session, user):
+    sid = cookie_auth.create_session(db_session, user.id)
+    app.dependency_overrides[database.get_db] = lambda: db_session
+    c = TestClient(app)
+    c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+    return c
+
+
+class TestPostWorkspacesClamp:
+    def test_user_with_no_cap_creates_blank(self, db_session):
+        try:
+            u = _seed_user(db_session, "alice")
+            c = _user_client(db_session, u)
+            r = c.post("/workspaces", json={"display_name": "blank"})
+            assert r.status_code in (200, 201), r.text
+            assert r.json()["enabled_tools"] == []
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_capped_user_creates_blank(self, db_session):
+        try:
+            u = _seed_user(db_session, "bob", allowed_tools=["web_search"])
+            c = _user_client(db_session, u)
+            r = c.post("/workspaces", json={"display_name": "blank"})
+            assert r.status_code in (200, 201)
+            assert r.json()["enabled_tools"] == []
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_cloning_blocked_when_source_exceeds_cap(self, db_session):
+        try:
+            # Source workspace owned by someone else, has execute_ping
+            owner = _seed_user(db_session, "owner")
+            source = models.Workspace(
+                slug="src-clone-bad",
+                display_name="Source",
+                system_prompt="",
+                enabled_tools=["execute_ping"],
+                engine_config={"backend": "llama_cpp"},
+                user_id=owner.id,
+                owner_can_edit=True,
+            )
+            db_session.add(source); db_session.commit()
+
+            # Capped user clones it
+            capped = _seed_user(db_session, "carol", allowed_tools=["web_search"])
+            c = _user_client(db_session, capped)
+            r = c.post("/workspaces", json={
+                "display_name": "copy",
+                "clone_from": "src-clone-bad",
+            })
+            assert r.status_code == 400
+            assert "execute_ping" in r.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_cloning_succeeds_when_source_within_cap(self, db_session):
+        try:
+            owner = _seed_user(db_session, "owner2")
+            source = models.Workspace(
+                slug="src-clone-ok",
+                display_name="Source",
+                system_prompt="",
+                enabled_tools=["web_search"],
+                engine_config={"backend": "llama_cpp"},
+                user_id=owner.id,
+                owner_can_edit=True,
+            )
+            db_session.add(source); db_session.commit()
+
+            capped = _seed_user(db_session, "dave", allowed_tools=["web_search"])
+            c = _user_client(db_session, capped)
+            r = c.post("/workspaces", json={
+                "display_name": "copy ok",
+                "clone_from": "src-clone-ok",
+            })
+            assert r.status_code in (200, 201), r.text
+            assert r.json()["enabled_tools"] == ["web_search"]
+        finally:
+            app.dependency_overrides.clear()
