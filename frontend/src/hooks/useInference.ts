@@ -264,7 +264,13 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                   }
                 }
 
-                if (parsed.chunk) {
+                // Plain content chunks have shape {chunk: "..."} with no
+                // `type` field. Typed events (reasoning_chunk, tool_call,
+                // tool_result, files_referenced) also carry a `chunk` field
+                // in some cases — they must NOT be folded into the content
+                // accumulator, or reasoning text duplicates inside the
+                // assistant message body.
+                if (parsed.chunk && !parsed.type) {
                   fullAssistantMessage += parsed.chunk;
                   setStreamingContent((prev) => {
                     const next = { ...prev, [optimisticId]: fullAssistantMessage };
