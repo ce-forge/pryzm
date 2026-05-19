@@ -275,13 +275,14 @@ async def stream_chat(
 
     # Apply per-turn modes BEFORE rendering tool_names + directives so any
     # force-included tool appears in both the LLM-visible tool list and the
-    # `== AVAILABLE TOOLS ==` directive block. (Tier hint from modes is
-    # captured but not consumed in v1 — no shipped mode sets one.)
-    tier_hint_from_modes = None
-    if modes:
-        tool_set, system_prompt_raw, tier_hint_from_modes = apply_modes(
-            tool_set, system_prompt_raw, modes,
-        )
+    # `== AVAILABLE TOOLS ==` directive block. Always called — even with an
+    # empty `modes` list — because apply_modes runs the gating pass that
+    # hides mode-gated tools (web_search) when their mode isn't active.
+    # (Tier hint from modes is captured but not consumed in v1 — no shipped
+    # mode sets one.)
+    tool_set, system_prompt_raw, tier_hint_from_modes = apply_modes(
+        tool_set, system_prompt_raw, modes or [],
+    )
 
     workspace_tools = tool_set.callables
     tool_names = ", ".join(workspace_tools.keys())
