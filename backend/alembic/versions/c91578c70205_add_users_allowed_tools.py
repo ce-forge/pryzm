@@ -24,7 +24,7 @@ def upgrade() -> None:
             "allowed_tools",
             postgresql.JSONB(astext_type=sa.Text()),
             nullable=False,
-            server_default="[]",
+            server_default=sa.text("'[]'::jsonb"),
         ),
     )
 
