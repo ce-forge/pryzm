@@ -43,7 +43,7 @@ function AdminShell({ children }: { children: ReactNode }) {
       </header>
 
       <nav
-        className="flex gap-1 px-4 border-b border-[#2a2a2c]"
+        className="flex gap-1 px-4 border-b border-[#2a2a2c] overflow-x-auto custom-scrollbar"
         aria-label="Admin sections"
       >
         {TABS.map((tab) => {
@@ -53,7 +53,7 @@ function AdminShell({ children }: { children: ReactNode }) {
               key={tab.href}
               href={tab.href}
               className={
-                "px-4 py-3 text-sm border-b-2 transition-colors " +
+                "px-4 py-3 text-sm border-b-2 whitespace-nowrap transition-colors " +
                 (active
                   ? "border-[#e3e3e3] text-[#e3e3e3]"
                   : "border-transparent text-gray-400 hover:text-[#e3e3e3]")
@@ -66,7 +66,7 @@ function AdminShell({ children }: { children: ReactNode }) {
         })}
       </nav>
 
-      <main className="flex-1 overflow-y-auto custom-scrollbar p-6">
+      <main className="flex-1 overflow-y-auto custom-scrollbar p-4 sm:p-6">
         {children}
       </main>
     </div>

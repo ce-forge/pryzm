@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
+import Identicon from "@/components/Identicon";
 
 interface AdminUser {
   id: string;
@@ -124,7 +125,10 @@ export default function AdminUserDetailPage() {
         >
           ← All users
         </Link>
-        <h2 className="text-xl font-semibold mt-2">{user.username}</h2>
+        <h2 className="text-xl font-semibold mt-2 flex items-center gap-3">
+          <Identicon seed={user.username} size={32} />
+          {user.username}
+        </h2>
         <div className="text-xs text-gray-400 mt-1 flex flex-wrap gap-3">
           <FlagPill label="Admin" on={user.is_admin} />
           <FlagPill label="Active" on={user.is_active} />
@@ -158,11 +162,11 @@ export default function AdminUserDetailPage() {
         {workspaces.length === 0 ? (
           <EmptyHint>This user has no workspaces.</EmptyHint>
         ) : (
-          <div className="border border-[#2a2a2c] rounded overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
                 <tr>
-                  <th className="px-3 py-2 font-medium">Name</th>
+                  <th className="px-3 py-2 font-medium max-md:sticky max-md:left-0 max-md:bg-[#1e1e1f]">Name</th>
                   <th className="px-3 py-2 font-medium w-32">Slug</th>
                   <th className="px-3 py-2 font-medium w-28">Owner edits</th>
                   <th className="px-3 py-2 font-medium w-40">Template</th>
@@ -179,7 +183,7 @@ export default function AdminUserDetailPage() {
                   return (
                     <React.Fragment key={w.id}>
                       <tr className="border-t border-[#2a2a2c]">
-                        <td className="px-3 py-2">{w.display_name}</td>
+                        <td className="px-3 py-2 max-md:sticky max-md:left-0 max-md:bg-[#131314]">{w.display_name}</td>
                         <td className="px-3 py-2 font-mono text-xs text-gray-400">
                           {w.slug}
                         </td>
@@ -231,8 +235,8 @@ export default function AdminUserDetailPage() {
         {openBugs.length === 0 ? (
           <EmptyHint>No open bug reports from this user.</EmptyHint>
         ) : (
-          <div className="border border-[#2a2a2c] rounded overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium w-40">When</th>
@@ -245,9 +249,14 @@ export default function AdminUserDetailPage() {
                 {openBugs.map((b) => (
                   <tr key={b.id} className="border-t border-[#2a2a2c]">
                     <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">
-                      {b.created_at
-                        ? new Date(b.created_at).toLocaleString()
-                        : "—"}
+                      {b.created_at ? (
+                        <>
+                          <div>{new Date(b.created_at).toLocaleDateString()}</div>
+                          <div>{new Date(b.created_at).toLocaleTimeString()}</div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <StatusBadge status={b.status} />
@@ -287,8 +296,8 @@ export default function AdminUserDetailPage() {
         {activity.length === 0 ? (
           <EmptyHint>No audit events yet for this user.</EmptyHint>
         ) : (
-          <div className="border border-[#2a2a2c] rounded overflow-hidden">
-            <table className="w-full text-sm">
+          <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+            <table className="w-full text-sm min-w-[600px]">
               <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
                 <tr>
                   <th className="px-3 py-2 font-medium w-40">When</th>
@@ -300,9 +309,14 @@ export default function AdminUserDetailPage() {
                 {activity.map((e) => (
                   <tr key={e.id} className="border-t border-[#2a2a2c]">
                     <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">
-                      {e.created_at
-                        ? new Date(e.created_at).toLocaleString()
-                        : "—"}
+                      {e.created_at ? (
+                        <>
+                          <div>{new Date(e.created_at).toLocaleDateString()}</div>
+                          <div>{new Date(e.created_at).toLocaleTimeString()}</div>
+                        </>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-3 py-2 truncate max-w-64">
                       <EventTypeBadge eventType={e.event_type} />

@@ -5,6 +5,8 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/utils/apiClient";
 import { AuditEventDetailModal } from "@/components/admin/AuditEventDetailModal";
 import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
+import Identicon from "@/components/Identicon";
+import { StatsPanel } from "@/components/admin/StatsPanel";
 
 interface AuditEvent {
   id: string;
@@ -154,7 +156,8 @@ export default function AdminAuditPage() {
   }, [eventTypes]);
 
   return (
-    <div className="max-w-6xl">
+    <div className="flex gap-6 max-w-7xl">
+      <div className="flex-1 min-w-0">
       <div className="flex flex-wrap gap-3 items-end mb-4">
         <FilterColumn label="Event type">
           <select
@@ -219,8 +222,8 @@ export default function AdminAuditPage() {
         <div className="mb-3 text-sm text-red-400">{error}</div>
       )}
 
-      <div className="border border-[#2a2a2c] rounded overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+        <table className="w-full text-sm min-w-[700px]">
           <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
             <tr>
               <th className="px-3 py-2 font-medium w-40">When</th>
@@ -244,12 +247,25 @@ export default function AdminAuditPage() {
                 className="border-t border-[#2a2a2c] hover:bg-[#1a1a1b] cursor-pointer"
               >
                 <td className="px-3 py-2 text-gray-400 whitespace-nowrap text-xs">
-                  {e.created_at
-                    ? new Date(e.created_at).toLocaleString()
-                    : "—"}
+                  {e.created_at ? (
+                    <>
+                      <div>{new Date(e.created_at).toLocaleDateString()}</div>
+                      <div>{new Date(e.created_at).toLocaleTimeString()}</div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-3 py-2 truncate max-w-32">
-                  {e.user_display_name_at_event ?? (
+                  {e.user_display_name_at_event ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Identicon
+                        seed={e.user_display_name_at_event}
+                        size={18}
+                      />
+                      {e.user_display_name_at_event}
+                    </span>
+                  ) : (
                     <span className="text-gray-500">system</span>
                   )}
                 </td>
@@ -287,6 +303,18 @@ export default function AdminAuditPage() {
           onClose={() => setSelectedEventId(null)}
         />
       )}
+      </div>
+
+      <aside className="hidden xl:block w-72 shrink-0 space-y-4">
+        <StatsPanel
+          title="At a glance"
+          rows={[
+            { label: "Events loaded", value: events.length },
+            { label: "Event types", value: eventTypes.length },
+            { label: "Users", value: users.length },
+          ]}
+        />
+      </aside>
     </div>
   );
 }

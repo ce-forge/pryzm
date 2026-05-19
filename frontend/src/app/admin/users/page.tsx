@@ -5,6 +5,7 @@ import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 import { ToolPicker } from "@/components/ToolPicker";
 import Identicon from "@/components/Identicon";
+import { StatsPanel } from "@/components/admin/StatsPanel";
 
 interface AdminUser {
   id: string;
@@ -193,9 +194,17 @@ export default function AdminUsersPage() {
     }
   };
 
+  const stats = {
+    total: users.length,
+    active: users.filter((u) => u.is_active).length,
+    admins: users.filter((u) => u.is_admin).length,
+    canCreate: users.filter((u) => u.can_create_workspaces).length,
+  };
+
   return (
-    <div className="max-w-4xl space-y-8">
-      <p className="text-xs text-gray-400">
+    <div className="flex gap-6 max-w-7xl">
+      <div className="flex-1 min-w-0 space-y-8">
+        <p className="text-xs text-gray-400">
         Create, edit, deactivate, reset password, delete. Click a username to
         open their detail page (workspaces, recent activity, open bug reports).
       </p>
@@ -324,11 +333,11 @@ export default function AdminUsersPage() {
         {listError && (
           <div className="mb-3 text-sm text-red-400">{listError}</div>
         )}
-        <div className="border border-[#2a2a2c] rounded overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="border border-[#2a2a2c] rounded overflow-x-auto">
+          <table className="w-full text-sm min-w-[800px]">
             <thead className="bg-[#1e1e1f] text-xs text-gray-400 text-left">
               <tr>
-                <th className="px-3 py-2 font-medium">Username</th>
+                <th className="px-3 py-2 font-medium max-md:sticky max-md:left-0 max-md:bg-[#1e1e1f]">Username</th>
                 <th className="px-3 py-2 font-medium w-20">Admin</th>
                 <th className="px-3 py-2 font-medium w-20">Active</th>
                 <th className="px-3 py-2 font-medium w-32">Can create WS</th>
@@ -350,7 +359,7 @@ export default function AdminUsersPage() {
               )}
               {users.map((u) => (
                 <tr key={u.id} className="border-t border-[#2a2a2c]">
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2 max-md:sticky max-md:left-0 max-md:bg-[#131314]">
                     <Link
                       href={`/admin/users/${encodeURIComponent(u.id)}`}
                       className="inline-flex items-center gap-2 text-sky-400 hover:underline"
@@ -460,6 +469,19 @@ export default function AdminUsersPage() {
           }}
         />
       )}
+      </div>
+
+      <aside className="hidden xl:block w-72 shrink-0 space-y-4">
+        <StatsPanel
+          title="At a glance"
+          rows={[
+            { label: "Total users", value: stats.total },
+            { label: "Active", value: stats.active },
+            { label: "Admins", value: stats.admins },
+            { label: "Can create workspaces", value: stats.canCreate },
+          ]}
+        />
+      </aside>
     </div>
   );
 }
