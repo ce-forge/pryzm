@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from core import cookie_auth
 from core.audit import EventType, log_event
-from core.tool_permissions import enforce_allowed_tools, validate_tool_names
+from core.tool_permissions import enforce_allowed_tools, filter_allowed_tools, validate_tool_names
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -268,7 +268,7 @@ def delete_workspace(slug: str, db: Session = Depends(database.get_db)):
     )
 
 
-@router.post("/workspaces/{slug}/reset", response_model=WorkspaceResponse)
+@router.post("/workspaces/{slug}/reset")
 def reset_workspace(
     slug: str,
     db: Session = Depends(database.get_db),
@@ -292,13 +292,20 @@ def reset_workspace(
     tmpl = db.query(models.WorkspaceTemplate).filter_by(id=ws.template_id).first()
     if tmpl is None:
         raise HTTPException(status_code=404, detail="Template no longer exists.")
+
+    template_tools = list(tmpl.enabled_tools or [])
+    kept, dropped = filter_allowed_tools(user, template_tools)
+
     ws.system_prompt = tmpl.system_prompt
-    ws.enabled_tools = list(tmpl.enabled_tools or [])
+    ws.enabled_tools = kept
     ws.color = tmpl.color
     ws.engine_config = dict(tmpl.engine_config or {})
     db.commit()
     db.refresh(ws)
-    return _to_response(ws)
+    return {
+        "workspace": _to_response(ws).model_dump(),
+        "dropped_tools": dropped,
+    }
 
 
 @router.patch("/workspaces/{slug}/position", response_model=WorkspaceResponse)

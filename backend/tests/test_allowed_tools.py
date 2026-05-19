@@ -489,3 +489,85 @@ class TestAdminDirectEditClamp:
             assert r.status_code == 200, r.text
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# POST /workspaces/{slug}/reset filter + new response shape
+# ---------------------------------------------------------------------------
+
+class TestResetFilter:
+    def _make_template(self, db_session, slug, enabled_tools, system_prompt="prompt-x"):
+        t = models.WorkspaceTemplate(
+            slug=slug,
+            display_name=slug,
+            system_prompt=system_prompt,
+            enabled_tools=enabled_tools,
+            engine_config={"backend": "llama_cpp"},
+        )
+        db_session.add(t); db_session.commit(); db_session.refresh(t)
+        return t
+
+    def _make_instance(self, db_session, owner_id, slug, template_id, enabled_tools):
+        ws = models.Workspace(
+            slug=slug,
+            display_name=slug,
+            system_prompt="",
+            enabled_tools=enabled_tools,
+            engine_config={"backend": "llama_cpp"},
+            user_id=owner_id,
+            template_id=template_id,
+            owner_can_edit=True,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+        return ws
+
+    def test_reset_within_cap_no_dropped(self, db_session):
+        try:
+            u = _seed_user(db_session, "alice", allowed_tools=["web_search"])
+            t = self._make_template(db_session, "t1", ["web_search"])
+            ws = self._make_instance(db_session, u.id, "alice-ws", t.id, [])
+            c = _user_client(db_session, u)
+            r = c.post(f"/workspaces/{ws.slug}/reset")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["dropped_tools"] == []
+            assert body["workspace"]["enabled_tools"] == ["web_search"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_reset_filters_disallowed(self, db_session):
+        try:
+            u = _seed_user(db_session, "bob", allowed_tools=["web_search"])
+            t = self._make_template(db_session, "t2", ["web_search", "execute_ping"])
+            ws = self._make_instance(db_session, u.id, "bob-ws", t.id, [])
+            c = _user_client(db_session, u)
+            r = c.post(f"/workspaces/{ws.slug}/reset")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["dropped_tools"] == ["execute_ping"]
+            assert body["workspace"]["enabled_tools"] == ["web_search"]
+            # other fields still propagated
+            assert body["workspace"]["system_prompt"] == "prompt-x"
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_reset_admin_bypasses_filter(self, db_session):
+        try:
+            admin_user = models.User(
+                username="adminish",
+                password_hash=cookie_auth.hash_password("adminish-pw-12chars"),
+                is_admin=True,
+                is_active=True,
+                allowed_tools=["web_search"],
+            )
+            db_session.add(admin_user); db_session.commit(); db_session.refresh(admin_user)
+            t = self._make_template(db_session, "t3", ["web_search", "execute_ping"])
+            ws = self._make_instance(db_session, admin_user.id, "adm-ws", t.id, [])
+            c = _user_client(db_session, admin_user)
+            r = c.post(f"/workspaces/{ws.slug}/reset")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["dropped_tools"] == []
+            assert sorted(body["workspace"]["enabled_tools"]) == sorted(["web_search", "execute_ping"])
+        finally:
+            app.dependency_overrides.clear()
