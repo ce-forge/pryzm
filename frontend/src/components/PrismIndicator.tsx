@@ -2,21 +2,33 @@
 
 import React from "react";
 
+interface PrismIndicatorProps {
+  /** Visual sizing. `pill` is the compact 56x28 used inside ThinkingPanel;
+   *  `block` is the larger 80x40 used in the standalone ProcessingAnimation. */
+  size?: "pill" | "block";
+}
+
 /**
- * Animated prism + lighthouse beam, used as the live-activity indicator
- * during processing turns. Wraps the SVG in a subtle vertical-float
- * animation independent of the 5s beam/spin cycle so the prism reads as
- * "alive" between beam events instead of static-then-flash.
+ * Animated prism + lighthouse beam. The single live-activity indicator
+ * across the chat surface — used inside the ThinkingPanel pill on
+ * reasoning turns and inline with the themed phrase on regular turns.
  *
- * Shared between ProcessingAnimation (non-reasoning turns, displayed with
- * a themed phrase) and ThinkingPanel (reasoning turns, displayed with a
- * `Thinking…` label that expands the reasoning content).
+ * Three layered animations on independent clocks so something is always
+ * happening:
+ *   - prismSpin / shootWhite / shootColor / flareAnim (5s) — the main
+ *     beam-in-rainbow-out lighthouse cycle.
+ *   - prismFloat / prismBreathe (3.2s) — subtle float + stroke-opacity
+ *     pulse so the prism reads as "alive" even between beam events.
+ *   - raysSweep (5s, in sync with shootColor) — small angular sweep on
+ *     the rainbow rays so they pan slightly as they exit.
  */
-export default function PrismIndicator() {
+export default function PrismIndicator({ size = "pill" }: PrismIndicatorProps) {
+  const dims = size === "pill" ? "w-14 h-7" : "w-20 h-10";
+
   return (
     <svg
       viewBox="0 0 60 30"
-      className="w-12 h-6 overflow-visible shrink-0 prism-svg"
+      className={`${dims} overflow-visible shrink-0 prism-svg`}
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
     >
@@ -29,16 +41,11 @@ export default function PrismIndicator() {
 
       <style>
         {`
-          /* Container float — runs on its own clock so the prism keeps
-             gently rising/settling even during the quiet phase between
-             beam events. ~3s sine, 1.5px peak — subtle, never seasick. */
+          /* Vertical float on the whole SVG. ~3px peak is plainly visible
+             but doesn't slosh — the prism reads as suspended, like Claude's. */
           .prism-svg { animation: prismFloat 3.2s ease-in-out infinite; }
 
-          /* Container-level rays sweep — gives the lighthouse-beacon
-             feel as the rainbow shoots out. Rotates a few degrees during
-             the exit so the rays appear to pan slightly. */
           .rays { transform-origin: 20px 17px; animation: raysSweep 5s infinite cubic-bezier(0.2, 1, 0.3, 1); }
-
           .beam-white { stroke-dasharray: 12 50; animation: shootWhite 5s infinite linear; }
           .beam-color { stroke-dasharray: 10 50; animation: shootColor 5s infinite cubic-bezier(0.2, 1, 0.3, 1); }
           .flare { transform-origin: 20px 17px; animation: flareAnim 5s infinite ease-out; }
@@ -50,20 +57,20 @@ export default function PrismIndicator() {
 
           @keyframes prismFloat {
             0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-1.5px); }
+            50% { transform: translateY(-3px); }
           }
 
-          /* Subtle stroke-opacity pulse during idle phase — the prism
-             "breathes" between beam events instead of going dead-quiet. */
+          /* Opacity range tightened against the dark backdrop — the
+             prism brightens noticeably in its breathe peak. */
           @keyframes prismBreathe {
-            0%, 100% { stroke-opacity: 0.55; }
-            50% { stroke-opacity: 0.85; }
+            0%, 100% { stroke-opacity: 0.45; }
+            50% { stroke-opacity: 1.0; }
           }
 
           @keyframes raysSweep {
             0%, 59.9% { transform: rotate(0deg); }
-            60% { transform: rotate(-3deg); }
-            70% { transform: rotate(3deg); }
+            60% { transform: rotate(-4deg); }
+            70% { transform: rotate(4deg); }
             72%, 100% { transform: rotate(0deg); }
           }
 

@@ -4,6 +4,11 @@ interface UseAutoScrollArgs {
   /** Tracked only to force-enable scrolling when a new message lands —
    *  e.g. the user just hit send, or restored after a scroll-up. */
   messages: { id?: string }[];
+  /** The live streaming content/reasoning text. ResizeObserver is the
+   *  primary trigger, but Markdown layout sometimes commits a frame
+   *  AFTER the state update lands — watching the text directly as a
+   *  belt-and-suspenders trigger guarantees a scroll on every chunk. */
+  streamingText?: string;
 }
 
 /**
@@ -15,7 +20,7 @@ interface UseAutoScrollArgs {
  * any specific state source. User scroll-up disables autoscroll
  * immediately; scrolling back to within 30 px of the bottom re-enables.
  */
-export function useAutoScroll({ messages }: UseAutoScrollArgs) {
+export function useAutoScroll({ messages, streamingText }: UseAutoScrollArgs) {
   const scrollRef = useRef<HTMLDivElement>(null);
   // Ref (not state) so user-driven scroll-up doesn't trigger a render loop.
   const isAutoScrollEnabled = useRef(true);
@@ -39,10 +44,11 @@ export function useAutoScroll({ messages }: UseAutoScrollArgs) {
     return () => clearTimeout(t);
   }, [messages.length, scrollToBottom]);
 
-  // (2) The actual scroll trigger. Anything that grows the page (token
-  // stream, pill expand, markdown reflow) fires the observer; if
-  // autoscroll is enabled, follow. rAF gate coalesces a burst of size
-  // changes from one render into a single scroll call.
+  // (2) Primary scroll trigger — observe everything inside the scroll
+  // container. Anything that grows the page (token stream, pill expand,
+  // markdown reflow) fires the observer; if autoscroll is enabled, follow.
+  // rAF gate coalesces a burst of size changes from one render into one
+  // scroll call.
   useEffect(() => {
     const sc = scrollRef.current;
     if (!sc) return;
@@ -50,17 +56,41 @@ export function useAutoScroll({ messages }: UseAutoScrollArgs) {
     if (!content) return;
 
     let frameScheduled = false;
-    const observer = new ResizeObserver(() => {
+    const trigger = () => {
       if (frameScheduled) return;
       frameScheduled = true;
       requestAnimationFrame(() => {
         frameScheduled = false;
         scrollToBottom();
       });
-    });
+    };
+    const observer = new ResizeObserver(trigger);
     observer.observe(content);
-    return () => observer.disconnect();
+    // Also observe individual message bubbles as they arrive — when a
+    // bubble's height changes (markdown reflow inside a code block, image
+    // load), its own resize fires before/in addition to the parent's.
+    const mutation = new MutationObserver(() => {
+      observer.disconnect();
+      observer.observe(content);
+      Array.from(content.children).forEach((c) => observer.observe(c));
+      trigger();
+    });
+    mutation.observe(content, { childList: true, subtree: false });
+    Array.from(content.children).forEach((c) => observer.observe(c));
+
+    return () => {
+      observer.disconnect();
+      mutation.disconnect();
+    };
   }, [scrollToBottom]);
+
+  // (3) Backup trigger — every streamingText state change. Markdown
+  // layout occasionally commits a frame later than the state update;
+  // this guarantees a scroll attempt the moment a token lands.
+  useEffect(() => {
+    if (!streamingText) return;
+    requestAnimationFrame(() => scrollToBottom());
+  }, [streamingText, scrollToBottom]);
 
   const onScroll = () => {
     if (!scrollRef.current) return;

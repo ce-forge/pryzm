@@ -33,6 +33,14 @@ interface ChatBubbleProps {
    */
   displayReasoning?: string;
   /**
+   * Reasoning duration in seconds. Set BEFORE the assistant message
+   * finishes — comes from the backend's `reasoning_done` SSE event
+   * during streaming (parent passes streamingReasoningDurationS[id]),
+   * or from the persisted message row after stream end. Presence flips
+   * the pill from `Thinking…` (with prism) to `Thought for X.Xs`.
+   */
+  displayReasoningDuration?: number | null;
+  /**
    * True when the routed model carries the `reasoning` catalog tag and
    * this is the streaming message. Drives the pill into its always-visible
    * live state — see ThinkingPanel.isStreaming for the visual treatment.
@@ -52,6 +60,7 @@ function ChatBubbleImpl({
   message,
   displayContent,
   displayReasoning,
+  displayReasoningDuration,
   isReasoningTurn,
   toolCalls,
   index,
@@ -132,7 +141,7 @@ function ChatBubbleImpl({
           {message.role !== "user" && (displayReasoning || (isStreaming && isReasoningTurn)) && (
             <ThinkingPanel
               reasoning={displayReasoning}
-              durationSeconds={message.reasoningDurationS ?? null}
+              durationSeconds={displayReasoningDuration ?? message.reasoningDurationS ?? null}
               isStreaming={isStreaming}
             />
           )}
@@ -186,6 +195,7 @@ const ChatBubble = React.memo(ChatBubbleImpl, (prev, next) => {
     prev.message === next.message &&
     prev.displayContent === next.displayContent &&
     prev.displayReasoning === next.displayReasoning &&
+    prev.displayReasoningDuration === next.displayReasoningDuration &&
     prev.isReasoningTurn === next.isReasoningTurn &&
     prev.toolCalls === next.toolCalls &&
     prev.searchQuery === next.searchQuery &&

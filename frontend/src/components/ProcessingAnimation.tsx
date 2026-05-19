@@ -22,15 +22,15 @@ export default function ProcessingAnimation() {
   const [phrase] = useState(pickPhrase);
 
   return (
-    <div className="flex items-center mt-4 mb-2 pl-4">
+    <div className="flex items-center gap-3 mt-4 mb-2 pl-4">
       <span
-        className="text-sm tracking-wide font-medium mr-4"
+        className="text-sm tracking-wide font-medium"
         style={{
           background: 'linear-gradient(90deg, #4b5563 0%, #4b5563 40%, #ffffff 50%, #4b5563 60%, #4b5563 100%)',
           backgroundSize: '200% 100%',
           WebkitBackgroundClip: 'text',
           color: 'transparent',
-          animation: 'textShimmer 5s infinite linear'
+          animation: 'textShimmer 4s infinite linear'
         }}
       >
         {phrase}
@@ -41,7 +41,7 @@ export default function ProcessingAnimation() {
           100% { background-position: -200% 0; }
         }
       `}</style>
-      <PrismIndicator />
+      <PrismIndicator size="block" />
     </div>
   );
 }

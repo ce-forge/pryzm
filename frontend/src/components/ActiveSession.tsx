@@ -42,6 +42,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const myStreamingText = ai.streamingContent[activeSessionKey];
   const myStreamingReasoning = ai.streamingReasoning[activeSessionKey];
   const myIsReasoning = ai.streamingIsReasoning[activeSessionKey] ?? false;
+  // Set the moment the backend's `reasoning_done` SSE event lands — before
+  // any content streams. The ThinkingPanel uses presence-of-duration to
+  // flip from `Thinking…` to `Thought for X.Xs`.
+  const myLiveReasoningDurationS = ai.streamingReasoningDurationS[activeSessionKey] ?? null;
 
   const currentIsProcessing =
     session.streamingSessionIdsRef.current.has(activeSessionKey);
@@ -50,7 +54,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const promptState = usePrompt(messages);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const { scrollRef, onScroll } = useAutoScroll({ messages });
+  const { scrollRef, onScroll } = useAutoScroll({
+    messages,
+    streamingText: myStreamingText ?? myStreamingReasoning ?? "",
+  });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
@@ -188,6 +195,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
             const displayReasoning = isLastStreaming
               ? (myStreamingReasoning || undefined)
               : m.reasoningContent;
+            const displayReasoningDuration = isLastStreaming
+              ? myLiveReasoningDurationS
+              : (m.reasoningDurationS ?? null);
             const stableKey = m.id ?? `idx-${i}`;
             return (
               <React.Fragment key={stableKey}>
@@ -200,6 +210,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
                   message={m}
                   displayContent={displayContent}
                   displayReasoning={displayReasoning}
+                  displayReasoningDuration={displayReasoningDuration}
                   isReasoningTurn={isLastStreaming && myIsReasoning}
                   toolCalls={displayToolCalls}
                   index={i}
