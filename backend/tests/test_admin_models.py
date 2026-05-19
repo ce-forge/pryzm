@@ -27,8 +27,8 @@ healthCheckTimeout: 3600
 startPort: 9000
 
 groups:
-  "chat":
-    swap: true
+  "on-demand":
+    swap: false
     exclusive: false
   "always-on":
     swap: false
@@ -43,7 +43,7 @@ models:
       -hf bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
-    groups: ["chat"]
+    groups: ["on-demand"]
     tags: []
 
   # Tier-2 default (larger).
@@ -53,7 +53,7 @@ models:
       -hf bartowski/google_gemma-4-E4B-it-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
       --cache-type-k q8_0 --cache-type-v q8_0
-    groups: ["chat"]
+    groups: ["on-demand"]
     tags: []
 
   # Embedding model — pinned always-on.
@@ -136,7 +136,7 @@ def test_list_models_returns_parsed_rows(client):
     assert e2b["quant"] == "Q4_K_M"
     assert e2b["ngl"] == 99
     assert e2b["ctx_size"] == 8192
-    assert e2b["group"] == "chat"
+    assert e2b["group"] == "on-demand"
     assert e2b["tags"] == []
     assert e2b["loaded"] is True
     nomic = by_id["nomic-embed-text-v1.5"]
@@ -186,7 +186,7 @@ def test_add_model_happy_path(client, tmp_yaml):
         "repo": "bartowski/Qwen2.5-Coder-7B-Instruct-GGUF:Q4_K_M",
         "ngl": 99,
         "ctx_size": 8192,
-        "group": "chat",
+        "group": "on-demand",
         "tags": ["code"],
     })
     assert res.status_code == 201, res.text
@@ -217,6 +217,50 @@ def test_add_model_accepts_split_repo_quant(client, tmp_yaml):
     assert "org/repo:Q8_0" in tmp_yaml.read_text()
 
 
+def test_add_model_with_expected_filename_uses_hff_form(client, tmp_yaml):
+    """When the HF picker supplies `expected_filename`, the emitted cmd uses
+    `-hf <repo>` + `-hff <filename>` instead of `-hf <repo>:<quant>`.
+    The :quant shortcut depends on preset metadata that some repos
+    (e.g. bartowski's larger Gemma variants) don't expose — the picker
+    knows the exact filename, so we should use it directly."""
+    res = client.post("/api/admin/models", json={
+        "id": "test-26b-via-picker",
+        "repo": "bartowski/google_gemma-4-26B-A4B-it-GGUF",
+        "quant": "Q4_K_M",
+        "expected_filename": "google_gemma-4-26B-A4B-it-Q4_K_M.gguf",
+        "group": "on-demand",
+    })
+    assert res.status_code == 201, res.text
+    row = res.json()
+    assert row["repo"] == "bartowski/google_gemma-4-26B-A4B-it-GGUF"
+    assert row["filename"] == "google_gemma-4-26B-A4B-it-Q4_K_M.gguf"
+    # Display quant is derived from the filename so the UI keeps its label.
+    assert row["quant"] == "Q4_K_M"
+
+    text = tmp_yaml.read_text()
+    assert "-hf bartowski/google_gemma-4-26B-A4B-it-GGUF" in text
+    assert "-hff google_gemma-4-26B-A4B-it-Q4_K_M.gguf" in text
+    # And specifically NOT the colon-shortcut form, which is what 404s.
+    assert "google_gemma-4-26B-A4B-it-GGUF:Q4_K_M" not in text
+
+
+def test_add_model_without_filename_keeps_legacy_quant_form(client, tmp_yaml):
+    """Manual entries (no `expected_filename`) keep emitting `-hf <repo>:<quant>`
+    so existing behaviour is unchanged for repos that do expose preset metadata."""
+    res = client.post("/api/admin/models", json={
+        "id": "test-7b-legacy",
+        "repo": "org/some-repo-GGUF:Q5_K_M",
+        "group": "on-demand",
+    })
+    assert res.status_code == 201, res.text
+
+    text = tmp_yaml.read_text()
+    assert "-hf org/some-repo-GGUF:Q5_K_M" in text
+    # No -hff anywhere in the YAML: the fixture entries use legacy form
+    # and this new entry was also added with the legacy form.
+    assert "-hff" not in text
+
+
 # ---------------------------------------------------------------------------
 # PUT /api/admin/models/{id} — edits non-identity fields
 # ---------------------------------------------------------------------------
@@ -243,7 +287,7 @@ def test_update_model_partial_update_preserves_identity(client, tmp_yaml):
     assert row["ngl"] == 50
     assert row["ctx_size"] == 4096
     # Fields not in the PUT body stay as-is
-    assert row["group"] == "chat"
+    assert row["group"] == "on-demand"
     assert row["tags"] == []
 
     # Disk state: cmd block reflects new values
