@@ -5,8 +5,7 @@ import { apiFetch } from "@/utils/apiClient";
 import { StatsPanel } from "@/components/admin/StatsPanel";
 import { TemplateCreateModal } from "./TemplateCreateModal";
 import { TemplateEditModal } from "./TemplateEditModal";
-import { TemplatePushModal } from "./TemplatePushModal";
-import { TemplateInstantiateModal } from "./TemplateInstantiateModal";
+import { TemplateApplyModal } from "./TemplateApplyModal";
 import type { AdminTemplate, AdminUserRow } from "./types";
 
 export function TemplatesView() {
@@ -18,8 +17,7 @@ export function TemplatesView() {
   // Modal state
   const [showCreate, setShowCreate] = useState(false);
   const [editTemplate, setEditTemplate] = useState<AdminTemplate | null>(null);
-  const [pushTemplate, setPushTemplate] = useState<AdminTemplate | null>(null);
-  const [instantiateTemplate, setInstantiateTemplate] = useState<AdminTemplate | null>(null);
+  const [applyTemplate, setApplyTemplate] = useState<AdminTemplate | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,9 +72,9 @@ export function TemplatesView() {
       <div className="flex-1 min-w-0 space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-gray-400">
-          Templates seed new users&apos; starter workspaces. Push to overwrite
-          settings across all instances; instantiate to add one to a specific
-          user.
+          Templates seed new users&apos; starter workspaces. Push to apply
+          the template across users — each user can be updated, adopted
+          from an existing slug-match, or created fresh.
         </p>
         <button
           type="button"
@@ -130,17 +128,10 @@ export function TemplatesView() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPushTemplate(t)}
+                      onClick={() => setApplyTemplate(t)}
                       className="text-xs px-2 py-0.5 rounded border border-sky-500/30 text-sky-300 hover:bg-sky-500/15"
                     >
-                      Push
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setInstantiateTemplate(t)}
-                      className="text-xs px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/15"
-                    >
-                      Instantiate
+                      Push…
                     </button>
                     <button
                       type="button"
@@ -178,20 +169,14 @@ export function TemplatesView() {
         />
       )}
 
-      {pushTemplate && (
-        <TemplatePushModal
-          target={pushTemplate}
-          onClose={() => setPushTemplate(null)}
-          onDone={() => setPushTemplate(null)}
-        />
-      )}
-
-      {instantiateTemplate && (
-        <TemplateInstantiateModal
-          target={instantiateTemplate}
-          users={users}
-          onClose={() => setInstantiateTemplate(null)}
-          onDone={() => setInstantiateTemplate(null)}
+      {applyTemplate && (
+        <TemplateApplyModal
+          target={applyTemplate}
+          onClose={() => setApplyTemplate(null)}
+          onDone={() => {
+            setApplyTemplate(null);
+            load();
+          }}
         />
       )}
       </div>

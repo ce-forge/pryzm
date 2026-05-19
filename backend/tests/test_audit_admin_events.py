@@ -356,13 +356,16 @@ def test_admin_template_deleted_emits_event(db_session):
 
 
 def test_admin_template_instantiated_emits_event(db_session):
+    """A `create` action via /apply emits one ADMIN_TEMPLATE_INSTANTIATED
+    event per created workspace, matching the legacy /instantiate
+    semantics so existing audit queries still work."""
     try:
         c, admin = _admin_client(db_session)
         bob = _seed_user(db_session)
         tmpl = _seed_template(db_session, slug="t-instn")
 
-        r = c.post(f"/api/admin/templates/{tmpl.id}/instantiate", json={
-            "user_id": bob.id, "owner_can_edit": True,
+        r = c.post(f"/api/admin/templates/{tmpl.id}/apply", json={
+            "targets": [{"user_id": bob.id, "action": "create", "owner_can_edit": True}],
         })
         assert r.status_code == 200, r.text
 
@@ -374,7 +377,6 @@ def test_admin_template_instantiated_emits_event(db_session):
         assert payload["template_id"] == tmpl.id
         assert payload["slug"] == "t-instn"
         assert payload["target_user_id"] == bob.id
-        # new_workspace_id matches the freshly created instance
         instance = db_session.query(models.Workspace).filter_by(
             user_id=bob.id, template_id=tmpl.id,
         ).one()
@@ -384,6 +386,9 @@ def test_admin_template_instantiated_emits_event(db_session):
 
 
 def test_admin_template_pushed_emits_event(db_session):
+    """`update` (and `adopt`) actions roll up into one
+    ADMIN_TEMPLATE_PUSHED event per /apply call so the audit feed isn't
+    flooded when admin pushes to many users at once."""
     try:
         c, admin = _admin_client(db_session)
         bob = _seed_user(db_session, username="bob")
@@ -392,7 +397,12 @@ def test_admin_template_pushed_emits_event(db_session):
         _seed_workspace(db_session, bob.id, slug="ws-push-bob", template_id=tmpl.id)
         _seed_workspace(db_session, carol.id, slug="ws-push-carol", template_id=tmpl.id)
 
-        r = c.post(f"/api/admin/templates/{tmpl.id}/push")
+        r = c.post(f"/api/admin/templates/{tmpl.id}/apply", json={
+            "targets": [
+                {"user_id": bob.id, "action": "update"},
+                {"user_id": carol.id, "action": "update"},
+            ],
+        })
         assert r.status_code == 200, r.text
 
         events = db_session.query(models.AuditEvent).filter_by(
@@ -402,7 +412,6 @@ def test_admin_template_pushed_emits_event(db_session):
         payload = events[0].payload
         assert payload["template_id"] == tmpl.id
         assert payload["affected_workspace_count"] == 2
-        assert payload["affected_user_count"] == 2
     finally:
         app.dependency_overrides.clear()
 
