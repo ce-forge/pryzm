@@ -470,6 +470,13 @@ async def analyze_data(
         assistant_message_id: Optional[str] = None
         tool_calls_acc: list[dict] = []
         referenced_docs: list[dict] | None = None
+        # Routing metadata captured from the upfront `route` typed event
+        # ai_engine emits right after the router picks. Surfaced into the
+        # audit payload so post-hoc prompt-tuning has full context — which
+        # model handled the turn, why that tier was picked, how many
+        # tools fired, did reasoning_mode kick in.
+        route_model: str | None = None
+        route_tier: str | None = None
 
         try:
             async for chunk in ai_engine.stream_chat(
@@ -508,6 +515,9 @@ async def analyze_data(
                         d = chunk.get("duration_s")
                         if isinstance(d, (int, float)):
                             reasoning_duration_s = float(d)
+                    elif ctype == "route":
+                        route_model = chunk.get("model")
+                        route_tier = chunk.get("tier")
                     yield json.dumps(chunk) + "\n"
                     continue
                 full_response += chunk
@@ -536,8 +546,9 @@ async def analyze_data(
                         assistant_message_id = ai_msg.id
 
                         usage_for_audit = _last_chat_metric_snapshot() or {}
-                        prompt_eval = int(usage_for_audit.get("prompt_eval_count") or 0)
-                        eval_count = int(usage_for_audit.get("eval_count") or 0)
+                        prompt_tokens = int(usage_for_audit.get("prompt_tokens") or 0)
+                        completion_tokens = int(usage_for_audit.get("completion_tokens") or 0)
+                        tool_names = sorted({tc.get("name") for tc in tool_calls_acc if tc.get("name")})
                         log_event(
                             save_db,
                             EventType.CHAT_MESSAGE_RECEIVED,
@@ -548,8 +559,26 @@ async def analyze_data(
                             resource_id=ai_msg.id,
                             payload={
                                 "content_preview": full_response[:200],
-                                "token_count": prompt_eval + eval_count,
-                                "model": usage_for_audit.get("model") or "",
+                                # Which model + tier the router picked. Captured
+                                # from the upfront `route` SSE event so it's
+                                # accurate even when the metric snapshot's
+                                # `model` field is empty (e.g. tool-only turns).
+                                "model": route_model or usage_for_audit.get("model") or "",
+                                "tier": route_tier or "",
+                                # Tools that actually fired this turn.
+                                "tools_used": tool_names,
+                                "tools_count": len(tool_calls_acc),
+                                # Reasoning visibility: surfaces whether the
+                                # model spent time thinking and how long.
+                                "reasoning": reasoning_duration_s is not None,
+                                "reasoning_duration_s": reasoning_duration_s,
+                                # Token + timing breakdown.
+                                "prompt_tokens": prompt_tokens,
+                                "completion_tokens": completion_tokens,
+                                "token_count": prompt_tokens + completion_tokens,
+                                "duration_ms": int(usage_for_audit.get("duration_ms") or 0),
+                                "ttft_ms": int(usage_for_audit.get("ttft_ms") or 0),
+                                "tokens_per_sec": float(usage_for_audit.get("tokens_per_sec") or 0.0),
                                 "finished_cleanly": True,
                             },
                         )
@@ -618,8 +647,12 @@ async def analyze_data(
                             resource_id=ai_msg.id,
                             payload={
                                 "content_preview": full_response[:200],
-                                "token_count": 0,
-                                "model": "",
+                                "model": route_model or "",
+                                "tier": route_tier or "",
+                                "tools_used": sorted({tc.get("name") for tc in tool_calls_acc if tc.get("name")}),
+                                "tools_count": len(tool_calls_acc),
+                                "reasoning": reasoning_duration_s is not None,
+                                "reasoning_duration_s": reasoning_duration_s,
                                 "finished_cleanly": False,
                                 "status": status,
                             },
