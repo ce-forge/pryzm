@@ -335,6 +335,12 @@ async def stream_chat(
     else:
         routed_model = router.small if tier is Tier.SMALL else router.large
 
+    # Only models tagged `reasoning` in the catalog have their
+    # `reasoning_content` surfaced to the UI. Small chat models emit
+    # short, low-signal chain-of-thought that adds noise on regular
+    # turns; gating here keeps the pill (and DB column) empty for them.
+    surface_reasoning = "reasoning" in router.catalog.get(routed_model, set())
+
     if memory_content:
         system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
 
@@ -588,7 +594,7 @@ async def stream_chat(
                 # panel; models without reasoning produce an empty string
                 # here and the block is a no-op.
                 reasoning = (message.get("reasoning_content") or "").strip()
-                if reasoning:
+                if reasoning and surface_reasoning:
                     reasoning_start = time.perf_counter()
                     reasoning_words = reasoning.split(" ")
                     for i, word in enumerate(reasoning_words):
