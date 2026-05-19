@@ -11,6 +11,7 @@ allowed_tools list as 'no restriction'.
 from fastapi import HTTPException
 
 from db import models
+from tools.registry import AVAILABLE_TOOLS
 
 
 def enforce_allowed_tools(
@@ -42,3 +43,13 @@ def filter_allowed_tools(
     kept = [t for t in requested if t in cap]
     dropped = [t for t in requested if t not in cap]
     return kept, dropped
+
+
+def validate_tool_names(names: list[str]) -> None:
+    """Raise 400 if any name isn't a known tool. Use at API boundary."""
+    unknown = [n for n in names if n not in AVAILABLE_TOOLS]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown tool name(s): {', '.join(unknown)}",
+        )

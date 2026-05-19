@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from core import cookie_auth
 from core.audit import EventType, log_event
+from core.tool_permissions import validate_tool_names
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -15,20 +16,9 @@ from services.workspaces import (
     get_by_slug,
     slugify_unique,
 )
-from tools.registry import AVAILABLE_TOOLS
 
 
 router = APIRouter(tags=["Workspaces"])
-
-
-def _validate_enabled_tools(names: List[str]) -> None:
-    """Reject names that aren't in the live tool registry."""
-    unknown = [n for n in names if n not in AVAILABLE_TOOLS]
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown tool name(s): {unknown}",
-        )
 
 
 def _to_response(workspace) -> WorkspaceResponse:
@@ -206,7 +196,7 @@ def update_workspace(
         ws.system_prompt = data["system_prompt"]
 
     if "enabled_tools" in data:
-        _validate_enabled_tools(data["enabled_tools"])
+        validate_tool_names(data["enabled_tools"])
         if list(ws.enabled_tools or []) != list(data["enabled_tools"]):
             previous_values["enabled_tools"] = list(ws.enabled_tools or [])
             new_values["enabled_tools"] = list(data["enabled_tools"])

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
 from core.audit import EventType, log_event
+from core.tool_permissions import validate_tool_names
 from db import database, models
 from schemas import AdminUserCreate, AdminUserUpdate, AdminPasswordReset
 
@@ -25,6 +26,7 @@ def _user_dict(u: models.User) -> dict:
         "is_admin": u.is_admin,
         "is_active": u.is_active,
         "can_create_workspaces": u.can_create_workspaces,
+        "allowed_tools": list(u.allowed_tools or []),
         "created_at": u.created_at.isoformat() if u.created_at else None,
         "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
     }
@@ -57,12 +59,15 @@ def create_user(
     if len(payload.password) < 4:
         raise HTTPException(status_code=400, detail="Password must be at least 4 characters.")
 
+    validate_tool_names(payload.allowed_tools)
+
     user = models.User(
         username=payload.username,
         password_hash=cookie_auth.hash_password(payload.password),
         email=payload.email,
         is_admin=payload.is_admin,
         can_create_workspaces=payload.can_create_workspaces,
+        allowed_tools=list(payload.allowed_tools),
         is_active=True,
         # Admin chose the password; the new user must pick their own on
         # first login, same gate the bootstrap admin goes through.
@@ -147,8 +152,11 @@ def update_user(
     old_is_active = u.is_active
     old_is_admin = u.is_admin
 
+    if "allowed_tools" in changes and changes["allowed_tools"] is not None:
+        validate_tool_names(changes["allowed_tools"])
+
     changed_fields = []
-    for field in ("email", "is_admin", "is_active", "can_create_workspaces"):
+    for field in ("email", "is_admin", "is_active", "can_create_workspaces", "allowed_tools"):
         if hasattr(payload, field) and getattr(payload, field, None) is not None and getattr(u, field) != getattr(payload, field):
             changed_fields.append(field)
 
