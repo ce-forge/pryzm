@@ -405,3 +405,83 @@ async def model_status(model_id: str) -> StreamingResponse:
             yield json.dumps({"status": "error", "id": model_id, "detail": "load timed out"}) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
+# ---------------------------------------------------------------------------
+# HuggingFace search proxy
+#
+# Admins shouldn't need to leave the dashboard to find a GGUF to add. These
+# two endpoints proxy the public HF API: search returns matching repos with
+# the `gguf` library filter; files returns the GGUF blobs in a specific repo
+# so the admin can pick a quant. The backend's IP is what gets rate-limited
+# (not every admin's browser), and routing through here means HF auth could
+# be added centrally later if private repos ever matter.
+# ---------------------------------------------------------------------------
+
+_HF_API_BASE = "https://huggingface.co/api"
+_HF_TIMEOUT = httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)
+
+
+@router.get("/hf-search")
+async def hf_search(q: str, limit: int = 20) -> list[dict]:
+    """Search HuggingFace for GGUF repos matching `q`."""
+    q = (q or "").strip()
+    if not q:
+        return []
+    limit = max(1, min(limit, 50))
+    params = {
+        "search": q,
+        "filter": "gguf",
+        "limit": str(limit),
+        "sort": "downloads",
+        "direction": "-1",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=_HF_TIMEOUT) as client:
+            r = await client.get(f"{_HF_API_BASE}/models", params=params)
+            r.raise_for_status()
+            body = r.json()
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"HuggingFace search failed: {e}")
+    return [
+        {
+            "id": m.get("id") or m.get("modelId"),
+            "downloads": m.get("downloads", 0),
+            "likes": m.get("likes", 0),
+            "tags": list(m.get("tags") or []),
+            "last_modified": m.get("lastModified"),
+        }
+        for m in body
+        if (m.get("id") or m.get("modelId"))
+    ]
+
+
+@router.get("/hf-files")
+async def hf_files(repo: str) -> list[dict]:
+    """List GGUF files in a HuggingFace repo so the admin can pick a quant."""
+    repo = (repo or "").strip()
+    if not repo or "/" not in repo:
+        raise HTTPException(status_code=400, detail="repo must look like 'org/name'")
+    try:
+        async with httpx.AsyncClient(timeout=_HF_TIMEOUT) as client:
+            r = await client.get(f"{_HF_API_BASE}/models/{repo}/tree/main")
+            if r.status_code == 404:
+                raise HTTPException(status_code=404, detail=f"repo not found: {repo}")
+            r.raise_for_status()
+            body = r.json()
+    except HTTPException:
+        raise
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"HuggingFace tree fetch failed: {e}")
+    files = [
+        {
+            "path": entry.get("path"),
+            "size": entry.get("size", 0),
+        }
+        for entry in body
+        if entry.get("type") == "file"
+        and isinstance(entry.get("path"), str)
+        and entry["path"].lower().endswith(".gguf")
+    ]
+    files.sort(key=lambda f: f["path"])
+    return files

@@ -1,6 +1,7 @@
 "use client";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
+import { HuggingFaceSearch } from "@/components/admin/system/HuggingFaceSearch";
 
 type Model = {
   id: string;
@@ -22,6 +23,8 @@ export default function ModelsSection() {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [prefillId, setPrefillId] = useState("");
+  const [prefillRepo, setPrefillRepo] = useState("");
   const [downloadId, setDownloadId] = useState<string | null>(null);
   const [downloadLog, setDownloadLog] = useState<string[]>([]);
   const [downloadStatus, setDownloadStatus] = useState<"streaming" | "loaded" | "error">("streaming");
@@ -159,7 +162,21 @@ export default function ModelsSection() {
       )}
 
       {showAddForm && (
-        <AddModelForm onAdded={handleAdded} onError={setError} />
+        <>
+          <HuggingFaceSearch
+            onPick={({ id, repo }) => {
+              setPrefillId(id);
+              setPrefillRepo(repo);
+            }}
+          />
+          <AddModelForm
+            key={`${prefillId}:${prefillRepo}`}
+            initialId={prefillId}
+            initialRepo={prefillRepo}
+            onAdded={handleAdded}
+            onError={setError}
+          />
+        </>
       )}
 
       {downloadId && (
@@ -279,9 +296,19 @@ function DownloadLogPane({
   );
 }
 
-function AddModelForm({ onAdded, onError }: { onAdded: (id: string) => void; onError: (msg: string) => void }) {
-  const [id, setId] = useState("");
-  const [repo, setRepo] = useState("");
+function AddModelForm({
+  initialId = "",
+  initialRepo = "",
+  onAdded,
+  onError,
+}: {
+  initialId?: string;
+  initialRepo?: string;
+  onAdded: (id: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const [id, setId] = useState(initialId);
+  const [repo, setRepo] = useState(initialRepo);
   const [ngl, setNgl] = useState(99);
   const [ctxSize, setCtxSize] = useState(8192);
   const [group, setGroup] = useState<"chat" | "always-on">("chat");
