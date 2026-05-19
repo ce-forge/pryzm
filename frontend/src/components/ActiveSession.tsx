@@ -14,7 +14,6 @@ import ChatInput from "./ChatInput";
 import ChatHeader from "./ChatHeader";
 import QuickActions from "./QuickActions";
 import ProcessingAnimation from "./ProcessingAnimation";
-import ThinkingPanel from "./ThinkingPanel";
 import SearchBar from "./SearchBar";
 import ChatTimestamp from "./ChatTimestamp";
 import ChatBubble from "./ChatBubble";
@@ -218,14 +217,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
           })}
 
           {currentIsProcessing && messages.length > 0 && !myStreamingText && (
-            <>
-              <ProcessingAnimation
-                label={myStreamingReasoning ? "focusing…" : "reflecting…"}
-              />
-              {myStreamingReasoning && (
-                <ThinkingPanel reasoning={myStreamingReasoning} variant="live" />
-              )}
-            </>
+            <ProcessingAnimation
+              label={myStreamingReasoning ? "focusing…" : "reflecting…"}
+              reasoning={myStreamingReasoning}
+            />
           )}
         </div>
       </div>
