@@ -261,6 +261,34 @@ export default function ModelsSection() {
   );
 }
 
+/**
+ * Scan the log buffer (newest line first) for a download progress percentage.
+ * Returns 0-100 or null if no progress signal is in the recent lines.
+ *
+ * Patterns the HF downloader / curl emit:
+ *   "XX%|███...| Y.YGB/Z.ZGB"   (tqdm-style)
+ *   "  XX%  ... downloading ..." (curl with --progress-bar variants)
+ *   "<file>: XX%"               (some llama-server builds)
+ *
+ * Conservative: match a `\d+%` only when it's clearly a download line —
+ * "downloading", "download", or accompanied by byte sizes.
+ */
+function extractDownloadProgress(log: string[]): number | null {
+  for (let i = log.length - 1; i >= 0 && i >= log.length - 50; i--) {
+    const line = log[i];
+    const looksLikeDownload =
+      /downloading|download/i.test(line) ||
+      /\d+(?:\.\d+)?\s*[KMG]i?B\s*\/\s*\d+(?:\.\d+)?\s*[KMG]i?B/.test(line);
+    if (!looksLikeDownload) continue;
+    const pctMatch = line.match(/(\d{1,3}(?:\.\d+)?)\s*%/);
+    if (pctMatch) {
+      const pct = parseFloat(pctMatch[1]);
+      if (pct >= 0 && pct <= 100) return pct;
+    }
+  }
+  return null;
+}
+
 function DownloadLogPane({
   id, log, status, error, onClose, logEndRef,
 }: {
@@ -271,6 +299,7 @@ function DownloadLogPane({
   onClose: () => void;
   logEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  const progress = status === "streaming" ? extractDownloadProgress(log) : null;
   return (
     <div className="mb-3 bg-[#0e0e0f] border border-[#333537] rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-[#131314] border-b border-[#333537]">
@@ -283,6 +312,20 @@ function DownloadLogPane({
           {status === "streaming" ? "Stop watching" : "Close"}
         </button>
       </div>
+      {progress !== null && (
+        <div className="px-3 py-2 bg-[#131314] border-b border-[#333537]">
+          <div className="flex items-center justify-between mb-1 text-[11px] text-gray-400 font-mono">
+            <span>Download progress</span>
+            <span>{progress.toFixed(progress >= 10 ? 0 : 1)}%</span>
+          </div>
+          <div className="h-1.5 rounded bg-[#2a2a2c] overflow-hidden">
+            <div
+              className="h-full bg-blue-500 transition-all duration-300"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      )}
       <div className="px-3 py-2 max-h-48 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-5 text-gray-400">
         {log.length === 0 && status === "streaming" && (
           <div className="text-gray-600">Waiting for llama-swap output…</div>

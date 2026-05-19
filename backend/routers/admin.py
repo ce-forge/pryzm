@@ -385,11 +385,14 @@ async def model_status(model_id: str) -> StreamingResponse:
                         if evt.get("type") != "logData":
                             continue
                         log_chunk = evt.get("data", "")
-                        # Forward log lines that mention the model id. Errs on
-                        # the side of inclusion — devs prefer too much output
-                        # to too little when watching a download.
+                        # Forward every log line during the watch window.
+                        # The previous substring filter on model_id missed the
+                        # HF downloader's progress lines (they contain the
+                        # filename, not the model id), leaving the pane empty
+                        # during downloads. The window is scoped to one admin
+                        # action so cross-model noise is rare.
                         for log_line in log_chunk.splitlines():
-                            if model_id in log_line:
+                            if log_line.strip():
                                 yield json.dumps({"log": log_line}) + "\n"
                         if time.monotonic() > deadline:
                             break
