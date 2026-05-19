@@ -54,7 +54,7 @@ export default function ThinkingPanel({
       >
         <span
           className={[
-            "inline-block text-[10px] leading-none text-gray-500 transition-transform duration-150",
+            "inline-block text-base leading-none text-gray-500 transition-transform duration-150",
             open ? "rotate-90" : "",
           ].join(" ")}
         >
@@ -69,28 +69,27 @@ export default function ThinkingPanel({
           <span className="font-medium">{labelText}</span>
         )}
         <style>{`
-          /* Soft shimmer — single white highlight band slides through a
-             grey field. No chromatic split, no fast cycle. 3.2s feels
-             considered. The prism mark's breathe carries the rest of
-             the 'alive' signal. */
+          /* Single white highlight band over a grey field, matching the
+             ProcessingAnimation's original 5s cycle so the pill and the
+             non-reasoning indicator feel like the same artefact. */
           .thinking-shimmer {
             background-image: linear-gradient(
               90deg,
-              rgba(156, 163, 175, 1) 0%,
-              rgba(156, 163, 175, 1) 44%,
-              rgba(243, 244, 246, 1) 50%,
-              rgba(156, 163, 175, 1) 56%,
-              rgba(156, 163, 175, 1) 100%
+              #4b5563 0%,
+              #4b5563 40%,
+              #ffffff 50%,
+              #4b5563 60%,
+              #4b5563 100%
             );
-            background-size: 240% 100%;
+            background-size: 200% 100%;
             -webkit-background-clip: text;
             background-clip: text;
             color: transparent;
-            animation: shimmerSweep 3.2s linear infinite;
+            animation: shimmerSweep 5s linear infinite;
           }
           @keyframes shimmerSweep {
-            0% { background-position: 240% 0; }
-            100% { background-position: -140% 0; }
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
           }
         `}</style>
       </button>

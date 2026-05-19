@@ -30,7 +30,7 @@ export default function ProcessingAnimation() {
           backgroundSize: '200% 100%',
           WebkitBackgroundClip: 'text',
           color: 'transparent',
-          animation: 'textShimmer 4s infinite linear'
+          animation: 'textShimmer 5s infinite linear'
         }}
       >
         {phrase}
