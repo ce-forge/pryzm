@@ -377,3 +377,62 @@ class TestPatchWorkspacesClamp:
             assert "execute_ping" in r.json()["detail"]
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/templates/{id}/instantiate clamp
+# ---------------------------------------------------------------------------
+
+class TestInstantiateClamp:
+    def _make_template(self, db_session, slug, enabled_tools):
+        t = models.WorkspaceTemplate(
+            slug=slug,
+            display_name=slug,
+            system_prompt="",
+            enabled_tools=enabled_tools,
+            engine_config={"backend": "llama_cpp"},
+        )
+        db_session.add(t); db_session.commit(); db_session.refresh(t)
+        return t
+
+    def test_instantiate_succeeds_when_template_within_cap(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            target = _seed_user(db_session, "alice", allowed_tools=["web_search"])
+            t = self._make_template(db_session, "t1", ["web_search"])
+            r = c.post(f"/api/admin/templates/{t.id}/instantiate",
+                json={"user_id": target.id, "owner_can_edit": False})
+            assert r.status_code == 200, r.text
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_instantiate_fails_when_template_exceeds_cap(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            target = _seed_user(db_session, "bob", allowed_tools=["web_search"])
+            t = self._make_template(db_session, "t2", ["web_search", "execute_ping"])
+            r = c.post(f"/api/admin/templates/{t.id}/instantiate",
+                json={"user_id": target.id, "owner_can_edit": False})
+            assert r.status_code == 400
+            assert "execute_ping" in r.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_instantiate_for_admin_user_bypasses_cap(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            # Target user is also an admin → bypass
+            target = models.User(
+                username="carol",
+                password_hash=cookie_auth.hash_password("carol-pw-12chars"),
+                is_admin=True,
+                is_active=True,
+                allowed_tools=["web_search"],
+            )
+            db_session.add(target); db_session.commit(); db_session.refresh(target)
+            t = self._make_template(db_session, "t3", ["web_search", "execute_ping"])
+            r = c.post(f"/api/admin/templates/{t.id}/instantiate",
+                json={"user_id": target.id, "owner_can_edit": False})
+            assert r.status_code == 200, r.text
+        finally:
+            app.dependency_overrides.clear()

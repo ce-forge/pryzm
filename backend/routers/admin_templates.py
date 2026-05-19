@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
 from core.audit import EventType, log_event
+from core.tool_permissions import enforce_allowed_tools
 from db import database, models
 from schemas import AdminTemplateCreate, AdminTemplateUpdate, AdminTemplateInstantiate
 
@@ -153,6 +154,7 @@ def instantiate_template(
             status_code=409,
             detail="User already has a workspace from this template. Delete the existing one first to re-instantiate.",
         )
+    enforce_allowed_tools(user, list(t.enabled_tools or []))
     instance = models.Workspace(
         slug=payload.slug or t.slug,
         display_name=t.display_name,
