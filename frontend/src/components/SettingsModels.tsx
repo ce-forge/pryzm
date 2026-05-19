@@ -261,6 +261,32 @@ export default function ModelsSection() {
   );
 }
 
+/**
+ * Detect which load phase llama-server is in by scanning the tail of the log.
+ * Returns a short human-readable label. llama-server's HF downloader in the
+ * current build is silent (no percentage lines), so we use phase markers as
+ * the user-visible signal instead.
+ */
+function detectPhase(log: string[]): string {
+  // Walk newest → oldest looking for the latest phase marker we recognise.
+  for (let i = log.length - 1; i >= 0 && i >= log.length - 200; i--) {
+    const line = log[i];
+    if (/server is listening|model loaded|Health check passed/i.test(line))
+      return "Finalizing";
+    if (/warming up the model|common_init_from_params/.test(line))
+      return "Warming up";
+    if (/llama_kv_cache|sched_reserve|llama_context: constructing/.test(line))
+      return "Initializing context";
+    if (/load_tensors:|llama_model_loader:|print_info:/.test(line))
+      return "Loading tensors";
+    if (/main: loading model|loading model from/.test(line))
+      return "Reading model file";
+    if (/common_download_file|downloading from|get_hf_plan/i.test(line))
+      return "Fetching from HuggingFace";
+  }
+  return "Preparing";
+}
+
 function DownloadLogPane({
   id, log, status, error, onClose, logEndRef,
 }: {
@@ -271,11 +297,12 @@ function DownloadLogPane({
   onClose: () => void;
   logEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
+  const phase = status === "streaming" ? detectPhase(log) : null;
   return (
     <div className="mb-3 bg-[#0e0e0f] border border-[#333537] rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-[#131314] border-b border-[#333537]">
         <div className="text-xs text-gray-300">
-          {status === "streaming" && <>Downloading <span className="font-mono text-emerald-400">{id}</span>…</>}
+          {status === "streaming" && <>Loading <span className="font-mono text-emerald-400">{id}</span>…</>}
           {status === "loaded" && <>Loaded <span className="font-mono text-emerald-400">{id}</span> ✓</>}
           {status === "error" && <>Error loading <span className="font-mono text-red-400">{id}</span>: {error}</>}
         </div>
@@ -284,8 +311,14 @@ function DownloadLogPane({
         </button>
       </div>
       {status === "streaming" && (
-        <div className="h-1 bg-[#2a2a2c] overflow-hidden">
-          <div className="indeterminate-bar h-full bg-blue-500" />
+        <div className="px-3 py-2 bg-[#131314] border-b border-[#333537]">
+          <div className="flex items-center justify-between mb-1.5 text-[11px]">
+            <span className="text-gray-300">{phase}…</span>
+            <span className="text-gray-500">{log.length} log line{log.length === 1 ? "" : "s"}</span>
+          </div>
+          <div className="h-2 rounded bg-[#2a2a2c] overflow-hidden">
+            <div className="indeterminate-bar h-full bg-blue-500" />
+          </div>
         </div>
       )}
       <div className="px-3 py-2 max-h-48 overflow-y-auto custom-scrollbar font-mono text-[11px] leading-5 text-gray-400">
