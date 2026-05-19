@@ -43,10 +43,12 @@ services:
     container_name: pryzm_llama_swap
     ports:
       - "127.0.0.1:8080:8080"
-    # Run as the host user so files written to the bind-mounted cache stay
-    # readable by the backend (which polls the partial blob to compute
-    # download progress). Falls back to 1000:1000 if UID/GID aren't set.
-    user: "${UID:-1000}:${GID:-1000}"
+    # Container runs as root (image default). llama-server needs to create
+    # /root/.cache/llama.cpp/ for its own scratch cache; non-root users can't
+    # write under /root/ in the image. Files it writes into the bind-mounted
+    # cache below come out root-owned on the host, but umask 022 keeps them
+    # world-readable — the backend (running as the host user) only needs to
+    # stat() partial blob sizes for the progress feed, not write the cache.
     volumes:
       - ./infra/llama-swap-config.yaml:/app/config.yaml:ro
       # Bind-mounted (was: named volume `llama_models`). The host directory
