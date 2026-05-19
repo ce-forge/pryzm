@@ -16,6 +16,21 @@ export interface InferenceApi {
    * frozen reasoning from the persisted Message row.
    */
   streamingReasoning: Record<string, string>;
+  /**
+   * Per-session flag set by the backend's `route` SSE event right after
+   * the router picks. `true` means the routed model carries the
+   * `reasoning` catalog tag and the ProcessingAnimation should render
+   * `Thinking…` instead of the themed phrase pool. Cleared at end-of-turn.
+   */
+  streamingIsReasoning: Record<string, boolean>;
+  /**
+   * Per-session reasoning duration captured the moment the backend's
+   * `reasoning_done` event lands — fires BEFORE content streams. This
+   * is what the ThinkingPanel uses to flip from `Thinking…` (active) to
+   * `Thought for X.Xs` (done) without waiting for the whole turn to
+   * finish.  Null until reasoning_done arrives.
+   */
+  streamingReasoningDurationS: Record<string, number | null>;
   streamingToolCalls: Record<string, ToolCall[]>;
   sendMessage: (
     text: string,
@@ -42,6 +57,8 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
   const [isProcessing, setIsProcessing] = useState(false);
   const [streamingContent, setStreamingContent] = useState<Record<string, string>>({});
   const [streamingReasoning, setStreamingReasoning] = useState<Record<string, string>>({});
+  const [streamingIsReasoning, setStreamingIsReasoning] = useState<Record<string, boolean>>({});
+  const [streamingReasoningDurationS, setStreamingReasoningDurationS] = useState<Record<string, number | null>>({});
   const [streamingToolCalls, setStreamingToolCalls] = useState<Record<string, ToolCall[]>>({});
 
   // Mirror isProcessing into a ref so sendMessage can early-return on a
@@ -87,6 +104,8 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
       setStreamingContent((prev) => ({ ...prev, [optimisticId]: "" }));
       setStreamingReasoning((prev) => ({ ...prev, [optimisticId]: "" }));
+      setStreamingIsReasoning((prev) => ({ ...prev, [optimisticId]: false }));
+      setStreamingReasoningDurationS((prev) => ({ ...prev, [optimisticId]: null }));
 
       let fullAssistantMessage = "";
       let fullReasoning = "";
@@ -217,6 +236,14 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                     ...prev,
                     [newDbId]: prev[optimisticId] ?? "",
                   }));
+                  setStreamingIsReasoning((prev) => ({
+                    ...prev,
+                    [newDbId]: prev[optimisticId] ?? false,
+                  }));
+                  setStreamingReasoningDurationS((prev) => ({
+                    ...prev,
+                    [newDbId]: prev[optimisticId] ?? null,
+                  }));
 
                   linkSessionRef.current?.(optimisticId, newDbId);
 
@@ -290,6 +317,24 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
                 if (parsed.type === "reasoning_done" && typeof parsed.duration_s === "number") {
                   reasoningDurationS = parsed.duration_s;
+                  const d = parsed.duration_s as number;
+                  setStreamingReasoningDurationS((prev) => {
+                    const next = { ...prev, [optimisticId]: d };
+                    if (realDbId !== null) next[realDbId] = d;
+                    return next;
+                  });
+                }
+
+                // Backend emits this right after the router picks. Sets
+                // the per-session is_reasoning flag so the
+                // ProcessingAnimation can show `Thinking…` from the very
+                // first paint, before any reasoning chunks arrive.
+                if (parsed.type === "route" && typeof parsed.is_reasoning === "boolean") {
+                  setStreamingIsReasoning((prev) => {
+                    const next = { ...prev, [optimisticId]: parsed.is_reasoning };
+                    if (realDbId !== null) next[realDbId] = parsed.is_reasoning;
+                    return next;
+                  });
                 }
               } catch {
                 /* malformed line, skip */
@@ -337,6 +382,20 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
           return next;
         });
 
+        setStreamingIsReasoning((prev) => {
+          const next = { ...prev };
+          delete next[optimisticId];
+          if (realDbId !== null) delete next[realDbId];
+          return next;
+        });
+
+        setStreamingReasoningDurationS((prev) => {
+          const next = { ...prev };
+          delete next[optimisticId];
+          if (realDbId !== null) delete next[realDbId];
+          return next;
+        });
+
         setStreamingToolCalls((prev) => {
           const next = { ...prev };
           delete next[optimisticId];
@@ -377,6 +436,8 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
     isProcessing,
     streamingContent,
     streamingReasoning,
+    streamingIsReasoning,
+    streamingReasoningDurationS,
     streamingToolCalls,
     sendMessage,
     stopInference,

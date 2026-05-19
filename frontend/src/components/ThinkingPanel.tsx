@@ -1,47 +1,107 @@
 "use client";
 
 import React, { useState } from "react";
+import PrismIndicator from "./PrismIndicator";
 
 interface ThinkingPanelProps {
-  /** Reasoning_content text. Empty/null renders nothing. */
+  /** Reasoning_content accumulated so far. Empty/null is valid while a
+   *  reasoning turn is mid-stream — the pill still renders. */
   reasoning: string | null | undefined;
   /**
-   * Wall-clock duration of the reasoning phase, in seconds. Shown next to
-   * the disclosure label on the finished variant. Live variant ignores it.
+   * Wall-clock duration of the reasoning phase, in seconds. Sources:
+   *   - Live: useInference's streamingReasoningDurationS, set the moment
+   *     the backend's `reasoning_done` SSE event lands (before content).
+   *   - Persisted: the message row.
+   * Presence of a duration flips the pill from `Thinking` to
+   * `Thought for X.Xs` — the global stream-finished flag isn't enough.
    */
   durationSeconds?: number | null;
-  /**
-   * `live` sits beside the running ProcessingAnimation pill while the
-   * model is still reasoning. `finished` sits above the assistant message
-   * once persistence completes. Both default to collapsed.
-   */
-  variant?: "live" | "finished";
+  /** True while the assistant turn is still streaming; combined with
+   *  empty reasoning, used to render the pre-thinking pill. */
+  isStreaming?: boolean;
 }
 
 export default function ThinkingPanel({
   reasoning,
   durationSeconds,
-  variant = "finished",
+  isStreaming = false,
 }: ThinkingPanelProps) {
   const [open, setOpen] = useState(false);
 
-  if (!reasoning) return null;
+  // Render conditions: existing reasoning text (live or frozen), OR a
+  // streaming reasoning turn whose thinking hasn't started yet.
+  if (!reasoning && !isStreaming) return null;
 
-  const showDuration = variant === "finished" && durationSeconds != null;
+  // Duration's existence flips the visual — not the global isStreaming
+  // flag. reasoning_done fires the instant </think> lands, before any
+  // content streams, and the pill should respect that boundary.
+  const isThinking = durationSeconds == null;
+  const labelText = isThinking ? "Thinking" : `Thought for ${durationSeconds}s`;
 
   return (
-    <div className={variant === "live" ? "mt-2 pl-4" : "mt-1 mb-2 pl-1"}>
+    <div className="mt-1 mb-2 max-w-3xl">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-[13px] text-gray-400 hover:text-gray-200 transition-colors"
+        className={[
+          "group inline-flex items-center gap-2 px-2.5 py-1",
+          "rounded-md border border-[#2a2a2c] bg-[#161617]/50",
+          "hover:border-[#3f3f42] hover:bg-[#1c1c1d]",
+          "text-[12px] tracking-[0.01em] text-gray-400 hover:text-gray-200",
+          "transition-colors",
+        ].join(" ")}
+        aria-expanded={open}
       >
-        <span className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}>▸</span>
-        <span>Thinking{showDuration ? ` (${durationSeconds}s)` : ""}</span>
+        <span
+          className={[
+            "inline-block text-base leading-none text-gray-500 transition-transform duration-150",
+            open ? "rotate-90" : "",
+          ].join(" ")}
+        >
+          ›
+        </span>
+        {isThinking ? (
+          <>
+            <span className="font-medium thinking-shimmer">{labelText}</span>
+            <PrismIndicator size="pill" />
+          </>
+        ) : (
+          <span className="font-medium">{labelText}</span>
+        )}
+        <style>{`
+          /* Single white highlight band over a grey field, matching the
+             ProcessingAnimation's original 5s cycle so the pill and the
+             non-reasoning indicator feel like the same artefact. */
+          .thinking-shimmer {
+            background-image: linear-gradient(
+              90deg,
+              #4b5563 0%,
+              #4b5563 40%,
+              #ffffff 50%,
+              #4b5563 60%,
+              #4b5563 100%
+            );
+            background-size: 200% 100%;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            animation: shimmerSweep 5s linear infinite;
+          }
+          @keyframes shimmerSweep {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+          }
+        `}</style>
       </button>
       {open && (
-        <div className="mt-2 px-3 py-2 rounded-lg border border-[#333537] bg-[#1a1b1c] text-[12px] text-gray-400 leading-relaxed whitespace-pre-wrap">
-          {reasoning}
+        <div
+          className={[
+            "mt-2 px-3 py-2 rounded-md border border-[#2a2a2c]",
+            "bg-[#161617]/50 text-[12px] text-gray-400 leading-relaxed",
+            "whitespace-pre-wrap",
+          ].join(" ")}
+        >
+          {reasoning || (isThinking ? "…" : "")}
         </div>
       )}
     </div>

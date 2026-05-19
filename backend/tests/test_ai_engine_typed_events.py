@@ -2,12 +2,59 @@
 text-emitted format_tool_execution / format_code_block markdown."""
 from unittest.mock import AsyncMock, MagicMock, patch
 import asyncio
+import json
 import pytest
 
 from core.ai_engine import stream_chat
 from core.llm_router import Tier
 from tools.registry import ResolvedToolSet
 from db import models
+
+
+def _message_to_deltas(message: dict, finish_reason: str | None = None):
+    """Convert a full message dict (Ollama shape — `{content, reasoning_content,
+    tool_calls}`) into the SSE delta sequence llama-server emits in streaming
+    mode. See docs/internal/2026-05-20-llama-server-sse-shape.md. The loop's
+    chat_stream consumer is what these tests exercise; the dict-shape mock
+    pre-dated streaming."""
+    # Role marker — always first.
+    yield {"role": "assistant", "content": None}
+
+    reasoning = message.get("reasoning_content")
+    if reasoning:
+        yield {"reasoning_content": reasoning}
+
+    content = message.get("content")
+    if content:
+        yield {"content": content}
+
+    tool_calls = message.get("tool_calls") or []
+    if tool_calls:
+        finish_reason = finish_reason or "tool_calls"
+        for tc in tool_calls:
+            args = tc["function"].get("arguments", {})
+            if isinstance(args, dict):
+                args = json.dumps(args)
+            yield {"tool_calls": [{
+                "index": 0,
+                "id": tc.get("id", "test-call-id"),
+                "type": "function",
+                "function": {
+                    "name": tc["function"]["name"],
+                    "arguments": args,
+                },
+            }]}
+
+    yield {"finish_reason": finish_reason or "stop"}
+
+
+def _async_iter_from_message(message: dict):
+    """Build the async-generator chat_stream() returns, sourced from one
+    full message. Use this to convert pre-streaming mock responses."""
+    async def _gen(*_args, **_kwargs):
+        for delta in _message_to_deltas(message):
+            yield delta
+    return _gen
 
 
 @pytest.mark.asyncio
@@ -31,12 +78,16 @@ async def test_tool_execution_yields_typed_events():
 
     # Two-step LLM behaviour: first call returns a tool_call, second call returns plain content.
     responses = iter([
-        {"message": {"tool_calls": [{"function": {"name": "_probe_typed_event_tool", "arguments": {"query": "foo"}}}]}},
-        {"message": {"content": "Done."}},
+        {"tool_calls": [{"function": {"name": "_probe_typed_event_tool", "arguments": {"query": "foo"}}}]},
+        {"content": "Done."},
     ])
 
-    async def fake_chat(*_args, **_kwargs):
-        return next(responses)
+    def fake_chat_stream(*_args, **_kwargs):
+        msg = next(responses)
+        async def _gen():
+            for delta in _message_to_deltas(msg):
+                yield delta
+        return _gen()
 
     mock_workspace = models.Workspace(
         id="ws-test", slug="it_copilot", display_name="IT Copilot",
@@ -50,7 +101,7 @@ async def test_tool_execution_yields_typed_events():
     mock_router.pick.return_value = ("small-model", Tier.SMALL, "test")
 
     yields: list = []
-    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+    with patch("core.ai_engine.llm_server.chat_stream", new=fake_chat_stream), \
          patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
          patch("core.ai_engine.get_router", return_value=mock_router):
         mock_db = mock_db_local.return_value
@@ -114,11 +165,16 @@ async def test_live_loop_tool_message_has_tool_call_id():
 
     captured_messages: list = []
 
-    async def fake_chat(client, messages, *args, **kwargs):
+    def fake_chat_stream(client, messages, *args, **kwargs):
         captured_messages.append([dict(m) for m in messages])
         if len(captured_messages) == 1:
-            return {"message": {"role": "assistant", "content": "", "tool_calls": [fake_tool_call]}}
-        return {"message": {"role": "assistant", "content": "done"}}
+            msg = {"role": "assistant", "content": "", "tool_calls": [fake_tool_call]}
+        else:
+            msg = {"role": "assistant", "content": "done"}
+        async def _gen():
+            for delta in _message_to_deltas(msg):
+                yield delta
+        return _gen()
 
     mock_workspace = models.Workspace(
         id="ws-test", slug="it_copilot", display_name="IT Copilot",
@@ -131,7 +187,7 @@ async def test_live_loop_tool_message_has_tool_call_id():
     mock_router.large = "large-model"
     mock_router.pick.return_value = ("small-model", Tier.SMALL, "test")
 
-    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+    with patch("core.ai_engine.llm_server.chat_stream", new=fake_chat_stream), \
          patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
          patch("core.ai_engine.get_router", return_value=mock_router):
         mock_db = mock_db_local.return_value
@@ -162,14 +218,11 @@ async def test_reasoning_content_yields_typed_events():
     BEFORE any content words, and emits a {type: reasoning_done} terminator
     with a duration_s. Models without reasoning_content produce neither event."""
 
-    async def fake_chat(*_args, **_kwargs):
-        return {
-            "message": {
-                "role": "assistant",
-                "content": "The answer is forty-two.",
-                "reasoning_content": "Step one: consider the question. Step two: answer it.",
-            }
-        }
+    fake_chat_stream = _async_iter_from_message({
+        "role": "assistant",
+        "content": "The answer is forty-two.",
+        "reasoning_content": "Step one: consider the question. Step two: answer it.",
+    })
 
     mock_workspace = models.Workspace(
         id="ws-test", slug="it_copilot", display_name="IT Copilot",
@@ -186,7 +239,7 @@ async def test_reasoning_content_yields_typed_events():
     tool_set = ResolvedToolSet(callables={}, definitions=[], per_tool_config={})
 
     yields: list = []
-    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+    with patch("core.ai_engine.llm_server.chat_stream", new=fake_chat_stream), \
          patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
          patch("core.ai_engine.get_router", return_value=mock_router):
         mock_db = mock_db_local.return_value
@@ -230,8 +283,9 @@ async def test_absent_reasoning_content_emits_nothing_extra():
     NOT emit reasoning_chunk or reasoning_done events. Older / non-thinking
     models flow through unchanged."""
 
-    async def fake_chat(*_args, **_kwargs):
-        return {"message": {"role": "assistant", "content": "Plain answer."}}
+    fake_chat_stream = _async_iter_from_message(
+        {"role": "assistant", "content": "Plain answer."}
+    )
 
     mock_workspace = models.Workspace(
         id="ws-test", slug="it_copilot", display_name="IT Copilot",
@@ -247,7 +301,7 @@ async def test_absent_reasoning_content_emits_nothing_extra():
     tool_set = ResolvedToolSet(callables={}, definitions=[], per_tool_config={})
 
     yields: list = []
-    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+    with patch("core.ai_engine.llm_server.chat_stream", new=fake_chat_stream), \
          patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
          patch("core.ai_engine.get_router", return_value=mock_router):
         mock_db = mock_db_local.return_value
@@ -278,14 +332,11 @@ async def test_reasoning_content_suppressed_for_unreasoning_models():
     low-signal CoT that adds noise on regular turns. Gating happens at the
     backend so DB rows stay empty too."""
 
-    async def fake_chat(*_args, **_kwargs):
-        return {
-            "message": {
-                "role": "assistant",
-                "content": "Plain answer.",
-                "reasoning_content": "Thinking Process: 1. Read. 2. Respond.",
-            }
-        }
+    fake_chat_stream = _async_iter_from_message({
+        "role": "assistant",
+        "content": "Plain answer.",
+        "reasoning_content": "Thinking Process: 1. Read. 2. Respond.",
+    })
 
     mock_workspace = models.Workspace(
         id="ws-test", slug="it_copilot", display_name="IT Copilot",
@@ -303,7 +354,7 @@ async def test_reasoning_content_suppressed_for_unreasoning_models():
     tool_set = ResolvedToolSet(callables={}, definitions=[], per_tool_config={})
 
     yields: list = []
-    with patch("core.ai_engine.llm_server.chat", new=fake_chat), \
+    with patch("core.ai_engine.llm_server.chat_stream", new=fake_chat_stream), \
          patch("core.ai_engine.database.SessionLocal") as mock_db_local, \
          patch("core.ai_engine.get_router", return_value=mock_router):
         mock_db = mock_db_local.return_value

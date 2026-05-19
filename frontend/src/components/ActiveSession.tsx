@@ -41,6 +41,11 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const activeSessionKey = session.currentSession || "temp_new_chat";
   const myStreamingText = ai.streamingContent[activeSessionKey];
   const myStreamingReasoning = ai.streamingReasoning[activeSessionKey];
+  const myIsReasoning = ai.streamingIsReasoning[activeSessionKey] ?? false;
+  // Set the moment the backend's `reasoning_done` SSE event lands — before
+  // any content streams. The ThinkingPanel uses presence-of-duration to
+  // flip from `Thinking…` to `Thought for X.Xs`.
+  const myLiveReasoningDurationS = ai.streamingReasoningDurationS[activeSessionKey] ?? null;
 
   const currentIsProcessing =
     session.streamingSessionIdsRef.current.has(activeSessionKey);
@@ -49,11 +54,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const promptState = usePrompt(messages);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const { scrollRef, onScroll } = useAutoScroll({
-    messages,
-    streamingText: myStreamingText ?? "",
-    isProcessing: currentIsProcessing,
-  });
+  const { scrollRef, bottomRef, onScroll } = useAutoScroll({ messages });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
 
@@ -191,6 +192,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
             const displayReasoning = isLastStreaming
               ? (myStreamingReasoning || undefined)
               : m.reasoningContent;
+            const displayReasoningDuration = isLastStreaming
+              ? myLiveReasoningDurationS
+              : (m.reasoningDurationS ?? null);
             const stableKey = m.id ?? `idx-${i}`;
             return (
               <React.Fragment key={stableKey}>
@@ -203,6 +207,8 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
                   message={m}
                   displayContent={displayContent}
                   displayReasoning={displayReasoning}
+                  displayReasoningDuration={displayReasoningDuration}
+                  isReasoningTurn={isLastStreaming && myIsReasoning}
                   toolCalls={displayToolCalls}
                   index={i}
                   searchQuery={search.searchQuery}
@@ -216,9 +222,16 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
             );
           })}
 
-          {currentIsProcessing && messages.length > 0 && !myStreamingText && (
+          {/* Non-reasoning turns get the prism+phrase indicator. Reasoning
+              turns use the ThinkingPanel pill on the assistant bubble as
+              the single live indicator instead — see ChatBubble. */}
+          {currentIsProcessing && messages.length > 0 && !myStreamingText && !myIsReasoning && (
             <ProcessingAnimation />
           )}
+          {/* Zero-height sentinel useAutoScroll scrolls into view. Always
+              the final child so the bottom of the feed is the bottom of
+              this element. */}
+          <div ref={bottomRef} aria-hidden="true" />
         </div>
       </div>
 

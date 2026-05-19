@@ -28,18 +28,6 @@ from utils.formatters import (
     format_error
 )
 
-# Reasoning models (Qwen 3.x, DeepSeek-R1, etc.) wrap their inner monologue
-# in <think>/<thinking> blocks that should never reach the user. We strip
-# *paired* blocks only, and only for an explicit tag allowlist — so legitimate
-# angle-bracket content (Vec<i32>, <email@x>, <3, HTML examples) passes through
-# untouched. KNOWN LIMITATION: if the assistant tries to *teach* the user about
-# <think> tags, the example will be stripped along with everything between the
-# tags. Re-run with rephrasing if you hit that case.
-_THINK_BLOCK_RE = re.compile(
-    r'<(think|thinking|scratchpad)\b[^>]*>.*?</\1>',
-    re.DOTALL | re.IGNORECASE,
-)
-
 # Filename pattern for natural-language mentions ("show me screenshot.png").
 # Restricted to the extensions we actually ingest — keeps false positives
 # down (e.g. "version 1.5.2" is not a filename in our world).
@@ -174,7 +162,14 @@ async def condense_chat_memory(
     prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
 
     try:
-        response = await llm_server.generate(client, prompt=prompt, model=llm_server.DEFAULT_CHAT_MODEL, options={"num_ctx": 8192})
+        # Use the always-on small model. The on-demand tier may not fit
+        # in VRAM alongside reasoning-tier models that are resident, and
+        # summarisation doesn't need the larger model's capability.
+        response = await llm_server.generate(
+            client, prompt=prompt,
+            model=llm_server.DEFAULT_SMALL_CHAT_MODEL,
+            options={"num_ctx": 8192},
+        )
         return response.strip()
     except Exception as e:
         print(f"Memory Condensation Failed: {e}")
@@ -341,6 +336,17 @@ async def stream_chat(
     # turns; gating here keeps the pill (and DB column) empty for them.
     surface_reasoning = "reasoning" in router.catalog.get(routed_model, set())
 
+    # Tell the client which tier this turn picked and whether it's
+    # reasoning-tagged, so the ProcessingAnimation can switch its label
+    # to `Thinking…` before any deltas arrive. Catalog tag is the single
+    # source of truth — same gate as the reasoning_chunk emission below.
+    yield {
+        "type": "route",
+        "model": routed_model,
+        "tier": tier.value,
+        "is_reasoning": surface_reasoning,
+    }
+
     if memory_content:
         system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
 
@@ -435,13 +441,93 @@ async def stream_chat(
                 return
 
             loop_count += 1
-            data = await llm_server.chat(
+
+            # Stream from llama-server. reasoning_content and content
+            # deltas forward to the caller in real time; tool_calls
+            # deltas accumulate by index for end-of-stream detection.
+            # See docs/internal/2026-05-20-llama-server-sse-shape.md
+            # for the wire format we're consuming.
+            acc_content = ""
+            acc_reasoning = ""
+            acc_tool_calls: dict[int, dict] = {}
+            reasoning_started_at: float | None = None
+            reasoning_done_emitted = False
+
+            async for delta in llm_server.chat_stream(
                 client,
                 messages=full_messages,
                 tools=tools_payload,
                 model=routed_model,
-            )
-            message = data.get("message", {})
+            ):
+                if is_disconnected and await is_disconnected():
+                    return
+
+                rc = delta.get("reasoning_content")
+                if rc:
+                    # Accumulate regardless of surface_reasoning so the
+                    # message reconstruction below carries it (the
+                    # router downstream may want it for logging). Only
+                    # forward to the client when the model is tagged.
+                    acc_reasoning += rc
+                    if surface_reasoning:
+                        if reasoning_started_at is None:
+                            reasoning_started_at = time.perf_counter()
+                        yield {"type": "reasoning_chunk", "chunk": rc}
+
+                ct = delta.get("content")
+                if ct:
+                    # First content token closes the reasoning phase.
+                    if reasoning_started_at is not None and not reasoning_done_emitted:
+                        yield {
+                            "type": "reasoning_done",
+                            "duration_s": round(
+                                time.perf_counter() - reasoning_started_at, 1,
+                            ),
+                        }
+                        reasoning_done_emitted = True
+                    acc_content += ct
+                    yield ct
+
+                # Tool-call deltas: llama-server streams the function name
+                # and opening `{` on the first delta of a slot, then
+                # arguments token-by-token across subsequent deltas. Key
+                # by `index` and concatenate the arguments string.
+                for tc_delta in (delta.get("tool_calls") or []):
+                    idx = tc_delta.get("index", 0)
+                    slot = acc_tool_calls.setdefault(idx, {
+                        "id": None,
+                        "type": "function",
+                        "function": {"name": "", "arguments": ""},
+                    })
+                    if tc_delta.get("id"):
+                        slot["id"] = tc_delta["id"]
+                    fn = tc_delta.get("function") or {}
+                    if fn.get("name"):
+                        slot["function"]["name"] = fn["name"]
+                    if fn.get("arguments"):
+                        slot["function"]["arguments"] += fn["arguments"]
+
+            # finish_reason=length can end the stream mid-think before any
+            # content arrives — close the reasoning channel so the UI gets
+            # a duration even in that case.
+            if reasoning_started_at is not None and not reasoning_done_emitted:
+                yield {
+                    "type": "reasoning_done",
+                    "duration_s": round(
+                        time.perf_counter() - reasoning_started_at, 1,
+                    ),
+                }
+
+            # Reconstruct the message dict the rest of the loop body
+            # expects (tool-call branch, stall-detection, fallback).
+            message = {
+                "role": "assistant",
+                "content": acc_content,
+                "reasoning_content": acc_reasoning,
+            }
+            tool_calls_list = [acc_tool_calls[i] for i in sorted(acc_tool_calls)]
+            if tool_calls_list:
+                message["tool_calls"] = tool_calls_list
 
             if message.get("tool_calls"):
                 full_messages.append(message)
@@ -582,49 +668,23 @@ async def stream_chat(
                 continue
 
             else:
-                content = message.get("content")
-                if content is None:
-                    content = ""
-
-                # Gemma 4's thinking mode and other reasoning-aware chat
-                # templates put internal deliberation in a separate
-                # `reasoning_content` field, leaving `content` for the
-                # final answer. Fake-stream the reasoning as its own
-                # event type so the UI can render it in a collapsible
-                # panel; models without reasoning produce an empty string
-                # here and the block is a no-op.
-                reasoning = (message.get("reasoning_content") or "").strip()
-                if reasoning and surface_reasoning:
-                    reasoning_start = time.perf_counter()
-                    reasoning_words = reasoning.split(" ")
-                    for i, word in enumerate(reasoning_words):
-                        if is_disconnected and await is_disconnected():
-                            return
-                        yield {
-                            "type": "reasoning_chunk",
-                            "chunk": word + (" " if i < len(reasoning_words) - 1 else ""),
-                        }
-                        await asyncio.sleep(0.01)
-                    yield {
-                        "type": "reasoning_done",
-                        "duration_s": round(time.perf_counter() - reasoning_start, 1),
-                    }
-
-                content = _THINK_BLOCK_RE.sub('', content).strip()
-
-                # Catch the model stalling out: a one-or-two-word "thought"
-                # emission, or echoing the tool-loop instruction back at us.
-                # Match the exact stall phrases only — a prefix check would
-                # false-positive on legitimate answers starting "Thoughts on …".
-                stripped = content.strip().lower()
+                # Stall + empty-content fallbacks. In streaming mode the
+                # content already reached the client during the chat_stream
+                # loop above; if the accumulated content is a known stall
+                # phrase or genuinely empty, append a fallback so the user
+                # sees something useful. The stall outputs are very short
+                # (`thought.`, `thoughts:`), so the appended fallback reads
+                # naturally as a continuation.
+                stripped = acc_content.strip().lower()
                 is_thought_stall = (
                     stripped in {"thought", "thoughts", "thought.", "thought:"}
                     or "i must wait for the search results" in stripped
                 )
-                if is_thought_stall:
-                    content = MICRO_PROMPTS["fallback_thought_loop"]
 
-                if not content.strip():
+                fallback_text = ""
+                if is_thought_stall:
+                    fallback_text = MICRO_PROMPTS["fallback_thought_loop"]
+                elif not acc_content.strip():
                     if loop_count > 1:
                         # Only claim failure if a tool actually errored.
                         # If tools succeeded and the model just had nothing
@@ -632,17 +692,22 @@ async def stream_chat(
                         # returned "Success! ..."), say nothing — the tool
                         # result block already shows what happened.
                         if had_tool_error:
-                            content = MICRO_PROMPTS["fallback_tool_failure"]
+                            fallback_text = MICRO_PROMPTS["fallback_tool_failure"]
                     else:
-                        content = MICRO_PROMPTS["fallback_generic"]
+                        fallback_text = MICRO_PROMPTS["fallback_generic"]
 
-                if content.strip():
-                    words = content.split(" ")
+                if fallback_text:
+                    prefix = "\n\n" if acc_content.strip() else ""
+                    words = (prefix + fallback_text).split(" ")
                     for i, word in enumerate(words):
                         if is_disconnected and await is_disconnected():
                             return
                         yield word + (" " if i < len(words) - 1 else "")
                         await asyncio.sleep(0.01)
+                    # Reflect what was actually sent to the client so
+                    # downstream persistence (routers/chat.py's
+                    # full_response accumulator) matches the user's view.
+                    acc_content = acc_content + prefix + fallback_text
 
                 finished_cleanly = True
                 break
