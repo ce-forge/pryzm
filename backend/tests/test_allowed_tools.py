@@ -192,3 +192,18 @@ class TestAdminUsersAllowedTools:
             assert "definitely_not_a_real_tool" in r.json()["detail"]
         finally:
             app.dependency_overrides.clear()
+
+    def test_patch_user_rejects_unknown_tool(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            grace = models.User(
+                username="grace",
+                password_hash=cookie_auth.hash_password("grace-pw-12chars"),
+            )
+            db_session.add(grace); db_session.commit(); db_session.refresh(grace)
+            r = c.patch(f"/api/admin/users/{grace.id}",
+                json={"allowed_tools": ["definitely_not_a_real_tool"]})
+            assert r.status_code == 400
+            assert "definitely_not_a_real_tool" in r.json()["detail"]
+        finally:
+            app.dependency_overrides.clear()
