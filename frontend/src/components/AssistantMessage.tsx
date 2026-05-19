@@ -1,8 +1,11 @@
 import React, { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { vscDarkPlus } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import "katex/dist/katex.min.css";
 import { DatabaseIcon, AlertIcon, TerminalIcon } from "./Icons";
 
 const CodeBlock = ({ language, value }: { language: string, value: string }) => {
@@ -42,14 +45,21 @@ const CodeBlock = ({ language, value }: { language: string, value: string }) => 
           {copied ? <span className="text-emerald-400">Copied!</span> : <span>Copy</span>}
         </button>
       </div>
-      <SyntaxHighlighter 
-        language={language} 
-        style={vscDarkPlus} 
-        customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '13px' }} 
-        wrapLines={true} 
+      <SyntaxHighlighter
+        language={language}
+        style={oneDark}
+        customStyle={{ margin: 0, padding: '1rem', background: 'transparent', fontSize: '13px' }}
+        codeTagProps={{ style: { background: 'transparent', textShadow: 'none' } }}
+        wrapLines={true}
         wrapLongLines={true}
+        // oneDark's `style` paints each line span with a subtle backdrop,
+        // which combined with wrapLines (needed for wrapLongLines) shows
+        // up as visible grey strips behind the code. Override the per-line
+        // span back to transparent so the only background is the outer
+        // CodeBlock's solid surface.
+        lineProps={{ style: { display: 'block', background: 'transparent' } }}
       >
-        {value}
+        {value || ""}
       </SyntaxHighlighter>
     </div>
   );
@@ -86,8 +96,15 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
   return (
     <div className="w-full">
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
+          h1({ children }) { return <h1 className="text-2xl font-semibold tracking-tight mt-6 mb-3 first:mt-0">{highlightChildren(children, searchQuery || "")}</h1>; },
+          h2({ children }) { return <h2 className="text-xl font-semibold tracking-tight mt-5 mb-2.5 first:mt-0">{highlightChildren(children, searchQuery || "")}</h2>; },
+          h3({ children }) { return <h3 className="text-lg font-semibold tracking-tight mt-4 mb-2 first:mt-0">{highlightChildren(children, searchQuery || "")}</h3>; },
+          h4({ children }) { return <h4 className="text-base font-semibold mt-3 mb-1.5 first:mt-0">{highlightChildren(children, searchQuery || "")}</h4>; },
+          a({ href, children }) { return <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2 decoration-blue-400/30 hover:decoration-blue-300">{children}</a>; },
+          hr() { return <hr className="my-6 border-[#2a2a2c]" />; },
           p({ children }) { return <p className="mb-4 last:mb-0 leading-relaxed w-full">{highlightChildren(children, searchQuery || "")}</p>; },
           blockquote({ children }) {
             const extractText = (nodes: React.ReactNode): string => {
@@ -122,7 +139,13 @@ function AssistantMessage({ content, searchQuery }: { content: string, searchQue
             if (codeChild?.props) {
               const { className, children: codeContent } = codeChild.props;
               const match = /language-(\w+)/.exec(className || "");
-              return <CodeBlock language={match ? match[1] : "text"} value={String(codeContent).replace(/\n$/, "")} />;
+              // Guard against empty / undefined code bodies — happens when
+              // the streaming markdown parser sees ```lang before the
+              // body has buffered, or when the model emits an empty
+              // fence. `String(undefined)` would render the literal text
+              // "undefined" otherwise.
+              const raw = codeContent == null ? "" : String(codeContent);
+              return <CodeBlock language={match ? match[1] : "text"} value={raw.replace(/\n$/, "")} />;
             }
             return <pre className="max-w-full overflow-x-auto">{children}</pre>;
           },
