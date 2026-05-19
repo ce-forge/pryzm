@@ -25,10 +25,14 @@ export default function ModelsSection() {
   const [showAddForm, setShowAddForm] = useState(false);
   const [prefillId, setPrefillId] = useState("");
   const [prefillRepo, setPrefillRepo] = useState("");
+  const [prefillFilename, setPrefillFilename] = useState<string | null>(null);
+  const [prefillSize, setPrefillSize] = useState<number | null>(null);
+  const [prefillBlobHash, setPrefillBlobHash] = useState<string | null>(null);
   const [downloadId, setDownloadId] = useState<string | null>(null);
   const [downloadLog, setDownloadLog] = useState<string[]>([]);
   const [downloadStatus, setDownloadStatus] = useState<"streaming" | "loaded" | "error">("streaming");
   const [downloadErr, setDownloadErr] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<{ bytes: number; total: number } | null>(null);
   const sseRef = useRef<AbortController | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -95,6 +99,7 @@ export default function ModelsSection() {
     setDownloadLog([]);
     setDownloadStatus("streaming");
     setDownloadErr(null);
+    setDownloadProgress(null);
     const ac = new AbortController();
     sseRef.current = ac;
 
@@ -115,9 +120,15 @@ export default function ModelsSection() {
           const line = buf.slice(0, nl).trim();
           buf = buf.slice(nl + 1);
           if (!line) continue;
-          let evt: { log?: string; status?: string; detail?: string };
+          let evt: {
+            log?: string;
+            status?: string;
+            detail?: string;
+            progress?: { bytes: number; total: number };
+          };
           try { evt = JSON.parse(line); } catch { continue; }
           if (evt.log) setDownloadLog(prev => [...prev, evt.log!]);
+          if (evt.progress) setDownloadProgress(evt.progress);
           if (evt.status === "loaded") { setDownloadStatus("loaded"); refresh(); }
           if (evt.status === "error") { setDownloadStatus("error"); setDownloadErr(evt.detail || "unknown error"); }
         }
@@ -164,15 +175,21 @@ export default function ModelsSection() {
       {showAddForm && (
         <>
           <HuggingFaceSearch
-            onPick={({ id, repo }) => {
+            onPick={({ id, repo, expected_filename, expected_size, expected_blob_hash }) => {
               setPrefillId(id);
               setPrefillRepo(repo);
+              setPrefillFilename(expected_filename);
+              setPrefillSize(expected_size);
+              setPrefillBlobHash(expected_blob_hash);
             }}
           />
           <AddModelForm
             key={`${prefillId}:${prefillRepo}`}
             initialId={prefillId}
             initialRepo={prefillRepo}
+            expectedFilename={prefillFilename}
+            expectedSize={prefillSize}
+            expectedBlobHash={prefillBlobHash}
             onAdded={handleAdded}
             onError={setError}
           />
@@ -185,6 +202,7 @@ export default function ModelsSection() {
           log={downloadLog}
           status={downloadStatus}
           error={downloadErr}
+          progress={downloadProgress}
           onClose={cancelDownload}
           logEndRef={logEndRef}
         />
@@ -314,18 +332,28 @@ function formatElapsed(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
 function DownloadLogPane({
-  id, log, status, error, onClose, logEndRef,
+  id, log, status, error, progress, onClose, logEndRef,
 }: {
   id: string;
   log: string[];
   status: "streaming" | "loaded" | "error";
   error: string | null;
+  progress: { bytes: number; total: number } | null;
   onClose: () => void;
   logEndRef: React.RefObject<HTMLDivElement | null>;
 }) {
   const phase = status === "streaming" ? detectPhase(log) : null;
   const elapsed = useElapsed(status === "streaming");
+  const hasRealProgress = progress !== null && progress.total > 0 && progress.bytes < progress.total;
+  const pct = hasRealProgress ? Math.min(100, (progress!.bytes / progress!.total) * 100) : 0;
   return (
     <div className="mb-3 bg-[#0e0e0f] border border-[#333537] rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-[#131314] border-b border-[#333537]">
@@ -341,17 +369,31 @@ function DownloadLogPane({
       {status === "streaming" && (
         <div className="px-3 py-2 bg-[#131314] border-b border-[#333537]">
           <div className="flex items-center justify-between mb-1.5 text-[11px]">
-            <span className="text-gray-300">{phase}…</span>
+            <span className="text-gray-300">
+              {phase}…
+              {hasRealProgress && (
+                <span className="text-gray-500 font-mono ml-2">
+                  {formatBytes(progress!.bytes)} / {formatBytes(progress!.total)} ({pct.toFixed(1)}%)
+                </span>
+              )}
+            </span>
             <span className="text-gray-500 font-mono">{formatElapsed(elapsed)}</span>
           </div>
           <div className="h-2 rounded bg-[#2a2a2c] overflow-hidden">
-            <div className="indeterminate-bar h-full bg-blue-500" />
+            {hasRealProgress ? (
+              <div
+                className="h-full bg-blue-500 transition-[width] duration-500 ease-out"
+                style={{ width: `${pct}%` }}
+              />
+            ) : (
+              <div className="indeterminate-bar h-full bg-blue-500" />
+            )}
           </div>
-          {phase === "Fetching from HuggingFace" && (
+          {!hasRealProgress && phase === "Fetching from HuggingFace" && (
             <p className="text-[10px] text-gray-500 mt-1.5 leading-relaxed">
-              llama-server&apos;s HF downloader runs silently. Multi-GB GGUFs
-              can take a few minutes on a typical home connection. The cache
-              is shared, so future loads of this same file are instant.
+              Waiting for the download to start writing to the cache. Multi-GB
+              GGUFs can take a few minutes — once bytes start flowing, real
+              progress will replace this spinner.
             </p>
           )}
         </div>
@@ -372,11 +414,17 @@ function DownloadLogPane({
 function AddModelForm({
   initialId = "",
   initialRepo = "",
+  expectedFilename = null,
+  expectedSize = null,
+  expectedBlobHash = null,
   onAdded,
   onError,
 }: {
   initialId?: string;
   initialRepo?: string;
+  expectedFilename?: string | null;
+  expectedSize?: number | null;
+  expectedBlobHash?: string | null;
   onAdded: (id: string) => void;
   onError: (msg: string) => void;
 }) {
@@ -402,6 +450,9 @@ function AddModelForm({
           ctx_size: ctxSize,
           group,
           tags,
+          expected_filename: expectedFilename,
+          expected_size: expectedSize,
+          expected_blob_hash: expectedBlobHash,
         }),
       });
       if (!res.ok) {

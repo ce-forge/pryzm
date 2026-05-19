@@ -14,6 +14,7 @@ interface HfRepo {
 interface HfFile {
   path: string;
   size: number;
+  blob_hash: string | null;
 }
 
 /**
@@ -66,7 +67,13 @@ function formatCount(n: number): string {
 export function HuggingFaceSearch({
   onPick,
 }: {
-  onPick: (picked: { id: string; repo: string }) => void;
+  onPick: (picked: {
+    id: string;
+    repo: string;
+    expected_filename: string;
+    expected_size: number;
+    expected_blob_hash: string | null;
+  }) => void;
 }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<HfRepo[]>([]);
@@ -140,10 +147,13 @@ export function HuggingFaceSearch({
     }
   };
 
-  const pickFile = (repoId: string, filePath: string) => {
+  const pickFile = (repoId: string, file: HfFile) => {
     onPick({
       id: slugFromRepo(repoId),
-      repo: `${repoId}:${quantFromFile(filePath)}`,
+      repo: `${repoId}:${quantFromFile(file.path)}`,
+      expected_filename: file.path,
+      expected_size: file.size,
+      expected_blob_hash: file.blob_hash,
     });
   };
 
@@ -233,7 +243,7 @@ export function HuggingFaceSearch({
                           <li key={f.path}>
                             <button
                               type="button"
-                              onClick={() => pickFile(repo.id, f.path)}
+                              onClick={() => pickFile(repo.id, f)}
                               className="w-full flex items-center justify-between gap-3 px-2 py-1 rounded hover:bg-[#1a1a1b] text-left"
                             >
                               <span className="font-mono text-xs text-[#e3e3e3] truncate">
