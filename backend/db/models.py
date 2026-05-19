@@ -51,6 +51,7 @@ class Workspace(Base):
     owner_can_edit = Column(Boolean, nullable=False, default=False)
     position = Column(Integer, nullable=False, default=0, index=True)
 
+    user = relationship("User", foreign_keys=[user_id])
     sessions = relationship("Session", back_populates="workspace", cascade="all, delete-orphan")
     folders = relationship("Folder", back_populates="workspace", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="workspace", cascade="all, delete-orphan")
@@ -125,6 +126,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     must_change_password = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    allowed_tools = Column(JSONB, nullable=False, default=list, server_default="[]")
 
 
 class AuthSession(Base):

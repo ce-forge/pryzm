@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from typing import List
 from core import cookie_auth
 from core.audit import EventType, log_event
+from core.tool_permissions import enforce_allowed_tools, filter_allowed_tools, validate_tool_names
 from db import database, models
 from schemas import (
     WorkspaceResponse,
@@ -15,20 +16,9 @@ from services.workspaces import (
     get_by_slug,
     slugify_unique,
 )
-from tools.registry import AVAILABLE_TOOLS
 
 
 router = APIRouter(tags=["Workspaces"])
-
-
-def _validate_enabled_tools(names: List[str]) -> None:
-    """Reject names that aren't in the live tool registry."""
-    unknown = [n for n in names if n not in AVAILABLE_TOOLS]
-    if unknown:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown tool name(s): {unknown}",
-        )
 
 
 def _to_response(workspace) -> WorkspaceResponse:
@@ -119,6 +109,8 @@ def create_workspace(
         enabled_tools = list(source.enabled_tools or [])
         engine_config = dict(source.engine_config or engine_config)
 
+    enforce_allowed_tools(user, enabled_tools)
+
     ws = models.Workspace(
         slug=slug,
         display_name=stripped_display_name,
@@ -206,7 +198,8 @@ def update_workspace(
         ws.system_prompt = data["system_prompt"]
 
     if "enabled_tools" in data:
-        _validate_enabled_tools(data["enabled_tools"])
+        validate_tool_names(data["enabled_tools"])
+        enforce_allowed_tools(ws.user, data["enabled_tools"])
         if list(ws.enabled_tools or []) != list(data["enabled_tools"]):
             previous_values["enabled_tools"] = list(ws.enabled_tools or [])
             new_values["enabled_tools"] = list(data["enabled_tools"])
@@ -275,7 +268,7 @@ def delete_workspace(slug: str, db: Session = Depends(database.get_db)):
     )
 
 
-@router.post("/workspaces/{slug}/reset", response_model=WorkspaceResponse)
+@router.post("/workspaces/{slug}/reset")
 def reset_workspace(
     slug: str,
     db: Session = Depends(database.get_db),
@@ -299,13 +292,20 @@ def reset_workspace(
     tmpl = db.query(models.WorkspaceTemplate).filter_by(id=ws.template_id).first()
     if tmpl is None:
         raise HTTPException(status_code=404, detail="Template no longer exists.")
+
+    template_tools = list(tmpl.enabled_tools or [])
+    kept, dropped = filter_allowed_tools(user, template_tools)
+
     ws.system_prompt = tmpl.system_prompt
-    ws.enabled_tools = list(tmpl.enabled_tools or [])
+    ws.enabled_tools = kept
     ws.color = tmpl.color
     ws.engine_config = dict(tmpl.engine_config or {})
     db.commit()
     db.refresh(ws)
-    return _to_response(ws)
+    return {
+        "workspace": _to_response(ws).model_dump(),
+        "dropped_tools": dropped,
+    }
 
 
 @router.patch("/workspaces/{slug}/position", response_model=WorkspaceResponse)

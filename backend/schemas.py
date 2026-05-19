@@ -137,6 +137,7 @@ class AdminUserCreate(BaseModel):
     email: Optional[str] = None
     is_admin: bool = False
     can_create_workspaces: bool = False
+    allowed_tools: list[str] = []
     starter_templates: list[StarterTemplate] = []
 
 
@@ -146,6 +147,7 @@ class AdminUserUpdate(BaseModel):
     is_admin: Optional[bool] = None
     is_active: Optional[bool] = None
     can_create_workspaces: Optional[bool] = None
+    allowed_tools: Optional[list[str]] = None
 
 
 class AdminPasswordReset(BaseModel):

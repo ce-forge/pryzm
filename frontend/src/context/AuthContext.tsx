@@ -18,6 +18,7 @@ export interface AuthUser {
   username: string;
   is_admin: boolean;
   can_create_workspaces: boolean;
+  allowed_tools: string[];
   email: string | null;
   workspaces: AuthWorkspace[];
   must_change_password: boolean;

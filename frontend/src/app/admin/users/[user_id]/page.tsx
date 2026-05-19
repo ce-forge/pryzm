@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
@@ -13,6 +13,7 @@ interface AdminUser {
   is_admin: boolean;
   is_active: boolean;
   can_create_workspaces: boolean;
+  allowed_tools: string[];
   created_at: string | null;
   last_login_at: string | null;
 }
@@ -23,6 +24,7 @@ interface AdminWorkspace {
   display_name: string;
   template_id: string | null;
   owner_can_edit: boolean;
+  enabled_tools: string[];
 }
 
 interface AuditRow {
@@ -136,6 +138,14 @@ export default function AdminUserDetailPage() {
               Last login: {new Date(user.last_login_at).toLocaleString()}
             </span>
           )}
+          <span>
+            Tools:{" "}
+            {user.allowed_tools.length === 0 ? (
+              <span className="text-gray-500">no restriction</span>
+            ) : (
+              <code className="font-mono">{user.allowed_tools.join(", ")}</code>
+            )}
+          </span>
         </div>
       </div>
 
@@ -159,20 +169,43 @@ export default function AdminUserDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {workspaces.map((w) => (
-                  <tr key={w.id} className="border-t border-[#2a2a2c]">
-                    <td className="px-3 py-2">{w.display_name}</td>
-                    <td className="px-3 py-2 font-mono text-xs text-gray-400">
-                      {w.slug}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-gray-300">
-                      {w.owner_can_edit ? "yes" : "no"}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-gray-400 font-mono truncate">
-                      {w.template_id ?? "—"}
-                    </td>
-                  </tr>
-                ))}
+                {workspaces.map((w) => {
+                  const violations =
+                    !user.is_admin && user.allowed_tools.length > 0
+                      ? w.enabled_tools.filter(
+                          (t) => !user.allowed_tools.includes(t),
+                        )
+                      : [];
+                  return (
+                    <React.Fragment key={w.id}>
+                      <tr className="border-t border-[#2a2a2c]">
+                        <td className="px-3 py-2">{w.display_name}</td>
+                        <td className="px-3 py-2 font-mono text-xs text-gray-400">
+                          {w.slug}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-300">
+                          {w.owner_can_edit ? "yes" : "no"}
+                        </td>
+                        <td className="px-3 py-2 text-xs text-gray-400 font-mono truncate">
+                          {w.template_id ?? "—"}
+                        </td>
+                      </tr>
+                      {violations.length > 0 && (
+                        <tr className="border-t border-[#2a2a2c]">
+                          <td
+                            colSpan={4}
+                            className="px-3 py-1 text-xs text-amber-400"
+                          >
+                            Grandfathered:{" "}
+                            <code className="font-mono">
+                              {violations.join(", ")}
+                            </code>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

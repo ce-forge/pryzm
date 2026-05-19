@@ -173,7 +173,7 @@ app.include_router(workspaces.router, dependencies=[Depends(cookie_auth.current_
 app.include_router(chat.router, dependencies=[Depends(cookie_auth.current_user)])
 app.include_router(folders.router, dependencies=[Depends(cookie_auth.current_user)])
 app.include_router(documents.router, dependencies=[Depends(cookie_auth.current_user)])
-app.include_router(settings_router.router, dependencies=[Depends(cookie_auth.require_admin)])
+app.include_router(settings_router.router, dependencies=[Depends(cookie_auth.current_user)])
 app.include_router(admin.router, dependencies=[Depends(cookie_auth.require_admin)])
 app.include_router(admin_users_router.router)
 app.include_router(admin_templates_router.router)

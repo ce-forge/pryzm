@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
@@ -45,9 +45,26 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const canEditWorkspace = mode !== "edit" || !!user?.is_admin || ownerCanEdit;
   const readOnly = mode === "edit" && !canEditWorkspace;
 
+  // Cap filter: admins and uncapped users see every tool; capped non-admins
+  // see only tools in their allowed_tools list. Returns null when no filter
+  // applies. Used both to gate the picker UI and to clamp the workspace's
+  // current enabled_tools (grandfathered tools outside the cap are hidden;
+  // they get silently dropped on the next PATCH that touches enabled_tools).
+  const allowedToolSet = useMemo<Set<string> | null>(() => {
+    if (!user || user.is_admin) return null;
+    const cap = user.allowed_tools ?? [];
+    if (cap.length === 0) return null;
+    return new Set(cap);
+  }, [user]);
+
+  const clampToCap = (tools: string[]): string[] =>
+    allowedToolSet ? tools.filter((t) => allowedToolSet.has(t)) : tools;
+
   const [name, setName] = useState(workspace?.display_name ?? "");
   const [prompt, setPrompt] = useState(workspace?.system_prompt ?? "");
-  const [enabledTools, setEnabledTools] = useState<string[]>(workspace?.enabled_tools ?? []);
+  const [enabledTools, setEnabledTools] = useState<string[]>(
+    clampToCap(workspace?.enabled_tools ?? []),
+  );
   const [color, setColor] = useState<WorkspaceColor>(
     (workspace?.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR
   );
@@ -55,6 +72,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const [availableTools, setAvailableTools] = useState<{ name: string; description: string }[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [resetDropped, setResetDropped] = useState<string[]>([]);
 
   // Create-mode state.
   const [startFrom, setStartFrom] = useState<string>("");
@@ -85,7 +103,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       if (source) {
         setName(source.display_name);
         setPrompt(source.system_prompt);
-        setEnabledTools([...source.enabled_tools]);
+        setEnabledTools(clampToCap([...source.enabled_tools]));
         setColor((source.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
       }
     }
@@ -108,7 +126,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
         () => {
           if ("display_name" in patch) setName(snapshot.display_name);
           if ("system_prompt" in patch) setPrompt(snapshot.system_prompt);
-          if ("enabled_tools" in patch) setEnabledTools(snapshot.enabled_tools);
+          if ("enabled_tools" in patch) setEnabledTools(clampToCap(snapshot.enabled_tools));
           if ("color" in patch) setColor((snapshot.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
         },
         async () => {
@@ -151,8 +169,12 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
 
   const performReset = async () => {
     if (mode !== "edit") return;
-    await workspacesApi.reset(workspace.slug);
+    const result = await workspacesApi.reset(workspace.slug);
     setConfirmReset(false);
+    if (result && result.dropped_tools.length > 0) {
+      setResetDropped(result.dropped_tools);
+      return;
+    }
     onClose();
   };
 
@@ -181,8 +203,14 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   };
 
   const modalContent = (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#1e1f20] w-full max-w-2xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#1e1f20] w-full max-w-2xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
 
         {/* Header */}
         <div className="flex justify-between items-center p-5 border-b border-[#333537] bg-[#131314]">
@@ -291,6 +319,11 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
               rows={10}
               disabled={readOnly}
               readOnly={readOnly}
+              placeholder={
+                mode === "create"
+                  ? "You are a helpful assistant. Answer the user's questions thoughtfully."
+                  : undefined
+              }
               className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 font-mono resize-y custom-scrollbar disabled:opacity-60 disabled:cursor-not-allowed"
             />
             <p className="text-xs text-gray-500 mt-1">Use <code>{"{tool_names}"}</code> to substitute the enabled tool list.</p>
@@ -306,7 +339,9 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
               {availableTools.length === 0 && (
                 <p className="text-xs text-gray-500 italic">Loading tool registry&hellip;</p>
               )}
-              {availableTools.map((t) => (
+              {availableTools
+                .filter((t) => !allowedToolSet || allowedToolSet.has(t.name))
+                .map((t) => (
                 <label key={t.name} className={`flex items-start gap-3 p-2 rounded ${readOnly ? "opacity-60 cursor-not-allowed" : "hover:bg-[#282a2c]/40 cursor-pointer"}`}>
                   <input
                     type="checkbox"
@@ -323,6 +358,14 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Dropped-tools notice after reset */}
+          {resetDropped.length > 0 && (
+            <div className="text-xs px-3 py-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300">
+              Some tools weren&apos;t restored because your admin restricts your tool
+              list: <code className="font-mono">{resetDropped.join(", ")}</code>
+            </div>
+          )}
 
           {/* Edit-mode danger zone */}
           {mode === "edit" && (canEditWorkspace || user?.is_admin) && (
