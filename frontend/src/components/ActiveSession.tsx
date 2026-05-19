@@ -217,10 +217,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
           })}
 
           {currentIsProcessing && messages.length > 0 && !myStreamingText && (
-            <ProcessingAnimation
-              label={myStreamingReasoning ? "focusing…" : "reflecting…"}
-              reasoning={myStreamingReasoning}
-            />
+            <ProcessingAnimation />
           )}
         </div>
       </div>

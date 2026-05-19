@@ -34,7 +34,7 @@ export default function ThinkingPanel({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-300 transition-colors"
+        className="flex items-center gap-1.5 text-[13px] text-gray-400 hover:text-gray-200 transition-colors"
       >
         <span className={`inline-block transition-transform ${open ? "rotate-90" : ""}`}>▸</span>
         <span>Thinking{showDuration ? ` (${durationSeconds}s)` : ""}</span>

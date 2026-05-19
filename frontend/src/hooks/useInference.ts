@@ -90,6 +90,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
       let fullAssistantMessage = "";
       let fullReasoning = "";
+      let reasoningDurationS: number | null = null;
       let referencedFiles: ReferencedFile[] | undefined;
       const pendingToolCalls: ToolCall[] = [];
       let pendingUserMessageId: string | null = null;
@@ -280,10 +281,10 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                     return next;
                   });
                 }
-                // `reasoning_done` carries the wall-clock duration_s but
-                // the live UI doesn't display it — the finished panel reads
-                // duration from the persisted message row. Event flows
-                // through harmlessly.
+
+                if (parsed.type === "reasoning_done" && typeof parsed.duration_s === "number") {
+                  reasoningDurationS = parsed.duration_s;
+                }
               } catch {
                 /* malformed line, skip */
               }
@@ -297,7 +298,15 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
         setIsProcessing(false);
 
         const finalKeySid = realDbId ?? optimisticId;
-        sessionApi.finalizeAssistantMessage(ws, finalKeySid, fullAssistantMessage, referencedFiles, pendingToolCalls.length > 0 ? pendingToolCalls : undefined);
+        sessionApi.finalizeAssistantMessage(
+          ws,
+          finalKeySid,
+          fullAssistantMessage,
+          referencedFiles,
+          pendingToolCalls.length > 0 ? pendingToolCalls : undefined,
+          fullReasoning || null,
+          reasoningDurationS,
+        );
         // Swap optimistic temp ids for the real DB UUIDs that came back in the
         // stream. No post-stream /sessions/{id} refetch = no race against the
         // next send.
