@@ -62,14 +62,11 @@ export default function ThinkingPanel({
         </span>
         {isThinking ? (
           <>
-            <PrismIndicator size="pill" />
             <span className="font-medium thinking-shimmer">{labelText}</span>
+            <PrismIndicator size="pill" />
           </>
         ) : (
-          <>
-            <PrismIndicator size="pill" />
-            <span className="font-medium">{labelText}</span>
-          </>
+          <span className="font-medium">{labelText}</span>
         )}
         <style>{`
           /* Soft shimmer — single white highlight band slides through a
