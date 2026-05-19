@@ -365,14 +365,24 @@ export default function AdminUsersPage() {
                     {u.can_create_workspaces ? "yes" : "no"}
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-400">
-                    {u.created_at
-                      ? new Date(u.created_at).toLocaleString()
-                      : "—"}
+                    {u.created_at ? (
+                      <>
+                        <div>{new Date(u.created_at).toLocaleDateString()}</div>
+                        <div>{new Date(u.created_at).toLocaleTimeString()}</div>
+                      </>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="px-3 py-2 text-xs text-gray-400">
-                    {u.last_login_at
-                      ? new Date(u.last_login_at).toLocaleString()
-                      : "never"}
+                    {u.last_login_at ? (
+                      <>
+                        <div>{new Date(u.last_login_at).toLocaleDateString()}</div>
+                        <div>{new Date(u.last_login_at).toLocaleTimeString()}</div>
+                      </>
+                    ) : (
+                      "never"
+                    )}
                   </td>
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1 whitespace-nowrap">
