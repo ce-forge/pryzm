@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 import { ToolPicker } from "@/components/ToolPicker";
+import Identicon from "@/components/Identicon";
 
 interface AdminUser {
   id: string;
@@ -240,56 +241,62 @@ export default function AdminUsersPage() {
             />
           </div>
 
-          <div>
-            <label className="block text-xs text-gray-400 mb-1">
-              Allowed tools (empty = no restriction)
-            </label>
-            <ToolPicker selected={allowedTools} onToggle={toggleAllowedTool} />
-          </div>
-
-          <div>
-            <div className="text-xs text-gray-400 mb-2">Starter workspaces</div>
-            {templates.length === 0 ? (
-              <div className="text-xs text-gray-500">
-                No workspace templates exist yet. The new user will start with
-                no workspaces and won&apos;t be able to use the AI until they
-                create one (requires &quot;Can create workspaces&quot; checked above).
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">
+                Allowed tools
+              </label>
+              <div className="max-h-60 overflow-y-auto rounded border border-[#2a2a2c] bg-[#131314] p-2 custom-scrollbar">
+                <ToolPicker selected={allowedTools} onToggle={toggleAllowedTool} />
               </div>
-            ) : (
-              <div className="space-y-1.5 border border-[#2a2a2c] rounded p-3 bg-[#131314]">
-                {templates.map((t) => {
-                  const selected = !!selectedTemplates[t.id];
-                  return (
-                    <div
-                      key={t.id}
-                      className="flex items-center justify-between gap-3"
-                    >
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selected}
-                          onChange={() => toggleTemplate(t.id)}
-                        />
-                        <span className="text-sm">{t.display_name}</span>
-                        <span className="text-xs text-gray-500 font-mono">
-                          {t.slug}
-                        </span>
-                      </label>
-                      {selected && (
-                        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+            </div>
+
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">
+                Starter workspaces
+              </label>
+              {templates.length === 0 ? (
+                <div className="text-xs text-gray-500 rounded border border-[#2a2a2c] bg-[#131314] p-3">
+                  No workspace templates exist yet. The new user will start with
+                  no workspaces and won&apos;t be able to use the AI until they
+                  create one (requires &quot;Can create workspaces&quot; checked above).
+                </div>
+              ) : (
+                <div className="max-h-60 overflow-y-auto space-y-1.5 border border-[#2a2a2c] rounded p-3 bg-[#131314] custom-scrollbar">
+                  {templates.map((t) => {
+                    const selected = !!selectedTemplates[t.id];
+                    return (
+                      <div
+                        key={t.id}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <label className="flex items-center gap-2 cursor-pointer">
                           <input
                             type="checkbox"
-                            checked={selectedTemplates[t.id].owner_can_edit}
-                            onChange={() => toggleOwnerCanEdit(t.id)}
+                            checked={selected}
+                            onChange={() => toggleTemplate(t.id)}
                           />
-                          Owner can edit
+                          <span className="text-sm">{t.display_name}</span>
+                          <span className="text-xs text-gray-500 font-mono">
+                            {t.slug}
+                          </span>
                         </label>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+                        {selected && (
+                          <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={selectedTemplates[t.id].owner_can_edit}
+                              onChange={() => toggleOwnerCanEdit(t.id)}
+                            />
+                            Owner can edit
+                          </label>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
 
           {formError && (
@@ -299,7 +306,7 @@ export default function AdminUsersPage() {
             <div className="text-sm text-emerald-400">{formSuccess}</div>
           )}
 
-          <div>
+          <div className="flex justify-end">
             <button
               type="submit"
               disabled={submitting}
@@ -327,7 +334,7 @@ export default function AdminUsersPage() {
                 <th className="px-3 py-2 font-medium w-32">Can create WS</th>
                 <th className="px-3 py-2 font-medium w-44">Created</th>
                 <th className="px-3 py-2 font-medium w-44">Last login</th>
-                <th className="px-3 py-2 font-medium w-56">Actions</th>
+                <th className="px-3 py-2 font-medium w-72">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -346,8 +353,9 @@ export default function AdminUsersPage() {
                   <td className="px-3 py-2">
                     <Link
                       href={`/admin/users/${encodeURIComponent(u.id)}`}
-                      className="text-sky-400 hover:underline"
+                      className="inline-flex items-center gap-2 text-sky-400 hover:underline"
                     >
+                      <Identicon seed={u.username} size={20} />
                       {u.username}
                     </Link>
                   </td>
@@ -367,18 +375,18 @@ export default function AdminUsersPage() {
                       : "never"}
                   </td>
                   <td className="px-3 py-2">
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex items-center gap-1 whitespace-nowrap">
                       <button
                         type="button"
                         onClick={() => setEditForUser(u)}
-                        className="text-xs px-2 py-1 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+                        className="text-xs px-2 py-0.5 rounded border border-[#2a2a2c] hover:bg-[#2a2a2c] text-gray-300"
                       >
                         Edit
                       </button>
                       <button
                         type="button"
                         onClick={() => setResetForUser(u)}
-                        className="text-xs px-2 py-1 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+                        className="text-xs px-2 py-0.5 rounded border border-[#2a2a2c] hover:bg-[#2a2a2c] text-gray-300"
                       >
                         Reset pw
                       </button>
@@ -386,10 +394,10 @@ export default function AdminUsersPage() {
                         type="button"
                         onClick={() => toggleActive(u)}
                         className={
-                          "text-xs px-2 py-1 rounded border " +
+                          "text-xs px-2 py-0.5 rounded border " +
                           (u.is_active
-                            ? "bg-amber-500/15 border-amber-500/30 text-amber-300 hover:bg-amber-500/25"
-                            : "bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25")
+                            ? "border-amber-500/30 text-amber-300 hover:bg-amber-500/15"
+                            : "border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/15")
                         }
                       >
                         {u.is_active ? "Deactivate" : "Reactivate"}
@@ -397,7 +405,7 @@ export default function AdminUsersPage() {
                       <button
                         type="button"
                         onClick={() => setDeleteForUser(u)}
-                        className="text-xs px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-300 hover:bg-red-500/25"
+                        className="text-xs px-2 py-0.5 rounded border border-red-500/30 text-red-300 hover:bg-red-500/15"
                       >
                         Delete
                       </button>
@@ -754,8 +762,10 @@ function EditUserModal({
             />
           </div>
 
-          <Field label="Allowed tools (empty = no restriction)">
-            <ToolPicker selected={allowedTools} onToggle={toggleAllowedTool} />
+          <Field label="Allowed tools">
+            <div className="max-h-60 overflow-y-auto rounded border border-[#2a2a2c] bg-[#131314] p-2 custom-scrollbar">
+              <ToolPicker selected={allowedTools} onToggle={toggleAllowedTool} />
+            </div>
           </Field>
 
           {error && <div className="text-sm text-red-400">{error}</div>}
