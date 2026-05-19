@@ -29,6 +29,22 @@ function slugFromRepo(repoId: string): string {
     .toLowerCase();
 }
 
+/**
+ * Extract the quant tag from a GGUF filename.
+ * `gemma-2-2b-it-Q4_K_M.gguf` → `Q4_K_M`. llama-server's `-hf repo:TAG`
+ * resolver wants the tag, not the full filename — passing the filename
+ * makes get_hf_plan fail to match anything in the repo.
+ * Falls back to the filename stem if no recognised quant pattern is found.
+ */
+function quantFromFile(path: string): string {
+  const stem = path.replace(/\.gguf$/i, "");
+  const m = stem.match(
+    /-(IQ\d(?:_X[SLM])?(?:_[KMS])?|Q\d_K(?:_[SLMV])?(?:_XL)?|Q\d_\d(?:_[KSML])?|Q\d|F16|F32|BF16|f16|f32|bf16|f\d+)$/,
+  );
+  if (m) return m[1];
+  return stem;
+}
+
 function formatBytes(bytes: number): string {
   if (!bytes) return "—";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -127,7 +143,7 @@ export function HuggingFaceSearch({
   const pickFile = (repoId: string, filePath: string) => {
     onPick({
       id: slugFromRepo(repoId),
-      repo: `${repoId}:${filePath}`,
+      repo: `${repoId}:${quantFromFile(filePath)}`,
     });
   };
 
