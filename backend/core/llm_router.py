@@ -142,16 +142,23 @@ def models_to_prewarm_from_yaml(
     tagged `vision`, so image-upload captioning doesn't pay cold-load
     cost on the first image of a session.
 
+    Authoritative source for always-on membership is the group-side
+    `members:` list — the model-side `groups:` field is silently ignored
+    by llama-swap per upstream docs. We read it the same way here so
+    the prewarmer agrees with llama-swap's actual loading rules.
+
     Dedup is by model_id; a model that's both always-on and vision
     appears once.
     """
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
+    always_on_members: set[str] = set(
+        ((cfg.get("groups") or {}).get("always-on") or {}).get("members") or []
+    )
     seen: dict[str, set[str]] = {}
     for model_id, model_cfg in (cfg.get("models") or {}).items():
         tags = set(model_cfg.get("tags") or [])
-        groups = set(model_cfg.get("groups") or [])
-        if "always-on" in groups or "vision" in tags:
+        if model_id in always_on_members or "vision" in tags:
             seen[model_id] = tags
     return list(seen.items())
 

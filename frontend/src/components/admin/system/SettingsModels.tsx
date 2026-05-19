@@ -274,8 +274,8 @@ export default function ModelsSection() {
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-xs ${m.loaded ? "text-emerald-400" : "text-gray-500"}`} title={m.loaded ? "Loaded in VRAM" : "Not loaded"}>
-                  {m.loaded ? "● loaded" : "○ idle"}
+                <span className={`text-xs ${m.loaded ? "text-emerald-400" : "text-gray-500"}`} title={m.loaded ? "Loaded in VRAM" : "Not in VRAM — will load on first request"}>
+                  {m.loaded ? "● loaded" : "○ unloaded"}
                 </span>
                 <button
                   onClick={() => setEditingId(m.id)}
