@@ -125,6 +125,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     must_change_password = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    allowed_tools = Column(JSONB, nullable=False, default=list, server_default="[]")
 
 
 class AuthSession(Base):
