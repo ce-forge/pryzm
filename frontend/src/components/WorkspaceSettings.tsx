@@ -319,6 +319,11 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
               rows={10}
               disabled={readOnly}
               readOnly={readOnly}
+              placeholder={
+                mode === "create"
+                  ? "You are a helpful assistant. Answer the user's questions thoughtfully."
+                  : undefined
+              }
               className="w-full bg-[#131314] border border-[#333537] text-gray-300 text-sm rounded-lg px-3 py-2 outline-none focus:border-blue-500 font-mono resize-y custom-scrollbar disabled:opacity-60 disabled:cursor-not-allowed"
             />
             <p className="text-xs text-gray-500 mt-1">Use <code>{"{tool_names}"}</code> to substitute the enabled tool list.</p>
@@ -330,12 +335,6 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
             <p className="text-xs text-gray-500 mb-3">
               Toggle which tools the model can call from this workspace. The model decides when to call them based on each tool&apos;s own description.
             </p>
-            {allowedToolSet && (
-              <p className="text-xs text-amber-400/80 mb-3">
-                Your admin restricts your tools to:{" "}
-                <code className="font-mono">{[...allowedToolSet].join(", ")}</code>
-              </p>
-            )}
             <div className="space-y-2">
               {availableTools.length === 0 && (
                 <p className="text-xs text-gray-500 italic">Loading tool registry&hellip;</p>
