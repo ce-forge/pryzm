@@ -26,10 +26,18 @@ interface ChatBubbleProps {
   /**
    * Reasoning_content from thinking-mode models. During streaming this
    * is the parent-passed live string from streamingReasoning[id]; once
-   * persisted, the parent passes message.reasoningContent. Empty/undefined
-   * means no panel renders.
+   * persisted, the parent passes message.reasoningContent. May be empty
+   * during the pre-thinking phase of a reasoning turn — the pill still
+   * renders if `isReasoningTurn` is true so it acts as the single live
+   * indicator instead of a separate prism+phrase block.
    */
   displayReasoning?: string;
+  /**
+   * True when the routed model carries the `reasoning` catalog tag and
+   * this is the streaming message. Drives the pill into its always-visible
+   * live state — see ThinkingPanel.isStreaming for the visual treatment.
+   */
+  isReasoningTurn?: boolean;
   toolCalls?: ToolCall[]; // passed separately so message reference stays stable
   index: number;
   searchQuery: string;
@@ -44,6 +52,7 @@ function ChatBubbleImpl({
   message,
   displayContent,
   displayReasoning,
+  isReasoningTurn,
   toolCalls,
   index,
   searchQuery,
@@ -120,11 +129,11 @@ function ChatBubbleImpl({
     <div className="group flex flex-col w-full mb-6 relative">
       <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} w-full`}>
         <div className={`flex flex-col ${message.role === 'user' ? 'max-w-[85%] items-end' : 'w-full items-start'} min-w-0`}>
-          {message.role !== "user" && displayReasoning && (
+          {message.role !== "user" && (displayReasoning || (isStreaming && isReasoningTurn)) && (
             <ThinkingPanel
               reasoning={displayReasoning}
               durationSeconds={message.reasoningDurationS ?? null}
-              variant="finished"
+              isStreaming={isStreaming}
             />
           )}
           <div className={`${message.role === 'user' ? 'bg-[#2f2f2f] text-[#e3e3e3] rounded-2xl py-2.5 px-5' : 'text-[#e3e3e3] px-1 w-full flex-1'} break-words min-w-0`}>
@@ -177,6 +186,7 @@ const ChatBubble = React.memo(ChatBubbleImpl, (prev, next) => {
     prev.message === next.message &&
     prev.displayContent === next.displayContent &&
     prev.displayReasoning === next.displayReasoning &&
+    prev.isReasoningTurn === next.isReasoningTurn &&
     prev.toolCalls === next.toolCalls &&
     prev.searchQuery === next.searchQuery &&
     prev.isStreaming === next.isStreaming &&

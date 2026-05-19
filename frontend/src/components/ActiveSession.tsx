@@ -204,6 +204,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
                   message={m}
                   displayContent={displayContent}
                   displayReasoning={displayReasoning}
+                  isReasoningTurn={isLastStreaming && myIsReasoning}
                   toolCalls={displayToolCalls}
                   index={i}
                   searchQuery={search.searchQuery}
@@ -217,8 +218,11 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
             );
           })}
 
-          {currentIsProcessing && messages.length > 0 && !myStreamingText && (
-            <ProcessingAnimation isReasoning={myIsReasoning} />
+          {/* Non-reasoning turns get the prism+phrase indicator. Reasoning
+              turns use the ThinkingPanel pill on the assistant bubble as
+              the single live indicator instead — see ChatBubble. */}
+          {currentIsProcessing && messages.length > 0 && !myStreamingText && !myIsReasoning && (
+            <ProcessingAnimation />
           )}
         </div>
       </div>
