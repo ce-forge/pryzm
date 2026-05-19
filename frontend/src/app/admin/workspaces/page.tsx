@@ -546,6 +546,43 @@ function Field({
   );
 }
 
+function ToolPicker({
+  available,
+  selected,
+  onToggle,
+}: {
+  available: { name: string; description: string }[];
+  selected: string[];
+  onToggle: (name: string) => void;
+}) {
+  if (available.length === 0) {
+    return (
+      <p className="text-xs text-gray-500 italic">Loading tool registry…</p>
+    );
+  }
+  return (
+    <div className="space-y-1">
+      {available.map((t) => (
+        <label
+          key={t.name}
+          className="flex items-start gap-2 p-1.5 rounded hover:bg-[#2a2a2c]/60 cursor-pointer"
+        >
+          <input
+            type="checkbox"
+            checked={selected.includes(t.name)}
+            onChange={() => onToggle(t.name)}
+            className="mt-0.5"
+          />
+          <div className="flex-1">
+            <div className="text-xs font-mono text-[#e3e3e3]">{t.name}</div>
+            <div className="text-xs text-gray-500">{t.description}</div>
+          </div>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 function ColorPicker({
   value,
   onChange,
@@ -597,8 +634,31 @@ function TemplateCreateModal({
   const [displayName, setDisplayName] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [color, setColor] = useState<string | null>(null);
+  const [enabledTools, setEnabledTools] = useState<string[]>([]);
+  const [availableTools, setAvailableTools] = useState<
+    { name: string; description: string }[]
+  >([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/tools")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setAvailableTools(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleTool = (name: string) => {
+    setEnabledTools((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    );
+  };
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -616,7 +676,7 @@ function TemplateCreateModal({
           slug: slug.trim(),
           display_name: displayName.trim(),
           system_prompt: systemPrompt,
-          enabled_tools: [],
+          enabled_tools: enabledTools,
           color,
         }),
       });
@@ -644,8 +704,8 @@ function TemplateCreateModal({
       <form onSubmit={submit} className="p-5 space-y-4">
         <p className="text-xs text-gray-400">
           Slug is stable forever — it shows up in cloned-workspace URLs and in
-          audit logs. Pick something short and lowercase. The system prompt and
-          enabled-tools list can be edited later.
+          audit logs. Pick something short and lowercase. Everything else can
+          be edited later.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Slug">
@@ -674,6 +734,13 @@ function TemplateCreateModal({
             onChange={(e) => setSystemPrompt(e.target.value)}
             rows={5}
             className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm resize-y font-mono"
+          />
+        </Field>
+        <Field label="Enabled tools">
+          <ToolPicker
+            available={availableTools}
+            selected={enabledTools}
+            onToggle={toggleTool}
           />
         </Field>
         <Field label="Color">
@@ -715,6 +782,10 @@ function TemplateEditModal({
   const [displayName, setDisplayName] = useState(target.display_name);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [color, setColor] = useState<string | null>(target.color ?? null);
+  const [enabledTools, setEnabledTools] = useState<string[]>([]);
+  const [availableTools, setAvailableTools] = useState<
+    { name: string; description: string }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -733,6 +804,9 @@ function TemplateEditModal({
         setDisplayName(body.display_name ?? "");
         setSystemPrompt(body.system_prompt ?? "");
         setColor(body.color ?? null);
+        setEnabledTools(
+          Array.isArray(body.enabled_tools) ? body.enabled_tools : [],
+        );
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -741,6 +815,25 @@ function TemplateEditModal({
       cancelled = true;
     };
   }, [target.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/tools")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setAvailableTools(data);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const toggleTool = (name: string) => {
+    setEnabledTools((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    );
+  };
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -753,6 +846,7 @@ function TemplateEditModal({
         body: JSON.stringify({
           display_name: displayName.trim(),
           system_prompt: systemPrompt,
+          enabled_tools: enabledTools,
           color,
         }),
       });
@@ -788,6 +882,13 @@ function TemplateEditModal({
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={8}
               className="w-full bg-[#131314] border border-[#2a2a2c] rounded px-2 py-1.5 text-sm resize-y font-mono"
+            />
+          </Field>
+          <Field label="Enabled tools">
+            <ToolPicker
+              available={availableTools}
+              selected={enabledTools}
+              onToggle={toggleTool}
             />
           </Field>
           <Field label="Color">
