@@ -236,8 +236,8 @@ async def add_model(
         raise HTTPException(status_code=400, detail=f"repo:quant looks malformed: {repo_full!r}")
     repo, quant = repo_full.split(":", 1)
 
-    if req.group not in {"chat", "always-on"}:
-        raise HTTPException(status_code=400, detail="group must be 'chat' or 'always-on'")
+    if req.group not in {"chat", "always-on", "inactive"}:
+        raise HTTPException(status_code=400, detail="group must be 'chat', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
         data = _read_yaml()

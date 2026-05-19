@@ -434,9 +434,10 @@ function DownloadLogPane({
   const pct = hasRealProgress ? Math.min(100, (progress!.bytes / progress!.total) * 100) : 0;
   const etaSec = useDownloadEta(status === "streaming" ? progress : null);
   // Local collapse: the log scroller hides but the header + progress bar
-  // stay visible so the admin can still see "Cancel" + ETA. Toggle with
-  // Hide/Show; the pane only fully disappears via Cancel or post-load Close.
-  const [collapsed, setCollapsed] = useState(false);
+  // stay visible so the admin can still see "Cancel" + ETA. Default to
+  // collapsed — the logs are llama-server stderr noise most of the time
+  // and the progress bar is the useful signal. Click Show to expand.
+  const [collapsed, setCollapsed] = useState(true);
   return (
     <div className="mb-3 bg-[#0e0e0f] border border-[#333537] rounded-lg overflow-hidden">
       <div className="flex items-center justify-between px-3 py-2 bg-[#131314] border-b border-[#333537]">
@@ -538,7 +539,7 @@ function AddModelForm({
   const [repo, setRepo] = useState(initialRepo);
   const [ngl, setNgl] = useState(99);
   const [ctxSize, setCtxSize] = useState(8192);
-  const [group, setGroup] = useState<"chat" | "always-on">("chat");
+  const [group, setGroup] = useState<"chat" | "always-on" | "inactive">("chat");
   const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -609,11 +610,12 @@ function AddModelForm({
         </Field>
         <Field label="Group">
           <select
-            value={group} onChange={e => setGroup(e.target.value as "chat" | "always-on")}
+            value={group} onChange={e => setGroup(e.target.value as "chat" | "always-on" | "inactive")}
             className="w-full bg-[#0e0e0f] border border-[#333537] text-sm rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
           >
             <option value="chat">chat</option>
             <option value="always-on">always-on</option>
+            <option value="inactive">inactive</option>
           </select>
         </Field>
         <Field label="Tags">
@@ -665,8 +667,10 @@ function EditModelRow({
   // the user deletes + re-adds.
   const [ngl, setNgl] = useState(model.ngl ?? 99);
   const [ctxSize, setCtxSize] = useState(model.ctx_size ?? 8192);
-  const [group, setGroup] = useState<"chat" | "always-on">(
-    (model.group === "always-on" ? "always-on" : "chat") as "chat" | "always-on",
+  const [group, setGroup] = useState<"chat" | "always-on" | "inactive">(
+    (["always-on", "inactive"].includes(model.group ?? "")
+      ? (model.group as "always-on" | "inactive")
+      : "chat"),
   );
   const [tags, setTags] = useState<string[]>(model.tags);
 
@@ -696,11 +700,12 @@ function EditModelRow({
         </Field>
         <Field label="Group">
           <select
-            value={group} onChange={e => setGroup(e.target.value as "chat" | "always-on")}
+            value={group} onChange={e => setGroup(e.target.value as "chat" | "always-on" | "inactive")}
             className="w-full bg-[#0e0e0f] border border-[#333537] text-sm rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
           >
             <option value="chat">chat</option>
             <option value="always-on">always-on</option>
+            <option value="inactive">inactive</option>
           </select>
         </Field>
         <Field label="Tags">

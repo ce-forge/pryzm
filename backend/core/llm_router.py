@@ -117,13 +117,18 @@ class HeuristicRouter:
 
 def build_catalog_from_yaml(path: str | pathlib.Path) -> dict[str, set[str]]:
     """Parses `infra/llama-swap-config.yaml` into {model_id -> set(tags)}.
-    Missing or null `tags:` becomes an empty set."""
+    Missing or null `tags:` becomes an empty set. Models in the `inactive`
+    group are excluded — they stay registered (cache survives) but the
+    chat router will never pick them."""
     with open(path) as f:
         cfg = yaml.safe_load(f) or {}
-    return {
-        model_id: set(model_cfg.get("tags") or [])
-        for model_id, model_cfg in (cfg.get("models") or {}).items()
-    }
+    catalog: dict[str, set[str]] = {}
+    for model_id, model_cfg in (cfg.get("models") or {}).items():
+        groups = set(model_cfg.get("groups") or [])
+        if "inactive" in groups:
+            continue
+        catalog[model_id] = set(model_cfg.get("tags") or [])
+    return catalog
 
 
 def models_to_prewarm_from_yaml(
