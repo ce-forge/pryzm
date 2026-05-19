@@ -132,7 +132,7 @@ def _build_cmd_block(repo: str, quant: str, ngl: int, ctx_size: int, group: str)
         f"-hf {repo}:{quant}\n"
         f"-ngl {ngl} --ctx-size {ctx_size} --jinja --flash-attn on"
     )
-    if group == "chat":
+    if group == "on-demand":
         base += "\n--cache-type-k q8_0 --cache-type-v q8_0"
     return base
 
@@ -143,7 +143,7 @@ class AddModelRequest(BaseModel):
     quant: Optional[str] = None  # Optional: if `repo` already contains `:quant`, this is ignored
     ngl: int = 99
     ctx_size: int = 8192
-    group: str = "chat"
+    group: str = "on-demand"
     tags: list[str] = Field(default_factory=list)
     # Optional progress-tracking hints from the HF picker — when present,
     # the status SSE emits real {bytes, total} events instead of just a
@@ -236,8 +236,8 @@ async def add_model(
         raise HTTPException(status_code=400, detail=f"repo:quant looks malformed: {repo_full!r}")
     repo, quant = repo_full.split(":", 1)
 
-    if req.group not in {"chat", "always-on", "inactive"}:
-        raise HTTPException(status_code=400, detail="group must be 'chat', 'always-on', or 'inactive'")
+    if req.group not in {"on-demand", "always-on", "inactive"}:
+        raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
         data = _read_yaml()
@@ -298,8 +298,8 @@ async def update_model(
     db: DbSession = Depends(database.get_db),
     admin: models.User = Depends(cookie_auth.require_admin),
 ) -> dict:
-    if req.group is not None and req.group not in {"chat", "always-on"}:
-        raise HTTPException(status_code=400, detail="group must be 'chat' or 'always-on'")
+    if req.group is not None and req.group not in {"on-demand", "always-on", "inactive"}:
+        raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
         data = _read_yaml()
@@ -319,7 +319,7 @@ async def update_model(
 
         new_ngl = req.ngl if req.ngl is not None else (current["ngl"] or 99)
         new_ctx = req.ctx_size if req.ctx_size is not None else (current["ctx_size"] or 8192)
-        new_group = req.group if req.group is not None else (current["group"] or "chat")
+        new_group = req.group if req.group is not None else (current["group"] or "on-demand")
         new_tags = req.tags if req.tags is not None else list(current["tags"])
 
         changed_fields = []

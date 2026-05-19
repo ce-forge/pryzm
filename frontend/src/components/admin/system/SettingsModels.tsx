@@ -539,7 +539,7 @@ function AddModelForm({
   const [repo, setRepo] = useState(initialRepo);
   const [ngl, setNgl] = useState(99);
   const [ctxSize, setCtxSize] = useState(8192);
-  const [group, setGroup] = useState<"chat" | "always-on" | "inactive">("chat");
+  const [group, setGroup] = useState<"on-demand" | "always-on" | "inactive">("on-demand");
   const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
@@ -610,10 +610,10 @@ function AddModelForm({
         </Field>
         <Field label="Group">
           <select
-            value={group} onChange={e => setGroup(e.target.value as "chat" | "always-on" | "inactive")}
+            value={group} onChange={e => setGroup(e.target.value as "on-demand" | "always-on" | "inactive")}
             className="w-full bg-[#0e0e0f] border border-[#333537] text-sm rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
           >
-            <option value="chat">chat</option>
+            <option value="on-demand">on-demand</option>
             <option value="always-on">always-on</option>
             <option value="inactive">inactive</option>
           </select>
@@ -667,10 +667,10 @@ function EditModelRow({
   // the user deletes + re-adds.
   const [ngl, setNgl] = useState(model.ngl ?? 99);
   const [ctxSize, setCtxSize] = useState(model.ctx_size ?? 8192);
-  const [group, setGroup] = useState<"chat" | "always-on" | "inactive">(
+  const [group, setGroup] = useState<"on-demand" | "always-on" | "inactive">(
     (["always-on", "inactive"].includes(model.group ?? "")
       ? (model.group as "always-on" | "inactive")
-      : "chat"),
+      : "on-demand"),
   );
   const [tags, setTags] = useState<string[]>(model.tags);
 
@@ -700,10 +700,10 @@ function EditModelRow({
         </Field>
         <Field label="Group">
           <select
-            value={group} onChange={e => setGroup(e.target.value as "chat" | "always-on" | "inactive")}
+            value={group} onChange={e => setGroup(e.target.value as "on-demand" | "always-on" | "inactive")}
             className="w-full bg-[#0e0e0f] border border-[#333537] text-sm rounded-lg px-2 py-1.5 outline-none focus:border-blue-500"
           >
-            <option value="chat">chat</option>
+            <option value="on-demand">on-demand</option>
             <option value="always-on">always-on</option>
             <option value="inactive">inactive</option>
           </select>

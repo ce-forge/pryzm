@@ -1,21 +1,28 @@
 # llama-swap configuration for Pryzm.
 #
-# Two groups:
+# Two VRAM-lifecycle groups. Tags (vision, embedding, code, …) on each
+# model are independent — they're routing hints, not policy.
 #   - always-on: resident in VRAM, never auto-unloaded. Holds the small chat
-#                default, the embedding model, and the vision/captioning model
-#                so RAG ingestion and image captioning don't fight the chat
-#                slot.
-#   - chat: swappable, one model at a time. Used by the router-escalated
-#           large chat model (E4B). When E4B loads it stays until something
-#           else in `chat` is requested; always-on members are not affected
-#           because the always-on group is `persistent`.
+#                default and the embedding model so RAG ingestion doesn't
+#                fight the chat slot.
+#   - on-demand: loaded on first use, evicted by the per-model ttl when
+#                idle. Multiple members coexist in VRAM if it fits — no
+#                forced swap between them. E4B (router-escalated) and the
+#                vision model both live here.
+# A third "inactive" state exists Pryzm-side: the backend's catalog filter
+# excludes any model whose model-side `groups:` contains `inactive`. Such
+# models stay in this file and keep their cache, but the chat router never
+# picks them.
 #
 # IMPORTANT: per upstream llama-swap docs (legacy-groups syntax), group
 # membership is declared via the GROUP's `members` list — NOT via a
-# model-side `groups:` field. The latter is silently ignored.
+# model-side `groups:` field. The latter is silently ignored by llama-swap
+# (but Pryzm reads it for the `inactive` filter).
 # See: https://github.com/mostlygeek/llama-swap/blob/40e39f7/config.example.yaml#L334-L396
 #
-# Reload without restart: docker compose kill -s HUP llama-swap
+# Reload: model edits (cmd, ngl, tags) via `docker compose kill -s HUP
+# llama-swap`. Group definition changes need `docker compose restart
+# llama-swap`.
 
 healthCheckTimeout: 3600   # allow first-request HuggingFace downloads to finish
 startPort: 9000            # llama-server instances bind 9000+
@@ -23,22 +30,24 @@ startPort: 9000            # llama-server instances bind 9000+
 groups:
   # Resident-in-VRAM models. `persistent: true` blocks other groups from
   # unloading these; `swap: false` lets every member coexist; `exclusive:
-  # false` means loading an always-on member doesn't unload `chat`.
+  # false` means loading an always-on member doesn't unload on-demand.
   "always-on":
     persistent: true
     swap: false
     exclusive: false
     members:
-      - "gemma-4-E2B-it"
-      - "nomic-embed-text-v1.5"
+    - "gemma-4-E2B-it"
+    - "nomic-embed-text-v1.5"
 
-  # Swappable chat slot. Only E4B lives here today — it loads when the
-  # router escalates and unloads when llama-swap reclaims the slot.
-  "chat":
-    swap: true
+  # On-demand slot. Members coexist in VRAM (swap: false) so image-then-
+  # think workflows don't pay an E4B reload after captioning. Each model
+  # carries its own ttl for idle eviction.
+  "on-demand":
+    swap: false
     exclusive: false
     members:
-      - "gemma-4-E4B-it"
+    - "gemma-4-E4B-it"
+    - "qwen2-vl-2B-it"
 
 models:
   # Tier-1 default (small). Pinned always-on per Phase C tuning — at
@@ -52,6 +61,8 @@ models:
       -hf bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M
       -ngl 99 --ctx-size 8192 --jinja --flash-attn on
     tags: []
+    groups:
+    - always-on
 
   # Tier-2 default (larger). Used for complex/long prompts the router
   # decides E2B can't handle. NO LONGER carries the `vision` tag —
@@ -67,10 +78,8 @@ models:
       --cache-type-k q8_0 --cache-type-v q8_0
     tags:
     - code
-
-  # Captioning model. Vision projector is loaded explicitly via
-  # --mmproj-url; auto-detect is unreliable on on-demand TTL loads.
-  # URL form leverages HF cache. ~1 GB Q4_K_M + ~600MB mmproj-f16.
+    groups:
+    - on-demand
   "qwen2-vl-2B-it":
     cmd: |-
       /app/llama-server --port ${PORT}
@@ -83,6 +92,8 @@ models:
     ttl: 60
     tags:
     - vision
+    groups:
+    - on-demand
 
   "nomic-embed-text-v1.5":
     cmd: >
