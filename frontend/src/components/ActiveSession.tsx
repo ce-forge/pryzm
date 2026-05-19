@@ -14,6 +14,7 @@ import ChatInput from "./ChatInput";
 import ChatHeader from "./ChatHeader";
 import QuickActions from "./QuickActions";
 import ProcessingAnimation from "./ProcessingAnimation";
+import ThinkingPanel from "./ThinkingPanel";
 import SearchBar from "./SearchBar";
 import ChatTimestamp from "./ChatTimestamp";
 import ChatBubble from "./ChatBubble";
@@ -40,6 +41,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const messages = session.messages;
   const activeSessionKey = session.currentSession || "temp_new_chat";
   const myStreamingText = ai.streamingContent[activeSessionKey];
+  const myStreamingReasoning = ai.streamingReasoning[activeSessionKey];
 
   const currentIsProcessing =
     session.streamingSessionIdsRef.current.has(activeSessionKey);
@@ -187,6 +189,9 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
             const liveToolCalls = isLastStreaming ? ai.streamingToolCalls[session.currentSession ?? ""] : undefined;
             const displayToolCalls = liveToolCalls ?? m.toolCalls;
             const displayContent = isLastStreaming && myStreamingText ? myStreamingText : m.content;
+            const displayReasoning = isLastStreaming
+              ? (myStreamingReasoning || undefined)
+              : m.reasoningContent;
             const stableKey = m.id ?? `idx-${i}`;
             return (
               <React.Fragment key={stableKey}>
@@ -198,6 +203,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
                 <ChatBubble
                   message={m}
                   displayContent={displayContent}
+                  displayReasoning={displayReasoning}
                   toolCalls={displayToolCalls}
                   index={i}
                   searchQuery={search.searchQuery}
@@ -211,7 +217,16 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
             );
           })}
 
-          {currentIsProcessing && messages.length > 0 && !myStreamingText && <ProcessingAnimation />}
+          {currentIsProcessing && messages.length > 0 && !myStreamingText && (
+            <>
+              <ProcessingAnimation
+                label={myStreamingReasoning ? "focusing…" : "reflecting…"}
+              />
+              {myStreamingReasoning && (
+                <ThinkingPanel reasoning={myStreamingReasoning} variant="live" />
+              )}
+            </>
+          )}
         </div>
       </div>
 

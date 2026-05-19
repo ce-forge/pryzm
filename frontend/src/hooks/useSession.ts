@@ -115,6 +115,8 @@ export function useSession() {
             const mapped: Message[] = historyData.map((m: Message & {
               referenced_files?: ReferencedFile[];
               tool_calls?: ToolCall[];
+              reasoning_content?: string | null;
+              reasoning_duration_s?: number | null;
             }) => ({
               id: m.id,
               role: m.role,
@@ -122,6 +124,8 @@ export function useSession() {
               timestamp: m.timestamp,
               referencedFiles: m.referenced_files ?? undefined,
               toolCalls: m.tool_calls ?? undefined,
+              reasoningContent: m.reasoning_content ?? undefined,
+              reasoningDurationS: m.reasoning_duration_s ?? null,
             }));
             setMessageCache(prev => ({ ...prev, [cacheKey(workspace, currentSession)]: mapped }));
           }
@@ -165,6 +169,8 @@ export function useSession() {
         const mapped: Message[] = data.map((m: Message & {
           referenced_files?: ReferencedFile[];
           tool_calls?: ToolCall[];
+          reasoning_content?: string | null;
+          reasoning_duration_s?: number | null;
         }) => ({
           id: m.id,
           role: m.role,
@@ -172,6 +178,8 @@ export function useSession() {
           timestamp: m.timestamp,
           referencedFiles: m.referenced_files ?? undefined,
           toolCalls: m.tool_calls ?? undefined,
+          reasoningContent: m.reasoning_content ?? undefined,
+          reasoningDurationS: m.reasoning_duration_s ?? null,
         }));
         setMessageCache(prev => ({ ...prev, [cacheKey(workspace, id)]: mapped }));
       }

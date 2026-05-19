@@ -5,6 +5,7 @@ import AssistantMessage from "./AssistantMessage";
 import MessageActions from "./MessageActions";
 import ToolCallsBlock from "./ToolCallsBlock";
 import ReferencedFilesPreview from "./ReferencedFilesPreview";
+import ThinkingPanel from "./ThinkingPanel";
 import type { ToolCall, ReferencedFile } from "@/types/chat";
 
 interface ChatBubbleProps {
@@ -12,8 +13,23 @@ interface ChatBubbleProps {
   // here is the message row from useSession's messageCache — we leave
   // it loosely typed to avoid coupling this component to the entire
   // server-message schema.
-  message: { id?: string; role: string; content: string; timestamp?: string; referencedFiles?: ReferencedFile[] };
+  message: {
+    id?: string;
+    role: string;
+    content: string;
+    timestamp?: string;
+    referencedFiles?: ReferencedFile[];
+    reasoningContent?: string;
+    reasoningDurationS?: number | null;
+  };
   displayContent: string; // streamed text; updates per token without changing `message`
+  /**
+   * Reasoning_content from thinking-mode models. During streaming this
+   * is the parent-passed live string from streamingReasoning[id]; once
+   * persisted, the parent passes message.reasoningContent. Empty/undefined
+   * means no panel renders.
+   */
+  displayReasoning?: string;
   toolCalls?: ToolCall[]; // passed separately so message reference stays stable
   index: number;
   searchQuery: string;
@@ -27,6 +43,7 @@ interface ChatBubbleProps {
 function ChatBubbleImpl({
   message,
   displayContent,
+  displayReasoning,
   toolCalls,
   index,
   searchQuery,
@@ -103,6 +120,13 @@ function ChatBubbleImpl({
     <div className="group flex flex-col w-full mb-6 relative">
       <div className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} w-full`}>
         <div className={`flex flex-col ${message.role === 'user' ? 'max-w-[85%] items-end' : 'w-full items-start'} min-w-0`}>
+          {message.role !== "user" && displayReasoning && (
+            <ThinkingPanel
+              reasoning={displayReasoning}
+              durationSeconds={message.reasoningDurationS ?? null}
+              variant="finished"
+            />
+          )}
           <div className={`${message.role === 'user' ? 'bg-[#2f2f2f] text-[#e3e3e3] rounded-2xl py-2.5 px-5' : 'text-[#e3e3e3] px-1 w-full flex-1'} break-words min-w-0`}>
             {message.role === "user" ? (
               <UserMessage content={displayContent} searchQuery={searchQuery} />
@@ -152,6 +176,7 @@ const ChatBubble = React.memo(ChatBubbleImpl, (prev, next) => {
   return (
     prev.message === next.message &&
     prev.displayContent === next.displayContent &&
+    prev.displayReasoning === next.displayReasoning &&
     prev.toolCalls === next.toolCalls &&
     prev.searchQuery === next.searchQuery &&
     prev.isStreaming === next.isStreaming &&

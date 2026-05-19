@@ -1,12 +1,21 @@
 import React from "react";
 
-export default function ProcessingAnimation() {
+interface ProcessingAnimationProps {
+  /**
+   * Label rendered next to the prism animation. Lowercase by convention.
+   * "reflecting…" is the small-model default; "focusing…" indicates the
+   * large-tier model is mid-reasoning (reasoning_content streaming).
+   */
+  label?: string;
+}
+
+export default function ProcessingAnimation({ label = "reflecting…" }: ProcessingAnimationProps) {
   return (
     <div className="flex items-center mt-4 mb-2 pl-4">
-      
-      {/* 1. TEXT ON THE LEFT */}
-      <span 
-        className="text-[12px] tracking-[0.2em] font-semibold uppercase mr-4"
+
+      {/* 1. LABEL ON THE LEFT */}
+      <span
+        className="text-[12px] tracking-wide mr-4"
         style={{
           background: 'linear-gradient(90deg, #4b5563 0%, #4b5563 40%, #ffffff 50%, #4b5563 60%, #4b5563 100%)',
           backgroundSize: '200% 100%',
@@ -15,7 +24,7 @@ export default function ProcessingAnimation() {
           animation: 'textShimmer 5s infinite linear'
         }}
       >
-        Processing
+        {label}
       </span>
       <style>{`
         @keyframes textShimmer {

@@ -9,6 +9,13 @@ type SessionApi = ReturnType<typeof useSessionContext>;
 export interface InferenceApi {
   isProcessing: boolean;
   streamingContent: Record<string, string>;
+  /**
+   * Per-session live reasoning_content from reasoning-aware chat models
+   * (Gemma 4 thinking mode etc.). Populated incrementally during stream;
+   * cleared at the end of the turn — the finished message reads its
+   * frozen reasoning from the persisted Message row.
+   */
+  streamingReasoning: Record<string, string>;
   streamingToolCalls: Record<string, ToolCall[]>;
   sendMessage: (
     text: string,
@@ -34,6 +41,7 @@ export interface InferenceApi {
 export function useInference(workspaceSlug: string, sessionApi: SessionApi): InferenceApi {
   const [isProcessing, setIsProcessing] = useState(false);
   const [streamingContent, setStreamingContent] = useState<Record<string, string>>({});
+  const [streamingReasoning, setStreamingReasoning] = useState<Record<string, string>>({});
   const [streamingToolCalls, setStreamingToolCalls] = useState<Record<string, ToolCall[]>>({});
 
   // Mirror isProcessing into a ref so sendMessage can early-return on a
@@ -78,8 +86,10 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       sessionApi.streamingSessionIdsRef.current.add(optimisticId);
 
       setStreamingContent((prev) => ({ ...prev, [optimisticId]: "" }));
+      setStreamingReasoning((prev) => ({ ...prev, [optimisticId]: "" }));
 
       let fullAssistantMessage = "";
+      let fullReasoning = "";
       let referencedFiles: ReferencedFile[] | undefined;
       const pendingToolCalls: ToolCall[] = [];
       let pendingUserMessageId: string | null = null;
@@ -202,6 +212,10 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                     ...prev,
                     [newDbId]: prev[optimisticId] ?? "",
                   }));
+                  setStreamingReasoning((prev) => ({
+                    ...prev,
+                    [newDbId]: prev[optimisticId] ?? "",
+                  }));
 
                   linkSessionRef.current?.(optimisticId, newDbId);
 
@@ -257,6 +271,19 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
                     return next;
                   });
                 }
+
+                if (parsed.type === "reasoning_chunk" && parsed.chunk) {
+                  fullReasoning += parsed.chunk;
+                  setStreamingReasoning((prev) => {
+                    const next = { ...prev, [optimisticId]: fullReasoning };
+                    if (realDbId !== null) next[realDbId] = fullReasoning;
+                    return next;
+                  });
+                }
+                // `reasoning_done` carries the wall-clock duration_s but
+                // the live UI doesn't display it — the finished panel reads
+                // duration from the persisted message row. Event flows
+                // through harmlessly.
               } catch {
                 /* malformed line, skip */
               }
@@ -282,6 +309,13 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
         );
 
         setStreamingContent((prev) => {
+          const next = { ...prev };
+          delete next[optimisticId];
+          if (realDbId !== null) delete next[realDbId];
+          return next;
+        });
+
+        setStreamingReasoning((prev) => {
           const next = { ...prev };
           delete next[optimisticId];
           if (realDbId !== null) delete next[realDbId];
@@ -327,6 +361,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
   return {
     isProcessing,
     streamingContent,
+    streamingReasoning,
     streamingToolCalls,
     sendMessage,
     stopInference,

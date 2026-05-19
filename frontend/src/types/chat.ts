@@ -17,6 +17,10 @@ export interface Message {
   timestamp?: string;
   referencedFiles?: ReferencedFile[];
   toolCalls?: ToolCall[];
+  /** Reasoning_content from thinking-mode models. Empty/undefined renders no panel. */
+  reasoningContent?: string;
+  /** Wall-clock duration of the reasoning phase, in seconds. */
+  reasoningDurationS?: number | null;
 }
 
 export interface FileUpload {
