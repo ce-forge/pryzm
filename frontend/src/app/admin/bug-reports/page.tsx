@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
+import Identicon from "@/components/Identicon";
 
 interface AdminBugReport {
   id: string;
@@ -181,11 +182,21 @@ export default function AdminBugReportsPage() {
                 className="border-t border-[#2a2a2c] hover:bg-[#1a1a1b] cursor-pointer"
               >
                 <td className="px-3 py-2 text-xs text-gray-400 whitespace-nowrap">
-                  {b.created_at
-                    ? new Date(b.created_at).toLocaleString()
-                    : "—"}
+                  {b.created_at ? (
+                    <>
+                      <div>{new Date(b.created_at).toLocaleDateString()}</div>
+                      <div>{new Date(b.created_at).toLocaleTimeString()}</div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
-                <td className="px-3 py-2">{b.user_display_name}</td>
+                <td className="px-3 py-2">
+                  <span className="inline-flex items-center gap-2">
+                    <Identicon seed={b.user_display_name} size={18} />
+                    {b.user_display_name}
+                  </span>
+                </td>
                 <td className="px-3 py-2">
                   <StatusBadge status={b.status} />
                 </td>
@@ -341,15 +352,28 @@ function BugDetailModal({
             label="Category"
             value={CATEGORY_LABELS[bug.category] ?? bug.category}
           />
-          <DetailRow label="Reporter" value={bug.user_display_name} />
-          <DetailRow
-            label="When"
-            value={
-              bug.created_at
-                ? new Date(bug.created_at).toLocaleString()
-                : "—"
-            }
-          />
+          <div className="flex gap-4">
+            <div className="text-xs text-gray-400 w-24 shrink-0 pt-0.5">
+              Reporter
+            </div>
+            <div className="flex-1 inline-flex items-center gap-2">
+              <Identicon seed={bug.user_display_name} size={20} />
+              {bug.user_display_name}
+            </div>
+          </div>
+          <div className="flex gap-4">
+            <div className="text-xs text-gray-400 w-24 shrink-0 pt-0.5">When</div>
+            <div className="flex-1">
+              {bug.created_at ? (
+                <>
+                  <div>{new Date(bug.created_at).toLocaleDateString()}</div>
+                  <div>{new Date(bug.created_at).toLocaleTimeString()}</div>
+                </>
+              ) : (
+                "—"
+              )}
+            </div>
+          </div>
           <DetailRow label="Workspace" value={bug.workspace_id ?? "—"} mono />
           <div className="flex gap-4">
             <div className="text-xs text-gray-400 w-24 shrink-0 pt-0.5">

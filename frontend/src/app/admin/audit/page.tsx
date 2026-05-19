@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { apiFetch } from "@/utils/apiClient";
 import { AuditEventDetailModal } from "@/components/admin/AuditEventDetailModal";
 import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
+import Identicon from "@/components/Identicon";
 
 interface AuditEvent {
   id: string;
@@ -244,12 +245,25 @@ export default function AdminAuditPage() {
                 className="border-t border-[#2a2a2c] hover:bg-[#1a1a1b] cursor-pointer"
               >
                 <td className="px-3 py-2 text-gray-400 whitespace-nowrap text-xs">
-                  {e.created_at
-                    ? new Date(e.created_at).toLocaleString()
-                    : "—"}
+                  {e.created_at ? (
+                    <>
+                      <div>{new Date(e.created_at).toLocaleDateString()}</div>
+                      <div>{new Date(e.created_at).toLocaleTimeString()}</div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-3 py-2 truncate max-w-32">
-                  {e.user_display_name_at_event ?? (
+                  {e.user_display_name_at_event ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Identicon
+                        seed={e.user_display_name_at_event}
+                        size={18}
+                      />
+                      {e.user_display_name_at_event}
+                    </span>
+                  ) : (
                     <span className="text-gray-500">system</span>
                   )}
                 </td>

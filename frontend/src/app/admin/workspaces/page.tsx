@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
 import { ToolPicker } from "@/components/ToolPicker";
+import Identicon from "@/components/Identicon";
 
 interface AdminWorkspace {
   id: string;
@@ -242,7 +243,12 @@ function AllWorkspacesView() {
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  {w.owner_username ?? (
+                  {w.owner_username ? (
+                    <span className="inline-flex items-center gap-2">
+                      <Identicon seed={w.owner_username} size={20} />
+                      {w.owner_username}
+                    </span>
+                  ) : (
                     <span className="text-amber-400">(orphan)</span>
                   )}
                 </td>
@@ -264,15 +270,20 @@ function AllWorkspacesView() {
                   </button>
                 </td>
                 <td className="px-3 py-2 text-xs text-gray-400">
-                  {w.created_at
-                    ? new Date(w.created_at).toLocaleString()
-                    : "—"}
+                  {w.created_at ? (
+                    <>
+                      <div>{new Date(w.created_at).toLocaleDateString()}</div>
+                      <div>{new Date(w.created_at).toLocaleTimeString()}</div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
                 </td>
                 <td className="px-3 py-2">
                   <button
                     type="button"
                     onClick={() => deleteWorkspace(w)}
-                    className="text-xs px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-300 hover:bg-red-500/25"
+                    className="text-xs px-2 py-0.5 rounded border border-red-500/30 text-red-300 hover:bg-red-500/15"
                   >
                     Delete
                   </button>
@@ -400,32 +411,32 @@ function TemplatesView() {
                   {t.color ?? "—"}
                 </td>
                 <td className="px-3 py-2">
-                  <div className="flex flex-wrap gap-1">
+                  <div className="flex items-center gap-1 whitespace-nowrap">
                     <button
                       type="button"
                       onClick={() => setEditTemplate(t)}
-                      className="text-xs px-2 py-1 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c]"
+                      className="text-xs px-2 py-0.5 rounded border border-[#2a2a2c] hover:bg-[#2a2a2c] text-gray-300"
                     >
                       Edit
                     </button>
                     <button
                       type="button"
                       onClick={() => setPushTemplate(t)}
-                      className="text-xs px-2 py-1 rounded bg-sky-500/15 border border-sky-500/30 text-sky-300 hover:bg-sky-500/25"
+                      className="text-xs px-2 py-0.5 rounded border border-sky-500/30 text-sky-300 hover:bg-sky-500/15"
                     >
                       Push
                     </button>
                     <button
                       type="button"
                       onClick={() => setInstantiateTemplate(t)}
-                      className="text-xs px-2 py-1 rounded bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25"
+                      className="text-xs px-2 py-0.5 rounded border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/15"
                     >
                       Instantiate
                     </button>
                     <button
                       type="button"
                       onClick={() => deleteTemplate(t)}
-                      className="text-xs px-2 py-1 rounded bg-red-500/15 border border-red-500/30 text-red-300 hover:bg-red-500/25"
+                      className="text-xs px-2 py-0.5 rounded border border-red-500/30 text-red-300 hover:bg-red-500/15"
                     >
                       Delete
                     </button>
