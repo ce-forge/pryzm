@@ -14,7 +14,7 @@ type Model = {
   loaded: boolean;
 };
 
-const KNOWN_TAGS = ["embedding", "vision", "code"];
+const KNOWN_TAGS = ["embedding", "vision", "code", "reasoning"];
 
 export default function ModelsSection() {
   const [models, setModels] = useState<Model[]>([]);
