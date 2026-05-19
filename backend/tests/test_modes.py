@@ -141,6 +141,37 @@ def test_apply_tier_override_is_returned():
     assert tier == "LARGE"
 
 
+def test_gated_tool_is_hidden_when_its_mode_is_not_active():
+    """A tool listed in a mode's gates_tools is filtered out of the
+    per-turn tool_set unless that mode is in requested_modes — even if
+    the workspace has it enabled. This is how the globe toggle gates
+    web_search end-to-end."""
+    @tool(properties={}, required=[])
+    def _gated_tool() -> str:
+        return ""
+
+    register_mode(Mode(name="gate", gates_tools=["_gated_tool"]))
+    ts = _make_tool_set(["_gated_tool"])  # workspace HAS the tool enabled
+
+    out_ts, _, _ = apply_modes(ts, "PROMPT", [])
+    assert "_gated_tool" not in out_ts.callables
+    assert not any(d["function"]["name"] == "_gated_tool" for d in out_ts.definitions)
+
+
+def test_gated_tool_is_visible_when_its_mode_is_active():
+    """The same tool is included when the gating mode is in requested_modes."""
+    @tool(properties={}, required=[])
+    def _gated_tool() -> str:
+        return ""
+
+    register_mode(Mode(name="gate", gates_tools=["_gated_tool"]))
+    ts = _make_tool_set(["_gated_tool"])
+
+    out_ts, _, _ = apply_modes(ts, "PROMPT", ["gate"])
+    assert "_gated_tool" in out_ts.callables
+    assert any(d["function"]["name"] == "_gated_tool" for d in out_ts.definitions)
+
+
 def test_web_search_mode_is_registered_when_module_imports():
     """Importing core.modes (and indirectly tools.web) registers a 'web_search' mode
     whose only effect is force_tools=['web_search']."""
