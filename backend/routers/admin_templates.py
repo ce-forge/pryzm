@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session as DbSession
 
 from core import cookie_auth
 from core.audit import EventType, log_event
-from core.tool_permissions import enforce_allowed_tools
+from core.tool_permissions import enforce_allowed_tools, filter_allowed_tools
 from db import database, models
 from schemas import AdminTemplateCreate, AdminTemplateUpdate, AdminTemplateInstantiate
 
@@ -194,14 +194,30 @@ def push_template(
     affected = db.query(models.Workspace).filter(models.Workspace.template_id == t.id).all()
     affected_count = len(affected)
     affected_user_ids = {w.user_id for w in affected}
+    template_tools = list(t.enabled_tools or [])
+
+    filtered: list[dict] = []
+
     for inst in affected:
+        owner = inst.user
+        if owner is not None:
+            kept, dropped = filter_allowed_tools(owner, template_tools)
+        else:
+            kept, dropped = list(template_tools), []
         for field in _SETTINGS_FIELDS:
             value = getattr(t, field, None)
-            if field == "enabled_tools" and value is not None:
-                value = list(value)
-            if field == "engine_config" and value is not None:
+            if field == "enabled_tools":
+                value = kept
+            elif field == "engine_config" and value is not None:
                 value = dict(value)
             setattr(inst, field, value)
+        if dropped:
+            filtered.append({
+                "user_id": owner.id if owner else None,
+                "username": owner.username if owner else None,
+                "dropped_tools": dropped,
+            })
+
     log_event(
         db, EventType.ADMIN_TEMPLATE_PUSHED,
         user=admin, request=request,
@@ -210,7 +226,12 @@ def push_template(
             "affected_workspace_count": affected_count,
             "affected_user_count": len(affected_user_ids),
             "had_customizations_count": 0,
+            "filtered": filtered,
         },
     )
     db.commit()
-    return {"ok": True, "affected_count": affected_count}
+    return {
+        "ok": True,
+        "affected_count": affected_count,
+        "filtered": filtered,
+    }

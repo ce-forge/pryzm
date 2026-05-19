@@ -571,3 +571,101 @@ class TestResetFilter:
             assert sorted(body["workspace"]["enabled_tools"]) == sorted(["web_search", "execute_ping"])
         finally:
             app.dependency_overrides.clear()
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/templates/{id}/push filter + extended response + audit
+# ---------------------------------------------------------------------------
+
+class TestPushFilter:
+    def _make_template(self, db_session, slug, enabled_tools):
+        t = models.WorkspaceTemplate(
+            slug=slug,
+            display_name=slug,
+            system_prompt="",
+            enabled_tools=enabled_tools,
+            engine_config={"backend": "llama_cpp"},
+        )
+        db_session.add(t); db_session.commit(); db_session.refresh(t)
+        return t
+
+    def _make_instance(self, db_session, owner_id, slug, template_id, enabled_tools=None):
+        ws = models.Workspace(
+            slug=slug,
+            display_name=slug,
+            system_prompt="",
+            enabled_tools=enabled_tools or [],
+            engine_config={"backend": "llama_cpp"},
+            user_id=owner_id,
+            template_id=template_id,
+            owner_can_edit=True,
+        )
+        db_session.add(ws); db_session.commit(); db_session.refresh(ws)
+        return ws
+
+    def test_push_no_filtering_when_users_uncapped(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            t = self._make_template(db_session, "tp1", ["web_search", "execute_ping"])
+            u = _seed_user(db_session, "alice")  # no cap
+            self._make_instance(db_session, u.id, "alice-tp1", t.id)
+            r = c.post(f"/api/admin/templates/{t.id}/push")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["filtered"] == []
+            assert body["affected_count"] == 1
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_push_filters_per_capped_user(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            t = self._make_template(db_session, "tp2", ["web_search", "execute_ping"])
+            u1 = _seed_user(db_session, "alice2")  # uncapped
+            u2 = _seed_user(db_session, "bob2", allowed_tools=["web_search"])  # capped
+            self._make_instance(db_session, u1.id, "a2-tp2", t.id)
+            self._make_instance(db_session, u2.id, "b2-tp2", t.id)
+            r = c.post(f"/api/admin/templates/{t.id}/push")
+            assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["affected_count"] == 2
+            filtered = body["filtered"]
+            assert len(filtered) == 1
+            assert filtered[0]["username"] == "bob2"
+            assert filtered[0]["dropped_tools"] == ["execute_ping"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_push_filter_persisted_to_workspaces(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            t = self._make_template(db_session, "tp3", ["web_search", "execute_ping"])
+            u = _seed_user(db_session, "carol2", allowed_tools=["web_search"])
+            ws = self._make_instance(db_session, u.id, "c2-tp3", t.id)
+            c.post(f"/api/admin/templates/{t.id}/push")
+            db_session.refresh(ws)
+            assert ws.enabled_tools == ["web_search"]
+        finally:
+            app.dependency_overrides.clear()
+
+    def test_push_audit_records_filtered(self, db_session):
+        try:
+            c, _ = _admin_client(db_session)
+            t = self._make_template(db_session, "tp4", ["web_search", "execute_ping"])
+            u = _seed_user(db_session, "dave2", allowed_tools=["web_search"])
+            self._make_instance(db_session, u.id, "d2-tp4", t.id)
+            c.post(f"/api/admin/templates/{t.id}/push")
+            ev = (
+                db_session.query(models.AuditEvent)
+                .filter(models.AuditEvent.event_type == "admin.template.pushed")
+                .order_by(models.AuditEvent.created_at.desc())
+                .first()
+            )
+            assert ev is not None
+            payload = ev.payload
+            assert "filtered" in payload
+            assert payload["filtered"] == [
+                {"user_id": u.id, "username": "dave2", "dropped_tools": ["execute_ping"]}
+            ]
+        finally:
+            app.dependency_overrides.clear()
