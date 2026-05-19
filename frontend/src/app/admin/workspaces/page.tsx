@@ -857,6 +857,9 @@ function TemplatePushModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  const [filtered, setFiltered] = useState<
+    { user_id: string | null; username: string | null; dropped_tools: string[] }[]
+  >([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -882,15 +885,22 @@ function TemplatePushModal({
     setSubmitting(true);
     setError(null);
     try {
-      const r = await apiFetch(`/api/admin/templates/${encodeURIComponent(target.id)}/push`, {
-        method: "POST",
-      });
+      const r = await apiFetch(
+        `/api/admin/templates/${encodeURIComponent(target.id)}/push`,
+        { method: "POST" },
+      );
       if (!r.ok) {
         setError(`Push failed (${r.status})`);
         return;
       }
+      const body = await r.json();
+      const f = Array.isArray(body.filtered) ? body.filtered : [];
+      setFiltered(f);
       setDone(true);
-      setTimeout(onDone, 900);
+      if (f.length === 0) {
+        setTimeout(onDone, 900);
+      }
+      // else: stay open — admin reads the filtered list and clicks Close
     } catch (e) {
       setError(String(e));
     } finally {
@@ -904,7 +914,37 @@ function TemplatePushModal({
         {loading ? (
           <div className="text-gray-400">Counting instances…</div>
         ) : done ? (
-          <div className="text-emerald-300">Push complete.</div>
+          <div className="space-y-3">
+            <div className="text-emerald-300">Push complete.</div>
+            {filtered.length > 0 && (
+              <div className="text-xs text-gray-300 space-y-1">
+                <div>
+                  Filtered tools for {filtered.length} user
+                  {filtered.length === 1 ? "" : "s"} due to per-user restrictions:
+                </div>
+                <ul className="list-disc pl-5 space-y-0.5">
+                  {filtered.map((f) => (
+                    <li key={f.user_id ?? f.username ?? ""}>
+                      <span className="font-mono text-[#e3e3e3]">
+                        {f.username ?? "(unknown)"}
+                      </span>{" "}
+                      — dropped{" "}
+                      <code className="font-mono text-amber-300">
+                        {f.dropped_tools.join(", ")}
+                      </code>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={onDone}
+                  className="text-sm px-3 py-1.5 rounded bg-[#1e1e1f] border border-[#2a2a2c] hover:bg-[#2a2a2c] mt-2"
+                >
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
         ) : (
           <>
             <p className="text-gray-300">
