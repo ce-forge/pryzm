@@ -180,6 +180,7 @@ def me(
         "username": user.username,
         "is_admin": user.is_admin,
         "can_create_workspaces": user.can_create_workspaces,
+        "allowed_tools": list(user.allowed_tools or []),
         "email": user.email,
         "must_change_password": user.must_change_password,
         "workspaces": [

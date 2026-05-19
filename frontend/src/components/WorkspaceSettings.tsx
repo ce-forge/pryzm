@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
@@ -45,9 +45,26 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const canEditWorkspace = mode !== "edit" || !!user?.is_admin || ownerCanEdit;
   const readOnly = mode === "edit" && !canEditWorkspace;
 
+  // Cap filter: admins and uncapped users see every tool; capped non-admins
+  // see only tools in their allowed_tools list. Returns null when no filter
+  // applies. Used both to gate the picker UI and to clamp the workspace's
+  // current enabled_tools (grandfathered tools outside the cap are hidden;
+  // they get silently dropped on the next PATCH that touches enabled_tools).
+  const allowedToolSet = useMemo<Set<string> | null>(() => {
+    if (!user || user.is_admin) return null;
+    const cap = user.allowed_tools ?? [];
+    if (cap.length === 0) return null;
+    return new Set(cap);
+  }, [user]);
+
+  const clampToCap = (tools: string[]): string[] =>
+    allowedToolSet ? tools.filter((t) => allowedToolSet.has(t)) : tools;
+
   const [name, setName] = useState(workspace?.display_name ?? "");
   const [prompt, setPrompt] = useState(workspace?.system_prompt ?? "");
-  const [enabledTools, setEnabledTools] = useState<string[]>(workspace?.enabled_tools ?? []);
+  const [enabledTools, setEnabledTools] = useState<string[]>(
+    clampToCap(workspace?.enabled_tools ?? []),
+  );
   const [color, setColor] = useState<WorkspaceColor>(
     (workspace?.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR
   );
@@ -86,7 +103,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
       if (source) {
         setName(source.display_name);
         setPrompt(source.system_prompt);
-        setEnabledTools([...source.enabled_tools]);
+        setEnabledTools(clampToCap([...source.enabled_tools]));
         setColor((source.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
       }
     }
@@ -109,7 +126,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
         () => {
           if ("display_name" in patch) setName(snapshot.display_name);
           if ("system_prompt" in patch) setPrompt(snapshot.system_prompt);
-          if ("enabled_tools" in patch) setEnabledTools(snapshot.enabled_tools);
+          if ("enabled_tools" in patch) setEnabledTools(clampToCap(snapshot.enabled_tools));
           if ("color" in patch) setColor((snapshot.color as WorkspaceColor) ?? DEFAULT_WORKSPACE_COLOR);
         },
         async () => {
@@ -186,8 +203,14 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   };
 
   const modalContent = (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-      <div className="bg-[#1e1f20] w-full max-w-2xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="bg-[#1e1f20] w-full max-w-2xl rounded-2xl border border-[#333537] shadow-2xl flex flex-col overflow-hidden max-h-[85vh]"
+        onClick={(e) => e.stopPropagation()}
+      >
 
         {/* Header */}
         <div className="flex justify-between items-center p-5 border-b border-[#333537] bg-[#131314]">
@@ -307,11 +330,19 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
             <p className="text-xs text-gray-500 mb-3">
               Toggle which tools the model can call from this workspace. The model decides when to call them based on each tool&apos;s own description.
             </p>
+            {allowedToolSet && (
+              <p className="text-xs text-amber-400/80 mb-3">
+                Your admin restricts your tools to:{" "}
+                <code className="font-mono">{[...allowedToolSet].join(", ")}</code>
+              </p>
+            )}
             <div className="space-y-2">
               {availableTools.length === 0 && (
                 <p className="text-xs text-gray-500 italic">Loading tool registry&hellip;</p>
               )}
-              {availableTools.map((t) => (
+              {availableTools
+                .filter((t) => !allowedToolSet || allowedToolSet.has(t.name))
+                .map((t) => (
                 <label key={t.name} className={`flex items-start gap-3 p-2 rounded ${readOnly ? "opacity-60 cursor-not-allowed" : "hover:bg-[#282a2c]/40 cursor-pointer"}`}>
                   <input
                     type="checkbox"
