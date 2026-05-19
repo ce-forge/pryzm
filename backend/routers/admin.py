@@ -482,6 +482,9 @@ async def hf_files(repo: str) -> list[dict]:
         if entry.get("type") == "file"
         and isinstance(entry.get("path"), str)
         and entry["path"].lower().endswith(".gguf")
+        # mmproj-*.gguf is the vision projection file, not a model weight.
+        # Loading it standalone fails — exclude from the pickable file list.
+        and not entry["path"].lower().startswith("mmproj")
     ]
     files.sort(key=lambda f: f["path"])
     return files
