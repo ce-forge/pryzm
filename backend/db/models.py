@@ -51,6 +51,7 @@ class Workspace(Base):
     owner_can_edit = Column(Boolean, nullable=False, default=False)
     position = Column(Integer, nullable=False, default=0, index=True)
 
+    user = relationship("User", foreign_keys=[user_id])
     sessions = relationship("Session", back_populates="workspace", cascade="all, delete-orphan")
     folders = relationship("Folder", back_populates="workspace", cascade="all, delete-orphan")
     documents = relationship("Document", back_populates="workspace", cascade="all, delete-orphan")
