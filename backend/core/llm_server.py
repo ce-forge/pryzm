@@ -16,6 +16,7 @@ import them directly.
 """
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, AsyncIterator
 
@@ -127,6 +128,107 @@ async def chat(
     adapted = _adapt_chat_response(resp.json())
     emit_chat_metric(model=model, response=adapted, fallback_duration_s=duration_s)
     return adapted
+
+
+async def chat_stream(
+    client: httpx.AsyncClient,
+    messages: list,
+    tools: list | None,
+    model: str,
+    options: dict | None = None,
+) -> AsyncIterator[dict]:
+    """POST /v1/chat/completions with stream=True. Yields one dict per
+    upstream SSE event with the shape of `choices[0].delta` plus an optional
+    `finish_reason` when the terminal event carries one.
+
+    The first upstream event is always the role marker
+    (`{role: "assistant", content: None}`); the terminal event has an empty
+    delta and `finish_reason` set. The caller can use either signal to
+    detect end-of-stream. The terminal event's `timings`/`usage` are
+    consumed here to emit a single `llm.metric` line, matching the non-
+    streaming `chat()` semantics — one metric per agentic-loop iteration."""
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+    }
+    if tools is not None:
+        payload["tools"] = tools
+    if options:
+        for k, v in options.items():
+            if k == "num_ctx":
+                payload["max_tokens"] = v
+            else:
+                payload[k] = v
+
+    url = f"{BASE_URL}/v1/chat/completions"
+    t0 = time.perf_counter()
+    final_event: dict | None = None
+
+    async with client.stream(
+        "POST", url, json=payload, timeout=settings.LLM_TIMEOUT_SECONDS,
+    ) as resp:
+        if resp.status_code >= 400:
+            # raise_for_status_with_body reads .text which is unavailable
+            # mid-stream — pull the body manually so the error matches the
+            # detail the non-streaming path surfaces.
+            body_bytes = await resp.aread()
+            try:
+                body = json.loads(body_bytes)
+                detail = (body.get("error") or {}).get("message") or body.get("detail")
+            except Exception:
+                detail = None
+            if not detail:
+                text = body_bytes.decode(errors="replace").strip()
+                detail = text[:400] + ("…" if len(text) > 400 else "")
+            raise httpx.HTTPStatusError(
+                f"{resp.status_code} {detail or 'streaming error'}",
+                request=resp.request, response=resp,
+            )
+
+        async for line in resp.aiter_lines():
+            line = line.strip()
+            if not line or not line.startswith("data: "):
+                continue
+            payload_str = line[6:]
+            if payload_str == "[DONE]":
+                break
+            try:
+                event = json.loads(payload_str)
+            except json.JSONDecodeError:
+                continue
+            choices = event.get("choices") or []
+            if not choices:
+                continue
+            choice = choices[0]
+            delta = choice.get("delta") or {}
+            finish = choice.get("finish_reason")
+
+            if finish is not None:
+                final_event = event
+
+            out: dict = dict(delta)
+            if finish is not None:
+                out["finish_reason"] = finish
+            yield out
+
+    duration_s = time.perf_counter() - t0
+
+    # Emit the metric once after the stream closes. _adapt_chat_response
+    # pulls usage + timings from the top level of the event, which the
+    # terminal event carries even though its `delta` is empty.
+    if final_event is not None:
+        adapted = _adapt_chat_response(final_event)
+    else:
+        adapted = {
+            "message": {},
+            "prompt_eval_count": 0,
+            "eval_count": 0,
+            "prompt_eval_duration": 0,
+            "eval_duration": 0,
+            "total_duration": int(duration_s * 1_000_000_000),
+        }
+    emit_chat_metric(model=model, response=adapted, fallback_duration_s=duration_s)
 
 
 async def generate(
