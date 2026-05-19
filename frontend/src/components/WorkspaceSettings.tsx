@@ -55,6 +55,7 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
   const [availableTools, setAvailableTools] = useState<{ name: string; description: string }[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [resetDropped, setResetDropped] = useState<string[]>([]);
 
   // Create-mode state.
   const [startFrom, setStartFrom] = useState<string>("");
@@ -151,8 +152,12 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
 
   const performReset = async () => {
     if (mode !== "edit") return;
-    await workspacesApi.reset(workspace.slug);
+    const result = await workspacesApi.reset(workspace.slug);
     setConfirmReset(false);
+    if (result && result.dropped_tools.length > 0) {
+      setResetDropped(result.dropped_tools);
+      return;
+    }
     onClose();
   };
 
@@ -323,6 +328,14 @@ export default function WorkspaceSettings({ mode, workspace, onClose }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Dropped-tools notice after reset */}
+          {resetDropped.length > 0 && (
+            <div className="text-xs px-3 py-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300">
+              Some tools weren&apos;t restored because your admin restricts your tool
+              list: <code className="font-mono">{resetDropped.join(", ")}</code>
+            </div>
+          )}
 
           {/* Edit-mode danger zone */}
           {mode === "edit" && (canEditWorkspace || user?.is_admin) && (

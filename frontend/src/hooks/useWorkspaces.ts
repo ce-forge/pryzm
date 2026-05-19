@@ -34,6 +34,11 @@ export interface RemoveResult {
   removed_documents: number;
 }
 
+export interface ResetResult {
+  workspace: Workspace;
+  dropped_tools: string[];
+}
+
 /**
  * Owns the list of workspaces + CRUD helpers. Reads once on mount; callers
  * trigger refetch after mutations. Components consume this via WorkspaceContext.
@@ -107,13 +112,13 @@ export function useWorkspaces() {
     }
   }, [refresh]);
 
-  const reset = useCallback(async (slug: string): Promise<Workspace | null> => {
+  const reset = useCallback(async (slug: string): Promise<ResetResult | null> => {
     try {
       const r = await apiFetch(`/workspaces/${slug}/reset`, { method: "POST" });
       if (!r.ok) return null;
-      const ws = await r.json();
+      const body = await r.json();
       await refresh();
-      return ws;
+      return body;
     } catch (e) {
       console.error("Failed to reset workspace", e);
       return null;
