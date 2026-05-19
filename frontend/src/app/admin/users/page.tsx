@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
+import { ToolPicker } from "@/components/ToolPicker";
 
 interface AdminUser {
   id: string;
@@ -11,6 +12,7 @@ interface AdminUser {
   is_admin: boolean;
   is_active: boolean;
   can_create_workspaces: boolean;
+  allowed_tools: string[];
   created_at: string | null;
   last_login_at: string | null;
 }
@@ -38,6 +40,7 @@ export default function AdminUsersPage() {
   const [password, setPassword] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
   const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(true);
+  const [allowedTools, setAllowedTools] = useState<string[]>([]);
   const [templates, setTemplates] = useState<WorkspaceTemplate[]>([]);
   const [selectedTemplates, setSelectedTemplates] = useState<
     Record<string, StarterTemplateSelection>
@@ -101,6 +104,12 @@ export default function AdminUsersPage() {
       .catch(() => setTemplates([]));
   }, []);
 
+  const toggleAllowedTool = (name: string) => {
+    setAllowedTools((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    );
+  };
+
   const toggleTemplate = (id: string) => {
     setSelectedTemplates((prev) => {
       const next = { ...prev };
@@ -147,6 +156,7 @@ export default function AdminUsersPage() {
           password,
           is_admin: isAdmin,
           can_create_workspaces: canCreateWorkspaces,
+          allowed_tools: allowedTools,
           starter_templates: Object.values(selectedTemplates),
         }),
       });
@@ -172,6 +182,7 @@ export default function AdminUsersPage() {
       // admin probably wants to make several users of the same shape.
       setUsername("");
       setPassword("");
+      setAllowedTools([]);
       setSelectedTemplates({});
       await loadUsers();
     } catch (e) {
@@ -227,6 +238,13 @@ export default function AdminUsersPage() {
               onChange={setCanCreateWorkspaces}
               hint="Allowed to add new workspaces in the chat sidebar"
             />
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">
+              Allowed tools (empty = no restriction)
+            </label>
+            <ToolPicker selected={allowedTools} onToggle={toggleAllowedTool} />
           </div>
 
           <div>
@@ -609,8 +627,17 @@ function EditUserModal({
   const [canCreateWorkspaces, setCanCreateWorkspaces] = useState(
     target.can_create_workspaces,
   );
+  const [allowedTools, setAllowedTools] = useState<string[]>(
+    target.allowed_tools ?? [],
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const toggleAllowedTool = (name: string) => {
+    setAllowedTools((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name],
+    );
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -635,6 +662,12 @@ function EditUserModal({
       if (isAdmin !== target.is_admin) patch.is_admin = isAdmin;
       if (canCreateWorkspaces !== target.can_create_workspaces) {
         patch.can_create_workspaces = canCreateWorkspaces;
+      }
+      if (
+        JSON.stringify([...allowedTools].sort()) !==
+        JSON.stringify([...(target.allowed_tools ?? [])].sort())
+      ) {
+        patch.allowed_tools = allowedTools;
       }
 
       if (Object.keys(patch).length === 0) {
@@ -720,6 +753,10 @@ function EditUserModal({
               onChange={setCanCreateWorkspaces}
             />
           </div>
+
+          <Field label="Allowed tools (empty = no restriction)">
+            <ToolPicker selected={allowedTools} onToggle={toggleAllowedTool} />
+          </Field>
 
           {error && <div className="text-sm text-red-400">{error}</div>}
 
