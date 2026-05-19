@@ -162,7 +162,14 @@ async def condense_chat_memory(
     prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
 
     try:
-        response = await llm_server.generate(client, prompt=prompt, model=llm_server.DEFAULT_CHAT_MODEL, options={"num_ctx": 8192})
+        # Use the always-on small model. The on-demand tier may not fit
+        # in VRAM alongside reasoning-tier models that are resident, and
+        # summarisation doesn't need the larger model's capability.
+        response = await llm_server.generate(
+            client, prompt=prompt,
+            model=llm_server.DEFAULT_SMALL_CHAT_MODEL,
+            options={"num_ctx": 8192},
+        )
         return response.strip()
     except Exception as e:
         print(f"Memory Condensation Failed: {e}")
