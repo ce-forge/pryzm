@@ -11,10 +11,19 @@ from typing import Annotated, Optional
 
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError, InvalidHashError, VerificationError
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session as DbSession
 
 from db import database, models
+
+
+# Endpoints reachable while `must_change_password` is true. Everything
+# else 403s until the user changes their password.
+ALLOWED_DURING_MUST_CHANGE = frozenset({
+    "/api/auth/password",
+    "/api/auth/logout",
+    "/api/auth/me",
+})
 
 
 _ph = PasswordHasher()
@@ -87,6 +96,7 @@ COOKIE_NAME = "pryzm_session"
 
 
 def current_user(
+    request: Request,
     pryzm_session: Annotated[Optional[str], Cookie()] = None,
     db: DbSession = Depends(database.get_db),
 ) -> models.User:
@@ -95,6 +105,11 @@ def current_user(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated.",
+        )
+    if user.must_change_password and request.url.path not in ALLOWED_DURING_MUST_CHANGE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Password change required.",
         )
     return user
 
