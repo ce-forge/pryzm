@@ -24,6 +24,7 @@ import httpx
 import requests
 
 from config import settings
+from core.audit import EventType
 from tools._web_fetch import FetchResult, fetch_and_extract
 from tools._web_query import refine_query
 from tools._web_rerank import rerank_chunks_by_query, split_into_chunks
@@ -46,26 +47,6 @@ def _load_tool_directive(name: str) -> str:
     with open(_TOOL_DIRECTIVES_PATH, "r") as f:
         directives = json.load(f)
     return directives[name]
-
-
-# Per-call stats stash for the engine's audit emission. Module-level and
-# single-flight by design — the engine reads `get_last_stats()` synchronously
-# right after `web_search` returns (no `await`/`yield` in between) and
-# snapshots into a local. Without that synchronous snapshot, a concurrent
-# /analyze request's `web_search` could overwrite the stash between
-# completion and read. Don't paper over this with a lock — fix the call
-# site to snapshot.
-_LAST_STATS: dict = {}
-
-
-def get_last_stats() -> dict:
-    """Return the stats dict from the most recent web_search call."""
-    return dict(_LAST_STATS)
-
-
-def _set_stats(**kwargs) -> None:
-    _LAST_STATS.clear()
-    _LAST_STATS.update(kwargs)
 
 
 _MAX_RESULTS = 8
@@ -130,23 +111,40 @@ WEB_SEARCH_DIRECTIVE = _load_tool_directive("web_search")
     },
     required=["query"],
     system_prompt_directive=WEB_SEARCH_DIRECTIVE,
+    audit_event_type=EventType.CHAT_WEB_SEARCH,
 )
-async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
+async def web_search(query: str, num_results: int = _DEFAULT_RESULTS):
     """Search the web via SearxNG, fetch the top hits, and return their extracted
-    main content as structured per-source blocks ready for the model to cite."""
-    capped = max(1, min(num_results, _MAX_RESULTS))
+    main content as structured per-source blocks ready for the model to cite.
 
-    # Reset stats to a zero baseline at function entry. The engine reads
-    # get_last_stats() right after this coroutine returns; without the
-    # baseline reset, a tool cancellation (e.g. the engine's outer
-    # TOOL_TIMEOUT_SECONDS firing before we reach any later _set_stats
-    # call) would leave the previous call's stats in the stash and the
-    # audit row would silently misattribute them.
-    _set_stats(
-        k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
-        failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
-        query_raw=query, query_refined=query,
-    )
+    Returns `(content, audit_payload)`. The audit payload carries the
+    per-call observability stats (k_requested / k_fetched_ok / failures /
+    wall-clock) the engine writes to `chat.web_search`. The engine fills
+    in `synthesis_model_id` since the tool doesn't know it."""
+    capped = max(1, min(num_results, _MAX_RESULTS))
+    query_preview = (query or "")[:200]
+
+    def _audit(
+        *,
+        query_refined: str,
+        k_returned_by_searxng: int = 0,
+        k_fetched_ok: int = 0,
+        k_failed: int = 0,
+        failure_reasons: dict | None = None,
+        fetch_wall_clock_ms: int = 0,
+        extracted_bytes_total: int = 0,
+    ) -> dict:
+        return {
+            "query_preview": query_preview,
+            "query_refined": str(query_refined)[:200],
+            "k_requested": capped,
+            "k_returned_by_searxng": k_returned_by_searxng,
+            "k_fetched_ok": k_fetched_ok,
+            "k_failed": k_failed,
+            "failure_reasons": failure_reasons or {},
+            "fetch_wall_clock_ms": fetch_wall_clock_ms,
+            "extracted_bytes_total": extracted_bytes_total,
+        }
 
     # Refine the search query via the always-on small model: fixes typos,
     # strips filler, preserves user intent (including time words). Falls back
@@ -179,21 +177,14 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         resp.raise_for_status()
         payload = resp.json()
     except requests.RequestException as exc:
-        _set_stats(
-            k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
-            failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
-            query_raw=query, query_refined=refined_query,
-        )
-        return f"Web search failed: {exc}"
+        return f"Web search failed: {exc}", _audit(query_refined=refined_query)
 
     hits = (payload.get("results") or [])[:capped]
     if not hits:
-        _set_stats(
-            k_requested=capped, k_returned_by_searxng=len(hits), k_fetched_ok=0, k_failed=0,
-            failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
-            query_raw=query, query_refined=refined_query,
+        return (
+            f"No results for {refined_query!r}.",
+            _audit(query_refined=refined_query, k_returned_by_searxng=0),
         )
-        return f"No results for {refined_query!r}."
 
     urls_titles = [(h.get("url", ""), h.get("title", "(no title)")) for h in hits]
 
@@ -246,35 +237,20 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
 
     if not successes:
-        _set_stats(
-            k_requested=capped,
-            k_returned_by_searxng=len(hits),
-            k_fetched_ok=0,
-            k_failed=len(failures),
-            failure_reasons=failure_reasons,
-            fetch_wall_clock_ms=fetch_wall_clock_ms,
-            extracted_bytes_total=0,
-            query_raw=query,
-            query_refined=refined_query,
-        )
         summary = ", ".join(f"{n}× {r}" for r, n in sorted(failure_reasons.items()))
-        return (
+        content = (
             f"Web search returned {len(hits)} results but none could be fetched. "
             f"Reasons: {summary}."
         )
+        return content, _audit(
+            query_refined=refined_query,
+            k_returned_by_searxng=len(hits),
+            k_failed=len(failures),
+            failure_reasons=failure_reasons,
+            fetch_wall_clock_ms=fetch_wall_clock_ms,
+        )
 
     extracted_bytes_total = sum(len(body.encode()) for _, _, body in successes)
-    _set_stats(
-        k_requested=capped,
-        k_returned_by_searxng=len(hits),
-        k_fetched_ok=len(successes),
-        k_failed=len(failures),
-        failure_reasons=failure_reasons,
-        fetch_wall_clock_ms=fetch_wall_clock_ms,
-        extracted_bytes_total=extracted_bytes_total,
-        query_raw=query,
-        query_refined=refined_query,
-    )
 
     blocks: list[str] = []
     for i, (title, url, body) in enumerate(successes, 1):
@@ -290,4 +266,13 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     # can surface it in the source pill. The directive already tells the
     # model to ignore internal metadata; this header is one more such
     # marker the model should not echo.
-    return f"**Searched as:** {refined_query}\n\n{out}"
+    content = f"**Searched as:** {refined_query}\n\n{out}"
+    return content, _audit(
+        query_refined=refined_query,
+        k_returned_by_searxng=len(hits),
+        k_fetched_ok=len(successes),
+        k_failed=len(failures),
+        failure_reasons=failure_reasons,
+        fetch_wall_clock_ms=fetch_wall_clock_ms,
+        extracted_bytes_total=extracted_bytes_total,
+    )

@@ -145,12 +145,19 @@ def _match_session_filename_mentions(
     finally:
         db.close()
 
-async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
+async def _execute_tool(
+    tool_call: dict, workspace_tools: dict,
+) -> tuple[str, Optional[dict]]:
     """Run one tool call from the agentic loop.
 
     Sync tools go through asyncio.to_thread so they don't block the event
     loop. Async tools (if any are added later) are awaited directly.
     The caller wraps this in asyncio.wait_for for timeout enforcement.
+
+    Tools may return either a bare string or a `(content, audit_payload)`
+    tuple. Returns `(content, audit_payload_or_None)` for the caller, so
+    the engine can merge tool-specific audit fields into the default
+    payload it builds.
     """
     name = tool_call["function"]["name"]
     args = tool_call["function"].get("arguments", {})
@@ -165,8 +172,13 @@ async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
     safe_args = {k: v for k, v in args.items() if k in valid_params}
 
     if asyncio.iscoroutinefunction(func):
-        return await func(**safe_args)
-    return await asyncio.to_thread(func, **safe_args)
+        result = await func(**safe_args)
+    else:
+        result = await asyncio.to_thread(func, **safe_args)
+
+    if isinstance(result, tuple) and len(result) == 2 and isinstance(result[1], dict):
+        return result[0], result[1]
+    return result, None
 
 
 def _prepare_system_message(
@@ -553,8 +565,9 @@ async def _run_agent_loop(
                                 if k in valid_params and k not in _hidden}
                 yield {"type": "tool_call", "name": func_name, "args": display_args}
 
+                tool_audit_payload: Optional[dict] = None
                 try:
-                    result = await asyncio.wait_for(
+                    result, tool_audit_payload = await asyncio.wait_for(
                         _execute_tool(enriched_call, workspace_tools),
                         timeout=settings.TOOL_TIMEOUT_SECONDS,
                     )
@@ -569,21 +582,11 @@ async def _run_agent_loop(
                     result = f"Tool execution failed: {str(tool_err)}"
                     had_tool_error = True
 
-                # Snapshot tool-specific observability stats BEFORE the yield.
-                # The yield suspends the generator and lets other concurrent
-                # /analyze requests run their own tool calls, which would
-                # overwrite a module-level stash like tools.web._LAST_STATS
-                # before we read it.
-                _web_stats_snapshot: dict = {}
-                if func_name == "web_search":
-                    from tools.web import get_last_stats as _web_stats
-                    _web_stats_snapshot = _web_stats()
-
                 yield {"type": "tool_result", "name": func_name, "result": result}
 
-                # Emit specialized audit event per tool — search_knowledge_base
-                # → chat.rag_retrieved, web_search → chat.web_search, everything
-                # else → chat.tool_invoked. No double-emit.
+                # Tool self-declares its audit event_type on the decorator;
+                # tools with specialised shape also return an audit_payload
+                # dict that gets merged on top of the engine's default keys.
                 is_error_result = isinstance(result, str) and (
                     result.startswith("Tool execution failed:")
                     or "timed out after" in result
@@ -593,52 +596,29 @@ async def _run_agent_loop(
                     k: v for k, v in raw_args.items()
                     if k not in ("workspace_id", "session_id")
                 }
-                if func_name == "search_knowledge_base":
-                    source_filenames = []
-                    if isinstance(result, str):
-                        source_filenames = list(set(
-                            re.findall(r'\[from ([^\]]+)\]', result)
-                        ))
-                    log_event_in_new_session(
-                        EventType.CHAT_RAG_RETRIEVED,
-                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
-                        payload={
-                            "query_preview": str(audit_args.get("query", ""))[:200],
-                            "num_results": len(source_filenames),
-                            "source_filenames": source_filenames,
-                            "mode": "tool",
-                        },
-                    )
-                elif func_name == "web_search":
-                    log_event_in_new_session(
-                        EventType.CHAT_WEB_SEARCH,
-                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
-                        payload={
-                            "query_preview": str(audit_args.get("query", ""))[:200],
-                            "query_refined": str(_web_stats_snapshot.get("query_refined", ""))[:200],
-                            "k_requested": _web_stats_snapshot.get("k_requested", 0),
-                            "k_returned_by_searxng": _web_stats_snapshot.get("k_returned_by_searxng", 0),
-                            "k_fetched_ok": _web_stats_snapshot.get("k_fetched_ok", 0),
-                            "k_failed": _web_stats_snapshot.get("k_failed", 0),
-                            "failure_reasons": _web_stats_snapshot.get("failure_reasons", {}),
-                            "fetch_wall_clock_ms": _web_stats_snapshot.get("fetch_wall_clock_ms", 0),
-                            "extracted_bytes_total": _web_stats_snapshot.get("extracted_bytes_total", 0),
-                            "synthesis_model_id": routed_model,
-                        },
-                    )
-                else:
-                    tool_payload = {
-                        "tool_name": func_name,
-                        "arg_values": audit_args,
-                        "succeeded": succeeded,
-                    }
-                    if not succeeded and isinstance(result, str):
-                        tool_payload["error_message"] = result[:200]
-                    log_event_in_new_session(
-                        EventType.CHAT_TOOL_INVOKED,
-                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
-                        payload=tool_payload,
-                    )
+                tool_func = workspace_tools[func_name]
+                event_type = (
+                    getattr(tool_func, "audit_event_type", None)
+                    or EventType.CHAT_TOOL_INVOKED
+                )
+                default_payload = {
+                    "tool_name": func_name,
+                    "arg_values": audit_args,
+                    "succeeded": succeeded,
+                }
+                if not succeeded and isinstance(result, str):
+                    default_payload["error_message"] = result[:200]
+                # The synthesis model id isn't known to the tool — only the
+                # engine routes the turn — so the engine injects it for the
+                # one event type that needs it.
+                if event_type == EventType.CHAT_WEB_SEARCH:
+                    default_payload["synthesis_model_id"] = routed_model
+                final_payload = {**default_payload, **(tool_audit_payload or {})}
+                log_event_in_new_session(
+                    event_type,
+                    user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                    payload=final_payload,
+                )
 
                 # When search_knowledge_base returns chunks from image
                 # documents, surface them as files_referenced so the inline

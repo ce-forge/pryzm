@@ -1,4 +1,5 @@
 from tools.registry import tool
+from core.audit import EventType
 from db.database import SessionLocal
 from services.knowledge import search_chunks_sync, _label_chunk
 from utils.formatters import format_tool_results
@@ -36,20 +37,25 @@ from utils.formatters import format_tool_results
         "by description, or by display request — pass it in the `filenames` argument so "
         "retrieval scopes to that file."
     ),
+    audit_event_type=EventType.CHAT_RAG_RETRIEVED,
 )
 def search_knowledge_base(
     queries,
     workspace_id: str,
     session_id: str = None,
     filenames=None,
-) -> str:
+):
     """Search the internal documentation and knowledge base.
 
     Accepts a list of search terms. For each, runs an independent vector
     search and returns a labeled section. Optionally scoped to a list of
     filenames when the user references specific files. Single-query
     callers can pass a one-element list — the function also tolerates a
-    bare string for backward-compat with older model calls."""
+    bare string for backward-compat with older model calls.
+
+    Returns `(content, audit_payload)` so the engine can emit a
+    `chat.rag_retrieved` audit row with the actual source filenames and
+    query without re-parsing the result text."""
     # Backward-compat: a model that hasn't updated may still send a string.
     if isinstance(queries, str):
         queries = [queries]
@@ -58,10 +64,11 @@ def search_knowledge_base(
     if isinstance(filenames, str):
         filenames = [filenames]
 
+    query_preview = str(queries[0] if queries else "")[:200]
     db = SessionLocal()
     try:
         sections = []
-        all_sources = set()
+        all_sources: set[str] = set()
         for q in queries:
             # Stricter threshold than the auto-RAG path: the LLM picked this tool
             # deliberately, so we want precision over recall.
@@ -77,7 +84,14 @@ def search_knowledge_base(
                     all_sources.add(chunk.document.filename)
             else:
                 sections.append(f"Query: {q!r}\nNo relevant documentation found.")
-        return "\n---\n".join(sections)
+        content = "\n---\n".join(sections)
+        audit_payload = {
+            "query_preview": query_preview,
+            "num_results": len(all_sources),
+            "source_filenames": sorted(all_sources),
+            "mode": "tool",
+        }
+        return content, audit_payload
     except Exception as e:
         return f"Knowledge base search failed with error: {str(e)}"
     finally:
