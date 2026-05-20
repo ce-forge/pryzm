@@ -92,13 +92,21 @@ WEB_SEARCH_DIRECTIVE = (
     "training (current events, recent vendor releases, newly-published docs, "
     "news). Do NOT use it for questions answerable from local knowledge-base "
     "documents or general background knowledge.\n"
-    "For comparison questions (\"which is better, A or B\", \"A vs B\"), start "
-    "with a single combined search — sometimes a canonical comparison source "
-    "exists and one search is enough. If the result is one-sided (only one "
-    "entity well-covered, only opinions, or no authoritative source), follow "
-    "up with separate web_search calls — one per entity — and synthesise from "
-    "the union. Prefer one search when one is enough; reach for more when the "
-    "first didn't get you authoritative data on every side of the question.\n"
+    "For comparison or multi-entity questions (\"which is better, A or B\", "
+    "\"A vs B\", \"compare A and B\"):\n"
+    "  1. Start with a single combined search. Raise `num_results` to 5 or "
+    "more to widen the source pool for breadth.\n"
+    "  2. BEFORE writing your final reply, list each entity the user named "
+    "and check that the search results contain at least one authoritative "
+    "source for EACH (canonical wiki / docs / spec page — opinions and "
+    "third-party comparison blogs don't count as authoritative).\n"
+    "  3. If any entity is missing an authoritative source, you MUST issue a "
+    "follow-up `web_search` for that entity specifically — in the SAME turn, "
+    "before writing your reply. You can call `web_search` multiple times per "
+    "turn; do so when the first call left a side uncovered.\n"
+    "  4. Only after every entity has authoritative coverage, synthesise.\n"
+    "Skip steps 3-4 only when the single combined search already produced "
+    "authoritative data on every side. Don't over-search; don't under-search.\n"
     "Results are returned as one or more `### Source [N]: <title>` blocks, each "
     "containing the source URL on its own line and an extracted page body below. "
     "Source numbering restarts at [1] within each `web_search` call — if you "
@@ -123,8 +131,10 @@ WEB_SEARCH_DIRECTIVE = (
         "num_results": {
             "type": "integer",
             "description": (
-                "How many top hits to fetch and read (default 5, max 8). "
-                "Each adds one page-fetch round to the wall-clock budget."
+                "How many top hits to fetch and read (default 3, max 8). "
+                "Raise this to 5-8 for comparison or deep-dive questions "
+                "where you want more source coverage in a single call. "
+                "Each result adds one page-fetch round to the wall-clock budget."
             ),
         },
     },
