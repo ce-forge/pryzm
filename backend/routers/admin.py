@@ -18,11 +18,8 @@ stream.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import pathlib
 import re
-import time
 from typing import Any, Optional
 
 import httpx
@@ -36,45 +33,12 @@ from config import settings
 from core import cookie_auth, llm_router
 from core.audit import EventType, log_event
 from db import database, models
-from services import llama_swap_config
+from services import llama_swap_config, llama_swap_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 _logger = logging.getLogger("pryzm.admin")
 
-_REPO_ROOT = llama_swap_config.REPO_ROOT
-_LLAMA_CACHE = _REPO_ROOT / "infra" / "llama_models"
 _yaml_lock = asyncio.Lock()
-
-# In-memory map of model_id → download tracking metadata. Populated by
-# add_model() when the request carries the HF picker's hints; consumed
-# by the status SSE to emit real {bytes, total} progress events. Cleared
-# on health pass or model delete. Lost on backend restart — by design,
-# admin can just stop watching and re-open the panel.
-_active_downloads: dict[str, dict] = {}
-
-
-def _blobs_dir_for_repo(repo: str) -> pathlib.Path:
-    """Map an HF repo like `bartowski/foo-GGUF` to the cache's blobs path."""
-    if "/" not in repo:
-        return _LLAMA_CACHE / "hub" / f"models--{repo}" / "blobs"
-    org, name = repo.split("/", 1)
-    return _LLAMA_CACHE / "hub" / f"models--{org}--{name}" / "blobs"
-
-
-def _partial_blob_size(blobs_dir: pathlib.Path, blob_hash: str) -> int:
-    """Return current on-disk size of the blob, picking up partial/incomplete
-    variants llama.cpp might write during download. 0 if nothing is present yet."""
-    if not blobs_dir.is_dir():
-        return 0
-    try:
-        for path in blobs_dir.glob(f"{blob_hash}*"):
-            try:
-                return path.stat().st_size
-            except OSError:
-                pass
-    except OSError:
-        pass
-    return 0
 
 _ID_VALID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REPO_QUANT_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
@@ -205,10 +169,10 @@ async def add_model(
     # when the HF picker passes hints; manual adds skip and fall back to
     # the indeterminate spinner.
     if req.expected_blob_hash and req.expected_size:
-        _active_downloads[req.id] = {
+        llama_swap_status._active_downloads[req.id] = {
             "blob_hash": req.expected_blob_hash,
             "expected_size": int(req.expected_size),
-            "blobs_dir": _blobs_dir_for_repo(repo),
+            "blobs_dir": llama_swap_status.blobs_dir_for_repo(repo),
             "filename": req.expected_filename,
         }
 
@@ -324,7 +288,7 @@ async def delete_model(
         db.commit()
         del models_cfg[model_id]
         llama_swap_config.write_yaml(data)
-        _active_downloads.pop(model_id, None)
+        llama_swap_status._active_downloads.pop(model_id, None)
         llama_swap_config.reload_llama_swap()
         llm_router.reload_router_from_yaml(llama_swap_config.YAML_PATH)
 
@@ -334,107 +298,10 @@ async def delete_model(
 
 @router.get("/models/{model_id}/status")
 async def model_status(model_id: str) -> StreamingResponse:
-    """Live SSE feed for the watch-while-loading panel.
-
-    Three concurrent sources pump events into a shared queue:
-      - log_producer: forwards llama-swap's /api/events log lines
-      - progress_producer: stat()s the partial blob on disk every 2s and
-        emits {progress: {bytes, total}} — gives a real percentage for
-        downloads tracked via the HF picker
-      - health_producer: polls /upstream/<id>/health and signals completion
-    """
-    base = settings.LLM_SERVER_URL.rstrip("/")
-    events_url = f"{base}/api/events"
-    health_url = f"{base}/upstream/{model_id}/health"
-    deadline = time.monotonic() + 600  # 10-minute cap; multi-GB downloads need headroom
-
-    async def gen():
-        yield json.dumps({"status": "subscribed", "id": model_id}) + "\n"
-        timeout = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
-        queue: asyncio.Queue[str] = asyncio.Queue()
-        loaded = False
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-
-            async def log_producer() -> None:
-                try:
-                    async with client.stream("GET", events_url) as resp:
-                        async for line in resp.aiter_lines():
-                            if not line.startswith("data:"):
-                                continue
-                            try:
-                                evt = json.loads(line[len("data:"):].strip())
-                            except json.JSONDecodeError:
-                                continue
-                            if evt.get("type") != "logData":
-                                continue
-                            for log_line in (evt.get("data") or "").splitlines():
-                                if log_line.strip():
-                                    await queue.put(json.dumps({"log": log_line}) + "\n")
-                except Exception:
-                    # llama-swap dropped the SSE — let the main loop time out on health
-                    pass
-
-            async def progress_producer() -> None:
-                while True:
-                    entry = _active_downloads.get(model_id)
-                    if entry:
-                        current = _partial_blob_size(entry["blobs_dir"], entry["blob_hash"])
-                        await queue.put(json.dumps({
-                            "progress": {
-                                "bytes": current,
-                                "total": entry["expected_size"],
-                            }
-                        }) + "\n")
-                    await asyncio.sleep(2.0)
-
-            async def health_producer() -> bool:
-                while time.monotonic() < deadline:
-                    try:
-                        r = await client.get(health_url, timeout=2.0)
-                        if r.status_code == 200:
-                            return True
-                    except Exception:
-                        pass
-                    await asyncio.sleep(1.0)
-                return False
-
-            log_task = asyncio.create_task(log_producer())
-            progress_task = asyncio.create_task(progress_producer())
-            health_task = asyncio.create_task(health_producer())
-
-            try:
-                while True:
-                    if health_task.done():
-                        try:
-                            loaded = health_task.result()
-                        except Exception:
-                            loaded = False
-                        break
-                    if time.monotonic() > deadline:
-                        break
-                    try:
-                        event = await asyncio.wait_for(queue.get(), timeout=0.5)
-                        yield event
-                    except asyncio.TimeoutError:
-                        continue
-            finally:
-                for t in (log_task, progress_task, health_task):
-                    t.cancel()
-                # Drain any final queued events so the client sees them.
-                while not queue.empty():
-                    try:
-                        yield queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-
-        _active_downloads.pop(model_id, None)
-        if loaded:
-            yield json.dumps({"status": "loaded", "id": model_id}) + "\n"
-        else:
-            yield json.dumps({"status": "error", "id": model_id, "detail": "load timed out"}) + "\n"
-
-    return StreamingResponse(gen(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        llama_swap_status.stream_status(model_id),
+        media_type="application/x-ndjson",
+    )
 
 
 # ---------------------------------------------------------------------------
