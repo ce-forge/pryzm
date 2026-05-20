@@ -11,10 +11,33 @@ import type { ToolCall } from "@/types/chat";
 import { TerminalIcon } from "./Icons";
 
 
+type WebSource = { n: number; title: string; url: string };
+type WebFailure = { url: string; reason: string };
+
+function parseWebSearchResult(result: string): { sources: WebSource[]; failures: WebFailure[] } {
+  const sources: WebSource[] = [];
+  const sourceRe = /^### Source \[(\d+)\]:\s*(.+?)\n(\S+)/gm;
+  let m: RegExpExecArray | null;
+  while ((m = sourceRe.exec(result)) !== null) {
+    sources.push({ n: parseInt(m[1], 10), title: m[2].trim(), url: m[3].trim() });
+  }
+
+  const failures: WebFailure[] = [];
+  const footerMatch = result.match(/\*\*Failed sources\*\*\n([\s\S]+)$/);
+  if (footerMatch) {
+    const lines = footerMatch[1].split(/\n/);
+    for (const line of lines) {
+      const fm = line.match(/^-\s*(\S+)\s*—\s*(.+)$/);
+      if (fm) failures.push({ url: fm[1], reason: fm[2].trim() });
+    }
+  }
+
+  return { sources, failures };
+}
+
 function WebSearchResultPill({ result }: { result: string }) {
   const [expanded, setExpanded] = useState(false);
-  const sourceCount = (result.match(/^### Source \[\d+\]:/gm) || []).length;
-  const failedCount = (result.match(/^- .+? — /gm) || []).length;
+  const { sources, failures } = parseWebSearchResult(result);
 
   return (
     <div className="-mt-1 mb-2">
@@ -23,14 +46,39 @@ function WebSearchResultPill({ result }: { result: string }) {
         onClick={() => setExpanded((e) => !e)}
         className="text-[12px] text-gray-300 bg-[#1e1f20] border border-[#333537] rounded-lg px-3 py-1.5 hover:bg-[#252627] transition-colors cursor-pointer"
       >
-        🌐 Searched: {sourceCount} source{sourceCount === 1 ? "" : "s"}
-        {failedCount > 0 ? ` (${failedCount} failed)` : ""}
+        🌐 Searched: {sources.length} source{sources.length === 1 ? "" : "s"}
+        {failures.length > 0 ? ` (${failures.length} failed)` : ""}
         {expanded ? " ▼" : " ▶"}
       </button>
       {expanded && (
-        <pre className="mt-2 rounded-lg bg-[#1e1f20] border border-[#333537] px-3 py-2 text-[12px] text-gray-200 whitespace-pre-wrap overflow-x-auto">
-          {result}
-        </pre>
+        <div className="mt-2 rounded-lg bg-[#1e1f20] border border-[#333537] px-3 py-2 text-[12px] text-gray-200 flex flex-col gap-1.5">
+          {sources.map((s) => (
+            <div key={s.n} className="flex flex-col">
+              <div className="text-gray-300">
+                <span className="text-gray-500 font-mono">[{s.n}]</span>{" "}
+                <span>{s.title}</span>
+              </div>
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-blue-400 hover:text-blue-300 hover:underline break-all font-mono text-[11px]"
+              >
+                {s.url}
+              </a>
+            </div>
+          ))}
+          {failures.length > 0 && (
+            <div className="mt-2 pt-2 border-t border-[#333537]">
+              <div className="text-[11px] text-gray-500 mb-1">Failed to fetch:</div>
+              {failures.map((f, i) => (
+                <div key={i} className="text-[11px] text-gray-500 font-mono break-all">
+                  {f.url} — {f.reason}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

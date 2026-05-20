@@ -64,11 +64,11 @@ WEB_SEARCH_DIRECTIVE = (
     "Results are returned as one or more `### Source [N]: <title>` blocks, each "
     "containing the source URL on its own line and an extracted page body below. "
     "When writing your reply, cite every factual claim by appending `[N]` "
-    "referring to the source index. End your reply with a `**Sources**` section "
-    "listing each cited source as `[N] <URL>`. Do not cite sources you did not "
-    "use. If a `**Failed sources**` footer appears in the tool output, that is "
-    "internal metadata about pages we could not fetch — do not echo it in your "
-    "reply."
+    "referring to the source index. Do not cite sources you did not use. The "
+    "user's UI shows the source list separately, so do NOT write a `**Sources**` "
+    "footer or list URLs in your reply — only the inline `[N]` markers. If a "
+    "`**Failed sources**` footer appears in the tool output, that is internal "
+    "metadata — do not echo it in your reply either."
 )
 
 
