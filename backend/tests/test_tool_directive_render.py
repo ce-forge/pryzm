@@ -4,7 +4,6 @@ import pytest
 from tools.registry import (
     AVAILABLE_TOOLS,
     TOOL_DEFINITIONS,
-    TOOL_WORKSPACES,
     tool,
 )
 
@@ -15,14 +14,11 @@ def _restore_registry():
     inside tests don't bleed across cases."""
     saved_tools = dict(AVAILABLE_TOOLS)
     saved_defs = list(TOOL_DEFINITIONS)
-    saved_ws = dict(TOOL_WORKSPACES)
     yield
     AVAILABLE_TOOLS.clear()
     AVAILABLE_TOOLS.update(saved_tools)
     TOOL_DEFINITIONS.clear()
     TOOL_DEFINITIONS.extend(saved_defs)
-    TOOL_WORKSPACES.clear()
-    TOOL_WORKSPACES.update(saved_ws)
 
 
 def test_decorator_stores_directive_on_function():
