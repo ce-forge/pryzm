@@ -15,6 +15,24 @@ import requests
 from tools._web_fetch import FetchResult
 
 
+@pytest.fixture(autouse=True)
+def _stub_rerank(monkeypatch):
+    """Skip embedding-based rerank in these orchestration tests. The rerank
+    helper has its own dedicated tests in test_web_search_rerank.py — here
+    we just want to verify the orchestrator handles success/failure shapes."""
+    async def passthrough(client, chunks, query, char_budget, model=None):
+        # Return chunks in original order up to char_budget — same behavior as
+        # the embed-failure fallback path.
+        out, used = [], 0
+        for c in chunks:
+            if used + len(c) > char_budget:
+                break
+            out.append(c)
+            used += len(c)
+        return out
+    monkeypatch.setattr("tools.web.rerank_chunks_by_query", passthrough)
+
+
 def _mock_searx_response(results: list[dict] | None = None, status: int = 200) -> MagicMock:
     resp = MagicMock(spec=requests.Response)
     resp.status_code = status

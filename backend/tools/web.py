@@ -18,10 +18,12 @@ from __future__ import annotations
 import asyncio
 import time
 
+import httpx
 import requests
 
 from config import settings
 from tools._web_fetch import FetchResult, fetch_and_extract
+from tools._web_rerank import rerank_chunks_by_query, split_into_chunks
 from tools._web_truncate import truncate_to_sentences
 from .registry import tool
 
@@ -151,14 +153,31 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         results = [FetchResult(url=url, ok=False, failure_reason="timeout") for url, _ in urls_titles]
     fetch_wall_clock_ms = int((time.monotonic() - fetch_t0) * 1000)
 
-    successes: list[tuple[str, str, str]] = []  # (title, url, body)
+    successes_raw: list[tuple[str, str, str]] = []  # (title, url, raw_body)
     failures: list[tuple[str, str]] = []  # (url, reason)
     for (url, title), fr in zip(urls_titles, results):
         if fr.ok:
-            body = truncate_to_sentences(fr.body, _MAX_CHARS_PER_PAGE)
-            successes.append((title, url, body))
+            successes_raw.append((title, url, fr.body))
         else:
             failures.append((url, fr.failure_reason or "error"))
+
+    # Embedding-based rerank: per-source, keep only chunks semantically similar
+    # to the query. Drops sidebars / related-articles / off-topic content that
+    # trafilatura preserved. Falls back to raw-body truncation on any embed
+    # failure (network, model unloaded) — never blocks synthesis.
+    successes: list[tuple[str, str, str]] = []
+    if successes_raw:
+        async with httpx.AsyncClient() as embed_client:
+            for title, url, raw_body in successes_raw:
+                chunks = split_into_chunks(raw_body)
+                picked = await rerank_chunks_by_query(
+                    embed_client, chunks, query, char_budget=_MAX_CHARS_PER_PAGE,
+                )
+                body = "\n\n".join(picked)
+                # Sentence-truncate as a final guard — rerank's char_budget is the
+                # primary cap but pathological chunk sizes could overshoot slightly.
+                body = truncate_to_sentences(body, _MAX_CHARS_PER_PAGE)
+                successes.append((title, url, body))
 
     failure_reasons: dict[str, int] = {}
     for _, reason in failures:
