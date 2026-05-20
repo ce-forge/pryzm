@@ -160,6 +160,74 @@ def test_create_workspace_403s_when_flag_off(db_at_head, monkeypatch):
         app.dependency_overrides.clear()
 
 
+def test_create_workspace_clone_from_foreign_404s(db_at_head, monkeypatch):
+    """User A cannot clone user B's workspace by slug — the lookup must be
+    scoped to the caller's own user_id."""
+    from fastapi.testclient import TestClient
+    from sqlalchemy.orm import sessionmaker
+    from core import cookie_auth
+    from db import database
+    from main import app
+
+    test_engine = db_at_head
+    TestSessionLocal = sessionmaker(bind=test_engine, autocommit=False, autoflush=False)
+
+    def _test_get_db():
+        db = TestSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    monkeypatch.setattr(database, "init_db", lambda: None)
+    monkeypatch.setattr(database, "SessionLocal", TestSessionLocal)
+    app.dependency_overrides[database.get_db] = _test_get_db
+
+    try:
+        with TestSessionLocal() as seed_db:
+            user_a = models.User(
+                username="alice-clone",
+                password_hash=cookie_auth.hash_password("test-pw-12chars"),
+                is_admin=False, is_active=True, can_create_workspaces=True,
+            )
+            user_b = models.User(
+                username="bob-clone",
+                password_hash=cookie_auth.hash_password("test-pw-12chars"),
+                is_admin=False, is_active=True, can_create_workspaces=True,
+            )
+            seed_db.add_all([user_a, user_b])
+            seed_db.commit()
+            seed_db.refresh(user_a); seed_db.refresh(user_b)
+
+            ws_b = models.Workspace(
+                slug="secret-clone-source",
+                display_name="Secret",
+                user_id=user_b.id,
+                system_prompt="Bob's private prompt",
+                enabled_tools=["search_knowledge_base"],
+                engine_config={"backend": "llama_cpp"},
+            )
+            seed_db.add(ws_b)
+            seed_db.commit()
+
+            sid = cookie_auth.create_session(seed_db, user_a.id)
+
+        with TestClient(app) as c:
+            c.cookies.set(cookie_auth.COOKIE_NAME, sid)
+            resp = c.post(
+                "/workspaces",
+                json={
+                    "display_name": "Alice Clone Attempt",
+                    "color": "blue",
+                    "clone_from": "secret-clone-source",
+                },
+            )
+
+        assert resp.status_code == 404, f"got {resp.status_code} body={resp.text[:200]}"
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_create_workspace_admin_bypasses_flag(db_at_head, monkeypatch):
     """An admin can create workspaces regardless of can_create_workspaces."""
     from fastapi.testclient import TestClient
