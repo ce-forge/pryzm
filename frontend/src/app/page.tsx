@@ -3,11 +3,10 @@
 import { useEffect, useState } from "react";
 import Sidebar from "@/components/Sidebar";
 import ActiveSession from "@/components/ActiveSession";
-import { AppProviders } from "@/context/AppProviders";
 import { ChatProviders } from "@/context/ChatProviders";
 import { LoginPage } from "@/components/LoginPage";
 import ChangePasswordForm from "@/components/ChangePasswordForm";
-import { useAuth } from "@/context/AuthContext";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 function AppShell() {
   const { user, isLoading, refresh } = useAuth();
@@ -51,8 +50,8 @@ function AppShell() {
 
 export default function Home() {
   return (
-    <AppProviders>
+    <AuthProvider>
       <AppShell />
-    </AppProviders>
+    </AuthProvider>
   );
 }

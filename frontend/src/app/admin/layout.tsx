@@ -3,8 +3,7 @@
 import { ReactNode, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useAuth } from "@/context/AuthContext";
-import { AppProviders } from "@/context/AppProviders";
+import { AuthProvider, useAuth } from "@/context/AuthContext";
 
 const TABS = [
   { href: "/admin/users", label: "Users" },
@@ -75,8 +74,8 @@ function AdminShell({ children }: { children: ReactNode }) {
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   return (
-    <AppProviders>
+    <AuthProvider>
       <AdminShell>{children}</AdminShell>
-    </AppProviders>
+    </AuthProvider>
   );
 }

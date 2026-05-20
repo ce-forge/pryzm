@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import { useAuth } from "@/context/AuthContext";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
-import WorkspaceSettings from "./WorkspaceSettings";
+import WorkspaceCreateModal from "./WorkspaceCreateModal";
+import WorkspaceEditModal from "./WorkspaceEditModal";
 import { Workspace } from "@/hooks/useWorkspaces";
 import { getWorkspaceColorClasses } from "@/utils/workspaceColors";
 import { WorkspaceSprite } from "@/utils/workspaceSprites";
@@ -119,14 +120,12 @@ export default function WorkspaceSwitcher() {
 
       {settingsTarget && (
         settingsTarget.mode === "edit" ? (
-          <WorkspaceSettings
-            mode="edit"
+          <WorkspaceEditModal
             workspace={settingsTarget.workspace}
             onClose={() => setSettingsTarget(null)}
           />
         ) : (
-          <WorkspaceSettings
-            mode="create"
+          <WorkspaceCreateModal
             onClose={() => setSettingsTarget(null)}
           />
         )
