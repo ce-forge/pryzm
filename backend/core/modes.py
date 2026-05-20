@@ -142,4 +142,5 @@ register_mode(Mode(
     name="web_search",
     force_tools=["web_search"],
     gates_tools=["web_search"],
+    tier_override="web",
 ))
