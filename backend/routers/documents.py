@@ -30,6 +30,7 @@ from core.deps import get_http_client
 from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models
 from services import ingest_broker, ingest_pipeline
+from utils.formatters import safe_content_disposition
 
 
 router = APIRouter(tags=["Documents"])
@@ -259,7 +260,7 @@ def get_document_raw(
         headers={
             "Cache-Control": "private, max-age=2592000",
             "ETag": f'"{doc.id}"',
-            "Content-Disposition": f'inline; filename="{doc.filename}"',
+            "Content-Disposition": safe_content_disposition(doc.filename, "inline"),
         },
     )
 

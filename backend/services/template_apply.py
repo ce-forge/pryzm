@@ -23,7 +23,7 @@ from typing import Literal
 
 from sqlalchemy.orm import Session
 
-from core.tool_permissions import filter_allowed_tools
+from core.tool_permissions import enforce_allowed_tools, filter_allowed_tools
 from db import models
 
 
@@ -140,7 +140,24 @@ def apply_targets(
         if user is None:
             rejections.append({"user_id": user_id, "reason": "user_not_found"})
             continue
-        kept, dropped = filter_allowed_tools(user, template_tools)
+
+        # Instantiate (create) is the strict site per the per-user-allowed-tools
+        # spec: a fresh workspace must not carry tools the target user is barred
+        # from. update/adopt are filter sites — they preserve continuity for
+        # users who already had the template applied before their cap tightened.
+        if action == "create":
+            try:
+                enforce_allowed_tools(user, template_tools)
+            except Exception as exc:
+                rejections.append({
+                    "user_id": user_id,
+                    "reason": "disallowed_tools",
+                    "detail": getattr(exc, "detail", str(exc)),
+                })
+                continue
+            kept, dropped = list(template_tools), []
+        else:
+            kept, dropped = filter_allowed_tools(user, template_tools)
 
         if action == "update":
             ws = (

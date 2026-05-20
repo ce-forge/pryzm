@@ -65,6 +65,26 @@ def test_engine_proxy_unauthenticated_is_401(db_session):
         app.dependency_overrides.clear()
 
 
+def test_engine_proxy_rejects_dotdot_path(db_session):
+    """A path containing `..` must be rejected with 400 before the proxy
+    constructs the upstream URL. Defence-in-depth against intra-host SSRF
+    via path-rewriting bugs in any future LLM_SERVER_URL upstream.
+
+    Note: TestClient.get() URL-resolves `..` client-side. To reach the
+    handler with a literal `..` segment we percent-encode the dots —
+    starlette decodes them back into the captured `path:path` argument
+    before invoking the route.
+    """
+    try:
+        admin = _seed_admin(db_session)
+        c = _client_for(db_session, admin)
+        r = c.get("/api/admin/engine/%2E%2E/something")
+        assert r.status_code == 400, f"got {r.status_code} body={r.text[:200]}"
+        assert "invalid" in r.json()["detail"].lower()
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_engine_proxy_502_when_upstream_unreachable(db_session, monkeypatch):
     """With llama-swap not running (its 127.0.0.1:8080 binding) the proxy
     surfaces httpx.RequestError as a 502."""
