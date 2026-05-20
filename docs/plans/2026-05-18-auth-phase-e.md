@@ -28,7 +28,7 @@
 
 4. **E2E + perf scripts** (`tests/e2e/conftest.py`, `tests/e2e/test_phase_b{2,3}_smoke.py`, `tests/perf/bench_llm.py`): currently read `PRYZM_API_TOKEN` from `.env`. They're migrated to programmatic login: `POST /api/auth/login` with `admin`-tier credentials sourced from env (e.g. a new `PRYZM_E2E_PASSWORD` env var, or just `admin/admin` for the local dev case), captured into a cookie jar, reused for subsequent calls. Where this is too invasive for a single script, the script is updated minimally to call the new login flow.
 
-5. **CORS_ORIGINS after the regex drops:** the regex (`CORS_PRIVATE_NETWORK_REGEX`) was the wildcard for any RFC1918 origin. After removal, only `CORS_ORIGINS` applies — currently `["http://localhost:3000", "http://127.0.0.1:3000", "http://dainamik.ddns.net:3000", "http://dainamik.ddns.net:3080", "https://dainamik.ddns.net"]` per `.env`. Anyone wanting LAN access from another device on the network needs that IP added to `CORS_ORIGINS` explicitly. This is the intended tightening. No code change beyond removing the regex.
+5. **CORS_ORIGINS after the regex drops:** the regex (`CORS_PRIVATE_NETWORK_REGEX`) was the wildcard for any RFC1918 origin. After removal, only `CORS_ORIGINS` applies — currently `["http://localhost:3000", "http://127.0.0.1:3000", "http://<your-host>.ddns.net:3000", "http://<your-host>.ddns.net:3080", "https://<your-host>.ddns.net"]` per `.env`. Anyone wanting LAN access from another device on the network needs that IP added to `CORS_ORIGINS` explicitly. This is the intended tightening. No code change beyond removing the regex.
 
 6. **`frontend/src/data/test_suite.json`:** runs in-browser via `useTestSuite` → `useInference` → `apiFetch`. After Phase E, `apiFetch` is cookie-only and the user is logged in to use the chat UI anyway, so the data-driven runner auto-migrates with no changes to the JSON or the hook.
 
@@ -500,7 +500,7 @@ In a private/incognito window:
 6. Open `/dashboard` → Models, Micro-Prompts, and Change password sections visible
 7. Sign out from sidebar → returned to login page
 8. Visit `/legacy-token` → 404 (route deleted)
-9. From cellular (external), repeat step 1-7 against `http://dainamik.ddns.net:3000`
+9. From cellular (external), repeat step 1-7 against `http://<your-host>.ddns.net:3000`
 
 ---
 
