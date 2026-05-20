@@ -88,10 +88,13 @@ def _detect_time_range(query: str) -> str | None:
 
 
 WEB_SEARCH_DIRECTIVE = (
-    "Use `web_search` for factual questions whose answer may have changed since "
-    "training (current events, recent vendor releases, newly-published docs, "
-    "news). Do NOT use it for questions answerable from local knowledge-base "
-    "documents or general background knowledge.\n"
+    "Use `web_search` whenever the answer depends on the current date, time, "
+    "or location — not just for facts that are evergreen knowledge from "
+    "training. Weather, traffic, exchange rates, store hours, today's news, "
+    "scheduled events, current prices, sports results, recent vendor releases, "
+    "and newly-published docs all qualify. Do NOT use it for questions "
+    "answerable from local knowledge-base documents or general background "
+    "knowledge.\n"
     "For comparison or multi-entity questions (\"which is better, A or B\", "
     "\"A vs B\", \"compare A and B\"):\n"
     "  1. Start with a single combined search. Raise `num_results` to 5 or "
