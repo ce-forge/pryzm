@@ -46,11 +46,11 @@ Uses a separate `pryzm_test` PostgreSQL database created per-session by `tests/c
 
 ## Environment
 
-Backend reads from `../.env` (gitignored). Key vars: `DB_USER`, `DB_PASSWORD`, `DB_NAME` (PostgreSQL); `PRYZM_BOOTSTRAP_ADMIN_PASSWORD` (first-boot admin password — defaults to `admin` if unset). Frontend uses `NEXT_PUBLIC_API_URL` and auto-derives `${host}:8000` when not set.
+Backend reads from `../.env` (gitignored). Key vars: `DB_USER`, `DB_PASSWORD`, `DB_NAME` (PostgreSQL); `PRYZM_BOOTSTRAP_ADMIN_PASSWORD` (first-boot admin password — when unset, bootstrap mints a random one-shot password and logs it once at WARNING level). Frontend uses `NEXT_PUBLIC_API_URL` and auto-derives `${host}:8000` when not set.
 
 ## Auth model
 
-Cookie-based sessions, no bearer tokens. First boot creates an admin account (`admin` / `$PRYZM_BOOTSTRAP_ADMIN_PASSWORD`) with `must_change_password=true` — admin is forced to set a real password on first login.
+Cookie-based sessions, no bearer tokens. First boot creates an admin account (`admin` / `$PRYZM_BOOTSTRAP_ADMIN_PASSWORD` if set, otherwise a logged random one-shot) with `must_change_password=true` — admin is forced to set a real password on first login. `must_change_password` is enforced server-side: every endpoint except `/api/auth/{password,logout,me}` 403s while the flag is true.
 
 Admin owns all credentials. Voluntary password change by users is closed (returns 403); the only path is **admin reset** via `/admin/users`, which sets `must_change_password=true` and signs the user out. They then change on next login via the forced-flow screen.
 
