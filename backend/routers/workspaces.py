@@ -74,6 +74,12 @@ def create_workspace(
     db: Session = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
 ):
+    if not user.is_admin and not user.can_create_workspaces:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to create workspaces.",
+        )
+
     stripped_display_name = payload.display_name.strip()
 
     # Reject if this user already has a workspace with the same display name.
