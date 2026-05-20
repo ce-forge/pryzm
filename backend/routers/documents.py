@@ -48,7 +48,7 @@ _IMAGE_MIME_BY_EXT = {
 async def upload_document(
     request: Request,
     file: UploadFile = File(...),
-    workspace: str = Form("it_copilot"),
+    workspace: str = Form(...),
     session_id: Optional[str] = Form(None),
     is_global: bool = Form(False),
     db: Session = Depends(database.get_db),
