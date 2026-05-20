@@ -41,6 +41,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   tool_error: "Tool error",
   slow: "Slow",
   ui_bug: "UI bug",
+  feedback_negative: "👎 Negative feedback",
   other: "Other",
 };
 
@@ -180,7 +181,7 @@ export default function AdminBugReportsPage() {
                   colSpan={5}
                   className="px-3 py-6 text-center text-gray-500"
                 >
-                  No bug reports match the current filters.
+                  No alerts match the current filters.
                 </td>
               </tr>
             )}
@@ -327,7 +328,7 @@ function BugDetailModal({
   };
 
   const deleteRow = async () => {
-    if (!window.confirm("Delete this bug report? Cannot be undone.")) return;
+    if (!window.confirm("Delete this alert? Cannot be undone.")) return;
     setBusy(true);
     setError(null);
     try {
@@ -357,7 +358,7 @@ function BugDetailModal({
       >
         <div className="flex items-center justify-between px-5 py-3 border-b border-[#2a2a2c]">
           <div className="flex items-center gap-3">
-            <h3 className="text-sm font-semibold">Bug report</h3>
+            <h3 className="text-sm font-semibold">Alert</h3>
             <StatusBadge status={bug.status} />
           </div>
           <button

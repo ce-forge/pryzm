@@ -262,3 +262,10 @@ export const BugIcon = (props: React.SVGProps<SVGSVGElement>) => (
     <path d="M17.2 17c2.1.1 3.8 1.9 3.8 4" />
   </svg>
 );
+
+export const ThumbsDownIcon = (props: React.SVGProps<SVGSVGElement>) => (
+  <svg {...baseProps} {...props}>
+    <path d="M17 14V2" />
+    <path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z" />
+  </svg>
+);
