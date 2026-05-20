@@ -21,7 +21,7 @@ The fix is to pull page contents into the loop, give the model real text to synt
 - One `web_search` tool that fetches page contents for the top-K hits, extracts main content, and returns structured per-source blocks.
 - Model writes the response with inline `[N]` citation markers and a `**Sources**` footer mapping each marker to a URL.
 - Globe toggle in the chat input remains the only user-facing signal — turning it on means "do real research."
-- A model carrying the `web` tag handles the synthesis turn, so admins can move web work to a stronger model without touching code.
+- The synthesis turn runs on whatever model the existing heuristic router picks — no special override. Complex queries that trip `COMPLEX_VERBS` escalate to the larger model the same way they would without web_search.
 - Tool-result block in the chat UI collapses to a compact "Searched: N sources" pill instead of dumping the per-source markdown.
 - Per-source failures degrade gracefully — one timed-out page does not kill the whole turn.
 
@@ -38,79 +38,29 @@ The fix is to pull page contents into the loop, give the model real text to synt
 End-to-end, when the user sends a turn with the globe toggle on:
 
 1. Frontend sends `modes: ["web_search"]` in the inference request.
-2. Backend's `apply_modes()` activates the `web_search` mode, which force-includes the `web_search` tool and emits a `tier_override="web"` hint.
-3. The chat router picks a model. `stream_chat` consumes the tier hint: if a model carries the `web` tag, that model is used for this turn instead of the heuristic pick. If no model is tagged, the heuristic pick stands.
-4. Model invokes `web_search(query, num_results=3)`.
-5. Tool calls SearxNG, then fetches each result URL in parallel with a 25s wall-clock fetch budget (inside the engine's 30s outer tool timeout), extracts main content via trafilatura in precision mode, caps each to 3000 chars.
-6. Tool returns one `### Source [N]: <title>` block per successful fetch with the URL on its own line and the extracted body below. Failed sources go in a `**Failed sources**` footer.
-7. Synthesis turn (same loop iteration's next LLM call) sees the structured blocks and the tool's `system_prompt_directive` telling it to cite each claim with `[N]` and end with a `**Sources**` footer.
-8. Frontend renders the tool-result block as a collapsed "Searched: 5 sources" pill; the assistant prose with inline `[N]` markers and the sources footer render through the normal markdown path.
+2. Backend's `apply_modes()` activates the `web_search` mode, which force-includes the `web_search` tool. The router's heuristic pick stands — no tier override.
+3. Model invokes `web_search(query, num_results=3)`.
+4. Tool refines the raw query via the always-on small model (fixes typos, strips filler, preserves time references), then calls SearxNG with an optional `time_range=month` filter when the query carries a recency signal ("latest", "current", "recent", etc).
+5. Tool fetches each result URL in parallel via headless chromium with a 25s wall-clock fetch budget (inside the engine's 30s outer tool timeout), extracts main content via trafilatura in precision mode, splits into paragraph chunks, reranks chunks by cosine similarity to the user's prompt via the always-on embedding model, and keeps the top chunks per page within a 3000-char budget.
+6. Tool returns one `### Source [N]: <title>` block per successful fetch with the URL on its own line and the extracted body below. The output begins with a `**Searched as:** <refined query>` header and ends with an optional `**Failed sources**` block.
+7. Synthesis turn (same loop iteration's next LLM call) sees the structured blocks and the tool's `system_prompt_directive` telling it to cite each claim with `[N]`. The directive also nudges the model to issue SEPARATE web_search calls per entity for comparison questions.
+8. Frontend renders the tool-result block as a sleek "N sources" pill below the assistant message (only after the stream completes). Expansion shows the refined query, the source list with clickable URLs, and any failed sources in a muted footer.
 
 ## Backend changes
 
-### Model catalog (`infra/llama-swap-config.yaml`)
-
-Add `web` to `gemma-4-E2B-it`'s tags. E2B is the always-on small model; tagging it `web` means the synthesis turn for a research call lands on E2B by default. If E2B can't write clean cited research, the tag moves to `gemma-4-E4B-it` or `gemma-4-26B-A4B-it` with no code change.
-
-```yaml
-"gemma-4-E2B-it":
-  cmd: |-
-    /app/llama-server --port ${PORT}
-    -hf bartowski/google_gemma-4-E2B-it-GGUF:Q4_K_M
-    -ngl 99 --ctx-size 8192 --jinja --flash-attn on
-  tags:
-    - web
-  groups:
-    - always-on
-```
-
-### Router (`core/llm_router.py`)
-
-New method on `HeuristicRouter`:
-
-```python
-def web_capable_model(self) -> str | None:
-    """First chat model carrying the `web` tag, or None. Mirrors
-    vision_capable_model() — tag-driven so the catalog YAML is the
-    only place that decides which model runs research synthesis."""
-    for model_id, tags in self.catalog.items():
-        if "web" in tags and "embedding" not in tags:
-            return model_id
-    return None
-```
-
-Identical shape to `vision_capable_model()`. Returns `None` if no model is tagged — the caller falls back to the heuristic pick.
-
 ### Modes (`core/modes.py`)
 
-Set `tier_override="web"` on the existing `web_search` mode. The dataclass already has the field; this is its first real consumer.
+The `web_search` mode uses `force_tools` and `gates_tools` only — it does NOT set `tier_override`. The router's heuristic decides the model for the turn based on prompt complexity, history depth, attachments, etc. — same as any non-web turn.
 
 ```python
 register_mode(Mode(
     name="web_search",
     force_tools=["web_search"],
     gates_tools=["web_search"],
-    tier_override="web",
 ))
 ```
 
-Mode's `directive` stays empty. Citation guidance lives on the tool, not the mode.
-
-### Engine wiring (`core/ai_engine.py`)
-
-After `apply_modes` returns its tier hint, override the router's pick when the hint matches a tagged model:
-
-```python
-tool_set, system_prompt, tier_hint = apply_modes(tool_set, system_prompt, modes)
-model_id, tier, reason = router.pick(prompt, history, attachments)
-if tier_hint == "web":
-    web_model = router.web_capable_model()
-    if web_model is not None:
-        model_id = web_model
-        reason = "mode_tier_override:web"
-```
-
-Generic enough that future modes (`code-mode` with `tier_override="code"`, etc.) reuse the same path by adding their own `*_capable_model()` lookup.
+An earlier iteration of this spec pinned web turns to a `web`-tagged model via `tier_override`. The override silently downgraded complex queries the heuristic had escalated to the large tier, so it was removed. The `tier_override` field on the `Mode` dataclass stays for future modes that genuinely need to pin a tier (e.g. `code-mode`), but no shipped mode uses it today.
 
 ### Tool rewrite (`tools/web.py`)
 
@@ -235,9 +185,10 @@ Backend:
 
 - `tests/test_web_search.py` — extend existing tests to cover the new payload shape, structured output, per-source failure handling, all-fail path, K-capping at 8.
 - Mock httpx with `respx` or similar so we don't hit the live internet from the test suite. Fixtures for: success, timeout, 403, non-HTML content-type, empty trafilatura output.
-- `tests/test_modes.py` — assert `web_search` mode's `tier_override` round-trips through `apply_modes` as `"web"`.
-- New `tests/test_llm_router.py` (or extend existing) — `web_capable_model()` returns the tagged model, returns `None` when no model is tagged.
-- `tests/test_ai_engine.py` — when modes return `tier_hint == "web"` and a model is tagged, `stream_chat` uses that model.
+- `tests/test_modes.py` — assert `web_search` mode does NOT set `tier_override` (router decides).
+- `tests/test_web_search_query.py` — refinement preserves time references and recency words; falls back to raw on LLM failure.
+- `tests/test_web_search_fetch.py` — Playwright-backed fetcher (mocked at `_render_page` seam) classifies each failure mode (timeout, 403, non-html, empty, error).
+- `tests/test_web_search_rerank.py` — paragraph splitter + cosine similarity + rerank order.
 
 Frontend:
 
@@ -248,5 +199,5 @@ Frontend:
 
 None blocking. Two items deferred to first real-usage observations:
 
-- E2B-vs-larger for synthesis. If E2B writes weak cited research, the `web` tag moves to E4B or 26B with no code change. Single-line YAML edit, `kill -s HUP llama-swap`.
+- Comparison queries. The model can already issue multiple `web_search` calls per turn (the directive nudges this for "A vs B" questions), but the small model may not consistently decompose. If real usage shows it doesn't, the deterministic fallback is to have the refinement step emit multiple queries when the input is comparative.
 - Caching. If users repeatedly research the same topics, add a small `URL → (body, fetched_at)` cache in front of the fetch loop. Unlikely to be needed.

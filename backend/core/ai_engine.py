@@ -244,33 +244,6 @@ def _audit_chat_event(
         audit_db.close()
 
 
-def _resolve_routed_model(
-    router,
-    tier_hint: str | None,
-    default_model_id: str,
-    default_reason: str,
-) -> tuple[str, str]:
-    """Apply a mode-declared tier override on top of the router's heuristic pick.
-
-    `tier_hint` is the third element returned by `apply_modes`. Today only the
-    web_search mode sets one (`tier_override="web"`). Lookup is generic:
-    `{hint}` -> `router.{hint}_capable_model()` if the method exists. Falls back
-    to the heuristic pick when no model carries the tag or no hint is supplied.
-
-    Returns `(model_id, reason)` — reason is the keyword emitted to the route
-    audit event so we can tell heuristic picks from mode overrides in logs.
-    """
-    if tier_hint is None:
-        return default_model_id, default_reason
-    lookup = getattr(router, f"{tier_hint}_capable_model", None)
-    if lookup is None:
-        return default_model_id, default_reason
-    candidate = lookup()
-    if candidate is None:
-        return default_model_id, default_reason
-    return candidate, f"mode_tier_override:{tier_hint}"
-
-
 async def stream_chat(
     client: httpx.AsyncClient,
     messages: list,
@@ -305,10 +278,9 @@ async def stream_chat(
     # `== AVAILABLE TOOLS ==` directive block. Always called — even with an
     # empty `modes` list — because apply_modes runs the gating pass that
     # hides mode-gated tools (web_search) when their mode isn't active.
-    # The tier hint is consumed below: after the heuristic router picks a model,
-    # _resolve_routed_model checks whether a mode-declared override should swap
-    # it for a tag-matched model (e.g. web_search mode -> web-tagged model).
-    tool_set, system_prompt_raw, tier_hint_from_modes = apply_modes(
+    # The tier_hint return value is captured but unused — no shipped mode
+    # currently sets `tier_override`; the seam stays for future modes.
+    tool_set, system_prompt_raw, _tier_hint_unused = apply_modes(
         tool_set, system_prompt_raw, modes or [],
     )
 
@@ -349,9 +321,6 @@ async def stream_chat(
         history_for_routing = recent_messages[:-1] if last_user else recent_messages
         routed_model, tier, route_reason = router.pick(
             prompt_for_routing, history_for_routing, attachments_for_routing,
-        )
-        routed_model, route_reason = _resolve_routed_model(
-            router, tier_hint_from_modes, routed_model, route_reason,
         )
         emit_route(
             model=routed_model,

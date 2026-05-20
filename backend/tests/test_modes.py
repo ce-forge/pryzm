@@ -183,14 +183,13 @@ def test_web_search_mode_is_registered_when_module_imports():
     assert "web_search" in m.force_tools
 
 
-def test_web_search_mode_carries_web_tier_override():
-    """The shipped web_search mode declares tier_override='web' so the engine
-    can route the synthesis turn to a web-tagged model. Round-trips through
-    apply_modes."""
-    assert MODES["web_search"].tier_override == "web"
+def test_web_search_mode_has_no_tier_override():
+    """The web_search mode trusts the router's heuristic for tier selection —
+    no `tier_override`. Earlier iterations pinned synthesis to a
+    web-tagged model, which silently downgraded complex queries that the
+    heuristic had escalated to the large tier. The router now decides."""
+    assert MODES["web_search"].tier_override is None
 
-    # The real web_search tool is registered at import time; _make_tool_set
-    # picks it up directly without a stub.
     tool_set = _make_tool_set(["web_search"])
     _, _, tier_hint = apply_modes(tool_set, "system", ["web_search"])
-    assert tier_hint == "web"
+    assert tier_hint is None
