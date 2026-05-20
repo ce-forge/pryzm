@@ -41,7 +41,7 @@ End-to-end, when the user sends a turn with the globe toggle on:
 2. Backend's `apply_modes()` activates the `web_search` mode, which force-includes the `web_search` tool and emits a `tier_override="web"` hint.
 3. The chat router picks a model. `stream_chat` consumes the tier hint: if a model carries the `web` tag, that model is used for this turn instead of the heuristic pick. If no model is tagged, the heuristic pick stands.
 4. Model invokes `web_search(query, num_results=5)`.
-5. Tool calls SearxNG, then fetches each result URL in parallel with a 30s wall-clock budget, extracts main content via trafilatura, caps each to 6000 chars.
+5. Tool calls SearxNG, then fetches each result URL in parallel with a 25s wall-clock fetch budget (inside the engine's 30s outer tool timeout), extracts main content via trafilatura, caps each to 6000 chars.
 6. Tool returns one `### Source [N]: <title>` block per successful fetch with the URL on its own line and the extracted body below. Failed sources go in a `**Failed sources**` footer.
 7. Synthesis turn (same loop iteration's next LLM call) sees the structured blocks and the tool's `system_prompt_directive` telling it to cite each claim with `[N]` and end with a `**Sources**` footer.
 8. Frontend renders the tool-result block as a collapsed "Searched: 5 sources" pill; the assistant prose with inline `[N]` markers and the sources footer render through the normal markdown path.
@@ -133,7 +133,7 @@ async def web_search(query: str, num_results: int = 5) -> str:
 Behavior:
 
 1. Call SearxNG for top-K hits (K capped at 8, default 5).
-2. Fetch all URLs in parallel via `httpx.AsyncClient` inside `asyncio.wait_for(..., timeout=30)`. Per-request timeout 8s.
+2. Fetch all URLs in parallel via `httpx.AsyncClient` inside `asyncio.wait_for(..., timeout=25)`. Per-request timeout 8s. The 25s ceiling sits under the engine's `TOOL_TIMEOUT_SECONDS=30` so the inner budget always trips first and the tool can return a partial result rather than getting cancelled by the outer guard.
 3. For each successful fetch (HTTP 2xx, content-type `text/html*` or `application/xhtml+xml`), extract main content with `trafilatura.extract(html, include_comments=False, include_tables=True)`.
 4. Truncate each extracted body to 6000 chars at a sentence boundary. A small helper walks the body, accumulates whole sentences, and stops before exceeding the cap — `textwrap.shorten` is too aggressive on prose where one sentence can run past the limit on its own.
 5. Assemble output:
