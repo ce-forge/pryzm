@@ -648,18 +648,21 @@ async def stream_chat(
                             },
                         )
                     elif func_name == "web_search":
-                        result_urls = (
-                            re.findall(r'https?://\S+', result)
-                            if isinstance(result, str)
-                            else []
-                        )
+                        from tools.web import get_last_stats as _web_stats
+                        stats = _web_stats()
                         _audit_chat_event(
                             user_id, workspace_id, session_id,
                             EventType.CHAT_WEB_SEARCH,
                             {
                                 "query_preview": str(audit_args.get("query", ""))[:200],
-                                "num_results": len(result_urls),
-                                "result_urls": result_urls,
+                                "k_requested": stats.get("k_requested", 0),
+                                "k_returned_by_searxng": stats.get("k_returned_by_searxng", 0),
+                                "k_fetched_ok": stats.get("k_fetched_ok", 0),
+                                "k_failed": stats.get("k_failed", 0),
+                                "failure_reasons": stats.get("failure_reasons", {}),
+                                "fetch_wall_clock_ms": stats.get("fetch_wall_clock_ms", 0),
+                                "extracted_bytes_total": stats.get("extracted_bytes_total", 0),
+                                "synthesis_model_id": routed_model,
                             },
                         )
                     else:

@@ -153,15 +153,26 @@ def test_audit_chat_event_writes_web_search(db_session, redirect_session_local):
         EventType.CHAT_WEB_SEARCH,
         {
             "query_preview": "kubernetes load balancer",
-            "num_results": 3,
-            "result_urls": ["https://a", "https://b", "https://c"],
+            "k_requested": 5,
+            "k_returned_by_searxng": 5,
+            "k_fetched_ok": 3,
+            "k_failed": 2,
+            "failure_reasons": {"timeout": 2},
+            "fetch_wall_clock_ms": 4200,
+            "extracted_bytes_total": 18000,
+            "synthesis_model_id": "qwen3.6:e2b",
         },
     )
     events = db_session.query(models.AuditEvent).filter_by(
         event_type="chat.web_search", user_id=user.id,
     ).all()
     assert len(events) == 1
-    assert events[0].payload["num_results"] == 3
+    assert events[0].payload["query_preview"] == "kubernetes load balancer"
+    assert events[0].payload["k_requested"] == 5
+    assert events[0].payload["k_fetched_ok"] == 3
+    assert events[0].payload["k_failed"] == 2
+    assert events[0].payload["failure_reasons"] == {"timeout": 2}
+    assert events[0].payload["synthesis_model_id"] == "qwen3.6:e2b"
 
 
 def test_audit_chat_event_writes_tool_invoked(db_session, redirect_session_local):

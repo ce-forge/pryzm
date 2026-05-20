@@ -16,6 +16,7 @@ SearxNG can eat into the engine's outer budget.
 from __future__ import annotations
 
 import asyncio
+import time
 
 import httpx
 import requests
@@ -24,6 +25,23 @@ from config import settings
 from tools._web_fetch import FetchResult, fetch_and_extract
 from tools._web_truncate import truncate_to_sentences
 from .registry import tool
+
+
+# Per-call stats stash for the engine's audit emission. The engine reads
+# `get_last_stats()` immediately after each web_search call. Single-flight
+# per process — concurrent web_search calls would race, but the engine
+# serializes tool calls inside a single chat turn so this is safe today.
+_LAST_STATS: dict = {}
+
+
+def get_last_stats() -> dict:
+    """Return the stats dict from the most recent web_search call."""
+    return dict(_LAST_STATS)
+
+
+def _set_stats(**kwargs) -> None:
+    _LAST_STATS.clear()
+    _LAST_STATS.update(kwargs)
 
 
 _MAX_RESULTS = 8
@@ -86,10 +104,18 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         resp.raise_for_status()
         payload = resp.json()
     except requests.RequestException as exc:
+        _set_stats(
+            k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
+            failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+        )
         return f"Web search failed: {exc}"
 
     hits = (payload.get("results") or [])[:capped]
     if not hits:
+        _set_stats(
+            k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
+            failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+        )
         return f"No results for {query!r}."
 
     urls_titles = [(h.get("url", ""), h.get("title", "(no title)")) for h in hits]
@@ -100,6 +126,7 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     # shield-based variant could collect partials; v1 accepts the simpler
     # all-or-timeout shape and marks every URL as `timeout` on cancellation.
     results: list[FetchResult] = []
+    fetch_t0 = time.monotonic()
     async with httpx.AsyncClient(
         headers={"user-agent": "Pryzm/1.0 (+self-hosted IT copilot)"},
         timeout=_PER_REQUEST_TIMEOUT_S,
@@ -113,6 +140,7 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
             )
         except asyncio.TimeoutError:
             results = [FetchResult(url=url, ok=False, failure_reason="timeout") for url, _ in urls_titles]
+    fetch_wall_clock_ms = int((time.monotonic() - fetch_t0) * 1000)
 
     successes: list[tuple[str, str, str]] = []  # (title, url, body)
     failures: list[tuple[str, str]] = []  # (url, reason)
@@ -123,15 +151,36 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         else:
             failures.append((url, fr.failure_reason or "error"))
 
+    failure_reasons: dict[str, int] = {}
+    for _, reason in failures:
+        failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+
     if not successes:
-        reason_counts: dict[str, int] = {}
-        for _, reason in failures:
-            reason_counts[reason] = reason_counts.get(reason, 0) + 1
-        summary = ", ".join(f"{n}× {r}" for r, n in sorted(reason_counts.items()))
+        _set_stats(
+            k_requested=capped,
+            k_returned_by_searxng=len(hits),
+            k_fetched_ok=0,
+            k_failed=len(failures),
+            failure_reasons=failure_reasons,
+            fetch_wall_clock_ms=fetch_wall_clock_ms,
+            extracted_bytes_total=0,
+        )
+        summary = ", ".join(f"{n}× {r}" for r, n in sorted(failure_reasons.items()))
         return (
             f"Web search returned {len(hits)} results but none could be fetched. "
             f"Reasons: {summary}."
         )
+
+    extracted_bytes_total = sum(len(body.encode()) for _, _, body in successes)
+    _set_stats(
+        k_requested=capped,
+        k_returned_by_searxng=len(hits),
+        k_fetched_ok=len(successes),
+        k_failed=len(failures),
+        failure_reasons=failure_reasons,
+        fetch_wall_clock_ms=fetch_wall_clock_ms,
+        extracted_bytes_total=extracted_bytes_total,
+    )
 
     blocks: list[str] = []
     for i, (title, url, body) in enumerate(successes, 1):
