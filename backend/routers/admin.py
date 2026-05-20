@@ -22,7 +22,6 @@ import json
 import logging
 import pathlib
 import re
-import subprocess
 import time
 from typing import Any, Optional
 
@@ -37,15 +36,13 @@ from config import settings
 from core import cookie_auth, llm_router
 from core.audit import EventType, log_event
 from db import database, models
+from services import llama_swap_config
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 _logger = logging.getLogger("pryzm.admin")
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-_YAML_PATH = _REPO_ROOT / "infra" / "llama-swap-config.yaml"
+_REPO_ROOT = llama_swap_config.REPO_ROOT
 _LLAMA_CACHE = _REPO_ROOT / "infra" / "llama_models"
-_yaml = ruamel.yaml.YAML()
-_yaml.preserve_quotes = True
 _yaml_lock = asyncio.Lock()
 
 # In-memory map of model_id → download tracking metadata. Populated by
@@ -79,100 +76,8 @@ def _partial_blob_size(blobs_dir: pathlib.Path, blob_hash: str) -> int:
         pass
     return 0
 
-# Match the bits we care about inside the multi-line cmd string.
-# `-hf <repo>` with `:quant` optional, since the `-hff <filename>` form replaces
-# the colon shortcut for repos that don't expose preset metadata on the HF API.
-_HF_RE = re.compile(r"-hf\s+(\S+?)(?::(\S+))?(?=\s|$)")
-_HFF_RE = re.compile(r"-hff\s+(\S+)")
-_NGL_RE = re.compile(r"-ngl\s+(\d+)")
-_CTX_RE = re.compile(r"--ctx-size\s+(\d+)")
 _ID_VALID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REPO_QUANT_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
-# Extract a quant tag from a GGUF filename for display (e.g. "Q4_K_M" from
-# "model-Q4_K_M.gguf"). Used only when the cmd uses `-hff` instead of `:quant`,
-# so the admin UI can still show "Q4_K_M" alongside the repo.
-_QUANT_FROM_FILE_RE = re.compile(
-    r"-((?:IQ|Q|UD-Q|UD-IQ)\d+(?:_[A-Z]+)*|F\d+|BF\d+)\.gguf$",
-    re.IGNORECASE,
-)
-
-
-def _read_yaml() -> dict:
-    with open(_YAML_PATH) as f:
-        return _yaml.load(f) or {}
-
-
-def _write_yaml(data: dict) -> None:
-    with open(_YAML_PATH, "w") as f:
-        _yaml.dump(data, f)
-
-
-def _reload_llama_swap() -> None:
-    start = time.perf_counter()
-    subprocess.run(
-        ["docker", "compose", "kill", "-s", "HUP", "llama-swap"],
-        cwd=_REPO_ROOT, check=True, timeout=5, capture_output=True,
-    )
-    duration_ms = int((time.perf_counter() - start) * 1000)
-    _logger.info("admin.llama_swap_reloaded duration_ms=%d", duration_ms)
-
-
-def _parse_model_row(model_id: str, cfg: dict) -> dict:
-    cmd = " ".join((cfg.get("cmd") or "").split())  # collapse newlines/whitespace
-    hf_match = _HF_RE.search(cmd)
-    hff_match = _HFF_RE.search(cmd)
-    ngl_match = _NGL_RE.search(cmd)
-    ctx_match = _CTX_RE.search(cmd)
-    groups = cfg.get("groups") or []
-
-    repo = hf_match.group(1) if hf_match else None
-    quant = hf_match.group(2) if hf_match else None
-    filename = hff_match.group(1) if hff_match else None
-    # Newer entries omit `:quant` from `-hf` and use `-hff <filename>` instead
-    # — derive a display quant from the filename so the UI keeps its label.
-    if filename and not quant:
-        m = _QUANT_FROM_FILE_RE.search(filename)
-        if m:
-            quant = m.group(1)
-
-    return {
-        "id": model_id,
-        "repo": repo,
-        "quant": quant,
-        "filename": filename,
-        "ngl": int(ngl_match.group(1)) if ngl_match else None,
-        "ctx_size": int(ctx_match.group(1)) if ctx_match else None,
-        "group": groups[0] if groups else None,
-        "tags": list(cfg.get("tags") or []),
-    }
-
-
-def _build_cmd_block(
-    repo: str,
-    quant: str,
-    filename: str | None,
-    ngl: int,
-    ctx_size: int,
-    group: str,
-) -> str:
-    """Render a multi-line `cmd:` value matching the style of existing entries.
-    When `filename` is provided (HF picker path), emit the explicit-filename
-    form which bypasses the HF API's preset metadata lookup — some repos
-    (e.g. bartowski's larger Gemma variants) don't expose it and return 404.
-    Falls back to the `:quant` shortcut for manual entries without a filename.
-    Chat models get k/v cache quantisation; embedding doesn't."""
-    if filename:
-        hf_lines = f"-hf {repo}\n-hff {filename}"
-    else:
-        hf_lines = f"-hf {repo}:{quant}"
-    base = (
-        f"/app/llama-server --port ${{PORT}}\n"
-        f"{hf_lines}\n"
-        f"-ngl {ngl} --ctx-size {ctx_size} --jinja --flash-attn on"
-    )
-    if group == "on-demand":
-        base += "\n--cache-type-k q8_0 --cache-type-v q8_0"
-    return base
 
 
 class AddModelRequest(BaseModel):
@@ -243,9 +148,9 @@ async def _fetch_running_model_ids() -> set[str]:
 
 @router.get("/models")
 async def list_models() -> list[dict]:
-    data = _read_yaml()
+    data = llama_swap_config.read_yaml()
     models_cfg = data.get("models") or {}
-    rows = [_parse_model_row(mid, cfg) for mid, cfg in models_cfg.items()]
+    rows = [llama_swap_config.parse_model_row(mid, cfg) for mid, cfg in models_cfg.items()]
     loaded_ids = await _fetch_running_model_ids()
     for row in rows:
         row["loaded"] = row["id"] in loaded_ids
@@ -278,13 +183,13 @@ async def add_model(
         raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
-        data = _read_yaml()
+        data = llama_swap_config.read_yaml()
         models_cfg = data.setdefault("models", {})
         if req.id in models_cfg:
             raise HTTPException(status_code=409, detail=f"model id already exists: {req.id}")
         models_cfg[req.id] = {
             "cmd": ruamel.yaml.scalarstring.PreservedScalarString(
-                _build_cmd_block(
+                llama_swap_config.build_cmd_block(
                     repo, quant, req.expected_filename,
                     req.ngl, req.ctx_size, req.group,
                 ),
@@ -292,14 +197,9 @@ async def add_model(
             "groups": [req.group],
             "tags": list(req.tags),
         }
-        _write_yaml(data)
-        try:
-            _reload_llama_swap()
-        except subprocess.CalledProcessError as e:
-            _logger.warning(
-                "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
-            # Don't fail the request — the YAML is written; SIGHUP can be retried manually.
-        llm_router.reload_router_from_yaml(_YAML_PATH)
+        llama_swap_config.write_yaml(data)
+        llama_swap_config.reload_llama_swap()
+        llm_router.reload_router_from_yaml(llama_swap_config.YAML_PATH)
 
     # Stash progress-tracking metadata for the status SSE. Only populated
     # when the HF picker passes hints; manual adds skip and fall back to
@@ -328,7 +228,7 @@ async def add_model(
     )
     db.commit()
     background_tasks.add_task(_warmup_model, req.id)
-    return _parse_model_row(req.id, data["models"][req.id])
+    return llama_swap_config.parse_model_row(req.id, data["models"][req.id])
 
 
 @router.put("/models/{model_id}")
@@ -343,7 +243,7 @@ async def update_model(
         raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
-        data = _read_yaml()
+        data = llama_swap_config.read_yaml()
         models_cfg = data.get("models") or {}
         if model_id not in models_cfg:
             raise HTTPException(status_code=404, detail=f"model not found: {model_id}")
@@ -351,7 +251,7 @@ async def update_model(
         existing = models_cfg[model_id]
         # Re-extract identity (repo + quant-or-filename) from the existing cmd;
         # identity is not editable through this endpoint.
-        current = _parse_model_row(model_id, existing)
+        current = llama_swap_config.parse_model_row(model_id, existing)
         if not current["repo"] or not (current["quant"] or current["filename"]):
             raise HTTPException(
                 status_code=500,
@@ -374,20 +274,16 @@ async def update_model(
             changed_fields.append("tags")
 
         existing["cmd"] = ruamel.yaml.scalarstring.PreservedScalarString(
-            _build_cmd_block(
+            llama_swap_config.build_cmd_block(
                 current["repo"], current["quant"], current["filename"],
                 new_ngl, new_ctx, new_group,
             ),
         )
         existing["groups"] = [new_group]
         existing["tags"] = list(new_tags)
-        _write_yaml(data)
-        try:
-            _reload_llama_swap()
-        except subprocess.CalledProcessError as e:
-            _logger.warning(
-                "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
-        llm_router.reload_router_from_yaml(_YAML_PATH)
+        llama_swap_config.write_yaml(data)
+        llama_swap_config.reload_llama_swap()
+        llm_router.reload_router_from_yaml(llama_swap_config.YAML_PATH)
 
     _logger.info(
         "admin.model_updated id=%s ngl=%d ctx_size=%d group=%s tags=%s",
@@ -399,7 +295,7 @@ async def update_model(
         payload={"model_id": model_id, "changed_fields": changed_fields},
     )
     db.commit()
-    return _parse_model_row(model_id, data["models"][model_id])
+    return llama_swap_config.parse_model_row(model_id, data["models"][model_id])
 
 
 @router.delete("/models/{model_id}")
@@ -410,7 +306,7 @@ async def delete_model(
     admin: models.User = Depends(cookie_auth.require_admin),
 ) -> dict:
     async with _yaml_lock:
-        data = _read_yaml()
+        data = llama_swap_config.read_yaml()
         models_cfg = data.get("models") or {}
         if model_id not in models_cfg:
             raise HTTPException(status_code=404, detail=f"model not found: {model_id}")
@@ -427,14 +323,10 @@ async def delete_model(
         )
         db.commit()
         del models_cfg[model_id]
-        _write_yaml(data)
+        llama_swap_config.write_yaml(data)
         _active_downloads.pop(model_id, None)
-        try:
-            _reload_llama_swap()
-        except subprocess.CalledProcessError as e:
-            _logger.warning(
-                "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
-        llm_router.reload_router_from_yaml(_YAML_PATH)
+        llama_swap_config.reload_llama_swap()
+        llm_router.reload_router_from_yaml(llama_swap_config.YAML_PATH)
 
     _logger.info("admin.model_removed id=%s", model_id)
     return {"deleted": model_id}

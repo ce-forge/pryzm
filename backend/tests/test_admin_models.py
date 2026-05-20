@@ -18,6 +18,7 @@ from core import cookie_auth, llm_router
 from db import database, models
 from main import app
 from routers import admin
+from services import llama_swap_config
 
 
 # Same YAML used by the live stack — copy verbatim so the tests exercise the
@@ -72,7 +73,7 @@ def tmp_yaml(tmp_path: Path, monkeypatch) -> Path:
     """Point the admin router at a temp YAML file for the test, restore on exit."""
     path = tmp_path / "llama-swap-config.yaml"
     path.write_text(_FIXTURE_YAML)
-    monkeypatch.setattr(admin, "_YAML_PATH", path)
+    monkeypatch.setattr(llama_swap_config, "YAML_PATH", path)
     return path
 
 
@@ -80,7 +81,7 @@ def tmp_yaml(tmp_path: Path, monkeypatch) -> Path:
 def client(tmp_yaml, db_session, monkeypatch) -> Iterator[TestClient]:
     monkeypatch.setattr(database, "init_db", lambda: None)
     # Stub out the SIGHUP shell-out and warmup HTTP call so tests stay hermetic.
-    monkeypatch.setattr(admin, "_reload_llama_swap", lambda: None)
+    monkeypatch.setattr(llama_swap_config, "reload_llama_swap", lambda: None)
 
     async def _stub_warmup(model_id: str) -> None:
         return None
@@ -111,8 +112,8 @@ def client(tmp_yaml, db_session, monkeypatch) -> Iterator[TestClient]:
 # ---------------------------------------------------------------------------
 
 def test_yaml_round_trip_preserves_comments_and_order(tmp_yaml):
-    data = admin._read_yaml()
-    admin._write_yaml(data)
+    data = llama_swap_config.read_yaml()
+    llama_swap_config.write_yaml(data)
     rewritten = tmp_yaml.read_text()
     # Comments survive
     assert "# Tier-1 default (small)." in rewritten
