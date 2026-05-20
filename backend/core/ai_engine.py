@@ -4,7 +4,6 @@ import inspect
 import logging
 import re
 import time
-from datetime import date
 from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -318,13 +317,6 @@ async def stream_chat(
     system_content = system_prompt_raw.replace("{tool_names}", tool_names)
     rendered_directives = render_tool_directives(tool_set)
     system_content = _inject_tool_directives(system_content, rendered_directives)
-
-    # Inject today's date so the model can reason about "this week", "latest",
-    # and other time-bound phrases without hedging that it "lacks real-time
-    # access to the date". The model's training-cutoff knowledge stays
-    # accurate; this just anchors the current frame of reference.
-    today_iso = date.today().isoformat()
-    system_content = f"Today's date is {today_iso}.\n\n{system_content}"
 
     tools_payload = tool_set.definitions if workspace_tools else None
     system_msg = {"role": "system", "content": system_content}
