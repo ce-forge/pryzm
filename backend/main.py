@@ -160,6 +160,8 @@ async def lifespan(app: FastAPI):
         gc_task.cancel()
         audit_retention_task.cancel()
         llama_cache_cleanup_task.cancel()
+        from tools._browser import shutdown_browser
+        await shutdown_browser()
 
 
 app = FastAPI(title=settings.PROJECT_NAME, version=settings.VERSION, lifespan=lifespan)

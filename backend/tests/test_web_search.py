@@ -1,7 +1,7 @@
 """Unit tests for the web_search tool (SearxNG + page fetch + structured output).
 
-SearxNG is still mocked via the requests library; page fetches are mocked via
-respx so the new async fetch path doesn't touch the network. End-to-end
+SearxNG is mocked via the requests library. Page fetches are monkeypatched at
+the fetch_and_extract level so tests don't spin up a real browser. End-to-end
 exercise against a running SearxNG + the live web is the manual smoke step on
 the PR.
 """
@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import httpx
 import pytest
 import requests
-import respx
+
+from tools._web_fetch import FetchResult
 
 
 def _mock_searx_response(results: list[dict] | None = None, status: int = 200) -> MagicMock:
@@ -33,43 +33,50 @@ def _fake_hits(n: int) -> list[dict]:
     ]
 
 
-def _ok_html(body_text: str) -> httpx.Response:
-    return httpx.Response(
-        200,
-        text=f"<html><body><article><p>{body_text}</p></article></body></html>",
-        headers={"content-type": "text/html"},
-    )
+def _ok_result(url: str, body: str) -> FetchResult:
+    return FetchResult(url=url, ok=True, body=body)
+
+
+def _fail_result(url: str, reason: str) -> FetchResult:
+    return FetchResult(url=url, ok=False, failure_reason=reason)
 
 
 @pytest.mark.asyncio
-async def test_returns_structured_source_blocks_for_each_fetched_page():
+async def test_returns_structured_source_blocks_for_each_fetched_page(monkeypatch):
     from tools.web import web_search
 
-    with patch("tools.web.requests.get") as mock_get, respx.mock:
-        mock_get.return_value = _mock_searx_response(_fake_hits(3))
-        respx.get("https://example.com/p1").mock(return_value=_ok_html("Article one content."))
-        respx.get("https://example.com/p2").mock(return_value=_ok_html("Article two content."))
-        respx.get("https://example.com/p3").mock(return_value=_ok_html("Article three content."))
+    async def fake_fetch(url, _timeout):
+        label = url.rsplit("/", 1)[1]  # "p1", "p2", "p3"
+        return _ok_result(url, f"Article {label} content.")
 
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(3))
         out = await web_search("anything", num_results=3)
 
     assert "### Source [1]: Title 1" in out
     assert "https://example.com/p1" in out
-    assert "Article one content." in out
+    assert "Article p1 content." in out
     assert "### Source [2]: Title 2" in out
     assert "### Source [3]: Title 3" in out
 
 
 @pytest.mark.asyncio
-async def test_failed_sources_listed_in_footer_others_still_returned():
+async def test_failed_sources_listed_in_footer_others_still_returned(monkeypatch):
     from tools.web import web_search
 
-    with patch("tools.web.requests.get") as mock_get, respx.mock:
-        mock_get.return_value = _mock_searx_response(_fake_hits(3))
-        respx.get("https://example.com/p1").mock(return_value=_ok_html("Body one."))
-        respx.get("https://example.com/p2").mock(return_value=httpx.Response(403, text="nope"))
-        respx.get("https://example.com/p3").mock(side_effect=httpx.TimeoutException("slow"))
+    async def fake_fetch(url, _timeout):
+        if "p1" in url:
+            return _ok_result(url, "Body one.")
+        if "p2" in url:
+            return _fail_result(url, "403")
+        return _fail_result(url, "timeout")
 
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(3))
         out = await web_search("anything", num_results=3)
 
     assert "### Source [1]: Title 1" in out
@@ -82,14 +89,18 @@ async def test_failed_sources_listed_in_footer_others_still_returned():
 
 
 @pytest.mark.asyncio
-async def test_all_fail_returns_single_line_error():
+async def test_all_fail_returns_single_line_error(monkeypatch):
     from tools.web import web_search
 
-    with patch("tools.web.requests.get") as mock_get, respx.mock:
-        mock_get.return_value = _mock_searx_response(_fake_hits(2))
-        respx.get("https://example.com/p1").mock(return_value=httpx.Response(403))
-        respx.get("https://example.com/p2").mock(side_effect=httpx.TimeoutException("slow"))
+    async def fake_fetch(url, _timeout):
+        if "p1" in url:
+            return _fail_result(url, "403")
+        return _fail_result(url, "timeout")
 
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(2))
         out = await web_search("anything", num_results=2)
 
     assert "### Source" not in out
@@ -119,14 +130,17 @@ async def test_searxng_unreachable_returns_failure_message():
 
 
 @pytest.mark.asyncio
-async def test_num_results_clamped_at_eight():
+async def test_num_results_clamped_at_eight(monkeypatch):
     from tools.web import web_search
 
-    with patch("tools.web.requests.get") as mock_get, respx.mock:
-        mock_get.return_value = _mock_searx_response(_fake_hits(10))
-        for i in range(1, 9):
-            respx.get(f"https://example.com/p{i}").mock(return_value=_ok_html(f"body {i}"))
+    async def fake_fetch(url, _timeout):
+        label = url.rsplit("/", 1)[1]
+        return _ok_result(url, f"body {label}")
 
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(10))
         out = await web_search("anything", num_results=20)
 
     # 9th and 10th hits never get fetched.
@@ -135,18 +149,20 @@ async def test_num_results_clamped_at_eight():
 
 
 @pytest.mark.asyncio
-async def test_body_is_truncated_to_max_chars():
+async def test_body_is_truncated_to_max_chars(monkeypatch):
     from tools.web import web_search
 
     long_body = "Sentence. " * 1000  # ~10K chars
-    with patch("tools.web.requests.get") as mock_get, respx.mock:
-        mock_get.return_value = _mock_searx_response(_fake_hits(1))
-        respx.get("https://example.com/p1").mock(return_value=_ok_html(long_body))
 
+    async def fake_fetch(url, _timeout):
+        return _ok_result(url, long_body)
+
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(1))
         out = await web_search("anything", num_results=1)
 
     # Extracted body inside the Source block should not exceed ~3000 chars.
-    # The block has small surrounding boilerplate so we check the body line
-    # contains "Sentence." many times but the whole output stays bounded.
     assert len(out) < 3500
     assert "Sentence." in out

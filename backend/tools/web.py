@@ -18,7 +18,6 @@ from __future__ import annotations
 import asyncio
 import time
 
-import httpx
 import requests
 
 from config import settings
@@ -141,19 +140,15 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     # all-or-timeout shape and marks every URL as `timeout` on cancellation.
     results: list[FetchResult] = []
     fetch_t0 = time.monotonic()
-    async with httpx.AsyncClient(
-        headers={"user-agent": "Pryzm/1.0 (+self-hosted IT copilot)"},
-        timeout=_PER_REQUEST_TIMEOUT_S,
-    ) as client:
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(
-                    *(fetch_and_extract(client, url, _PER_REQUEST_TIMEOUT_S) for url, _ in urls_titles)
-                ),
-                timeout=_FETCH_WALL_CLOCK_S,
-            )
-        except asyncio.TimeoutError:
-            results = [FetchResult(url=url, ok=False, failure_reason="timeout") for url, _ in urls_titles]
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(fetch_and_extract(url, _PER_REQUEST_TIMEOUT_S) for url, _ in urls_titles)
+            ),
+            timeout=_FETCH_WALL_CLOCK_S,
+        )
+    except asyncio.TimeoutError:
+        results = [FetchResult(url=url, ok=False, failure_reason="timeout") for url, _ in urls_titles]
     fetch_wall_clock_ms = int((time.monotonic() - fetch_t0) * 1000)
 
     successes: list[tuple[str, str, str]] = []  # (title, url, body)
