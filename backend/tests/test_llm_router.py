@@ -220,6 +220,18 @@ def test_web_capable_model_returns_first_web_tagged_chat_model():
     assert router.web_capable_model() == "small-2b"
 
 
+def test_web_capable_model_skips_embedding_even_if_misstagged():
+    """Defensive: an embedding model accidentally tagged `web` must not be
+    picked as the research synthesizer — mirrors the vision_capable_model
+    safeguard for the captioner."""
+    router = HeuristicRouter({
+        "small-2b": set(),
+        "large-26b": set(),
+        "embed": {"embedding", "web"},
+    })
+    assert router.web_capable_model() is None
+
+
 def test_web_capable_model_none_when_no_model_tagged():
     """No `web` tag anywhere → None; caller falls back to the heuristic pick."""
     catalog = {
