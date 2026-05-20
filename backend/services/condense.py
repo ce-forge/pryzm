@@ -17,11 +17,45 @@ import httpx
 from sqlalchemy import text
 
 from config import settings
-from core import ai_engine
+from core import llm_server
 from core.engine_config import EngineConfig
+from core.prompt_manager import MICRO_PROMPTS
 from db import database, models
 
 logger = logging.getLogger(__name__)
+
+
+async def condense_chat_memory(
+    client: httpx.AsyncClient,
+    old_memory: str,
+    messages: list,
+    *,
+    engine_config: EngineConfig,
+) -> str:
+    """Summarise older messages so the agentic loop doesn't blow the
+    context window. Uses the always-on small chat model — summarisation
+    doesn't need the on-demand tier's capability and the small model is
+    guaranteed resident, so this call can't fail with a cold-load."""
+    chat_text = "\n".join(
+        f"{m['role'].capitalize()}: {m['content']}"
+        for m in messages if m["role"] in ("user", "assistant")
+    )
+
+    prompt = f"{MICRO_PROMPTS['memory_condenser_system']}\n\n"
+    if old_memory:
+        prompt += f"--- PREVIOUS MEMORY ---\n{old_memory}\n\n"
+    prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
+
+    try:
+        response = await llm_server.generate(
+            client, prompt=prompt,
+            model=llm_server.DEFAULT_SMALL_CHAT_MODEL,
+            options={"num_ctx": 8192},
+        )
+        return response.strip()
+    except Exception:
+        logger.exception("memory condensation failed; preserving previous memory")
+        return old_memory
 
 
 @contextmanager
@@ -136,7 +170,7 @@ async def _condense_inner(
     new_last_id = to_summarize[-1].id
 
     msg_dicts = [{"role": m.role, "content": m.content} for m in to_summarize]
-    new_summary_text = await ai_engine.condense_chat_memory(
+    new_summary_text = await condense_chat_memory(
         client, old_summary, msg_dicts, engine_config=engine_config,
     )
 

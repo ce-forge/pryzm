@@ -350,6 +350,131 @@ def _stitch_chunks_dedup(chunk_texts: list[str], max_overlap: int = 250) -> str:
     return "".join(out)
 
 
+def _retrieve_pinned_filenames(
+    db: Session,
+    workspace_id: str,
+    session_id: str | None,
+    restrict_to_filenames: list[str],
+) -> dict | None:
+    """Pinned-filename retrieval: return ALL chunks of the matching document(s)
+    in insertion order. Used when the user attached a file or referenced one
+    by name in this turn.
+
+    Returns None when no matching documents exist (caller falls through to a
+    broader mode so the chat doesn't dead-end on a stale filename marker).
+    """
+    scoped_docs = (
+        db.query(models.Document)
+        .filter(
+            models.Document.workspace_id == workspace_id,
+            models.Document.filename.in_(restrict_to_filenames),
+            or_(
+                models.Document.session_id == session_id,
+                models.Document.is_global == True,
+            ),
+        )
+        .order_by(models.Document.created_at.desc())
+        .all()
+    )
+    if not scoped_docs:
+        return None
+
+    # Explicit attachment ⇒ return ALL chunks of the scoped doc(s) in
+    # insertion order. UUIDv7 ids make `ORDER BY id` equivalent to "the
+    # order the splitter produced them". Relevance ranking would be the
+    # wrong operation here — the user wants the whole document.
+    # Context-window overflow on huge files surfaces via the upstream
+    # error message (core/llm_server._raise_for_status_with_body).
+    chunks = (
+        db.query(models.DocumentChunk)
+        .filter(models.DocumentChunk.document_id.in_([d.id for d in scoped_docs]))
+        .order_by(models.DocumentChunk.id)
+        .all()
+    )
+    if not chunks:
+        return None
+
+    unique_sources = list({c.document.filename for c in chunks})
+    # Group by document, stitch each doc's chunks with overlap removed,
+    # then label once per doc — avoids the chunk_overlap=200 duplication
+    # the splitter intentionally bakes in.
+    chunks_by_doc: dict[str, list] = {}
+    for c in chunks:
+        chunks_by_doc.setdefault(c.document_id, []).append(c)
+    context_blocks = []
+    for doc_chunks in chunks_by_doc.values():
+        filename = doc_chunks[0].document.filename if doc_chunks[0].document else "unknown"
+        stitched = _stitch_chunks_dedup([c.content for c in doc_chunks])
+        context_blocks.append(f"[from {filename}]\n{stitched}")
+    return {
+        "context": format_rag_context(context_blocks),
+        "sources": unique_sources,
+    }
+
+
+def _retrieve_session_overview(
+    db: Session,
+    session_id: str,
+    top_k: int,
+) -> dict | None:
+    """Overview mode: surface up to top_k chunks of the most recently uploaded
+    document in the session. Used when the user attached a file with no text
+    alongside it — the intent is "tell me about this file" rather than search.
+    """
+    recent_doc = (
+        db.query(models.Document)
+        .filter(models.Document.session_id == session_id)
+        .order_by(models.Document.created_at.desc())
+        .first()
+    )
+    if not recent_doc:
+        return None
+
+    chunks = (
+        db.query(models.DocumentChunk)
+        .filter(models.DocumentChunk.document_id == recent_doc.id)
+        .order_by(models.DocumentChunk.id)
+        .limit(top_k)
+        .all()
+    )
+    if not chunks:
+        return None
+
+    context_blocks = [f"[from {recent_doc.filename}]\n{c.content}" for c in chunks]
+    formatted_context = "\n\n=== FILE EXCERPTS ===\n"
+    formatted_context += "\n\n---\n\n".join(context_blocks)
+    return {
+        "context": formatted_context,
+        "sources": [recent_doc.filename],
+    }
+
+
+async def _retrieve_workspace_wide(
+    client: httpx.AsyncClient,
+    db: Session,
+    query: str,
+    workspace_id: str,
+    session_id: str | None,
+    top_k: int,
+) -> dict | None:
+    """Default mode: workspace-wide hybrid (vector + keyword) retrieval bounded
+    by cosine distance. Used for free-form questions with no attachment."""
+    results = await search_chunks(
+        client, db, query,
+        workspace_id=workspace_id, session_id=session_id,
+        threshold=0.65, top_k=top_k,
+    )
+    if not results:
+        return None
+
+    unique_sources = list({chunk.document.filename for chunk in results})
+    context_blocks = [_label_chunk(chunk) for chunk in results]
+    return {
+        "context": format_rag_context(context_blocks),
+        "sources": unique_sources,
+    }
+
+
 async def retrieve_relevant_chunks(
     client: httpx.AsyncClient,
     db: Session,
@@ -360,103 +485,30 @@ async def retrieve_relevant_chunks(
     overview_mode: bool = False,
     restrict_to_filenames: list[str] | None = None,
 ):
-    """Vector-search for relevant chunks.
+    """Retrieve relevant chunks via one of three modes, most-specific first.
 
-    Three retrieval modes, most-specific first:
+    Modes are tried in order; if a mode finds nothing, the next eligible mode
+    runs. This fall-through is intentional — a stale filename marker (file
+    renamed/deleted between turns) shouldn't dead-end the chat.
 
-    1. **restrict_to_filenames** — when the user attached one or more files
-       in this turn, retrieval is pinned to documents whose filename matches
-       one of those entries (within the current session or workspace
-       globals). Avoids returning chunks from unrelated docs when the
-       intent is clearly "tell me about THIS file."
-    2. **overview_mode** — no user text alongside the attachment; surface
-       up to top_k chunks of the most recently uploaded document in the
-       session.
-    3. **default** — workspace-wide semantic search bounded by cosine
-       distance, with an ILIKE substring fallback. Used when the user is
-       asking a free-form question with no attachment.
+    1. **pinned filenames** — when `restrict_to_filenames` is non-empty,
+       pin to docs whose filename matches.
+    2. **session overview** — when `overview_mode=True`, sample the most
+       recently uploaded document in the session.
+    3. **workspace-wide** — hybrid semantic + keyword search, the default.
     """
     if restrict_to_filenames:
-        scoped_docs = (
-            db.query(models.Document)
-            .filter(
-                models.Document.workspace_id == workspace_id,
-                models.Document.filename.in_(restrict_to_filenames),
-                or_(
-                    models.Document.session_id == session_id,
-                    models.Document.is_global == True,
-                ),
-            )
-            .order_by(models.Document.created_at.desc())
-            .all()
+        result = _retrieve_pinned_filenames(
+            db, workspace_id, session_id, restrict_to_filenames,
         )
-        if scoped_docs:
-            # Explicit attachment ⇒ return ALL chunks of the scoped doc(s)
-            # in insertion order. UUIDv7 ids make `ORDER BY id` equivalent
-            # to "the order the splitter produced them". Relevance ranking
-            # would be the wrong operation here — the user wants the whole
-            # document. Context-window overflow on huge files surfaces via
-            # the upstream error message (core/llm_server._raise_for_status_with_body).
-            chunks = (
-                db.query(models.DocumentChunk)
-                .filter(models.DocumentChunk.document_id.in_([d.id for d in scoped_docs]))
-                .order_by(models.DocumentChunk.id)
-                .all()
-            )
-            if chunks:
-                unique_sources = list({c.document.filename for c in chunks})
-                # Group by document, stitch each doc's chunks with overlap
-                # removed, then label once per doc — avoids the chunk_overlap=200
-                # duplication the splitter intentionally bakes in.
-                chunks_by_doc: dict[str, list] = {}
-                for c in chunks:
-                    chunks_by_doc.setdefault(c.document_id, []).append(c)
-                context_blocks = []
-                for doc_chunks in chunks_by_doc.values():
-                    filename = doc_chunks[0].document.filename if doc_chunks[0].document else "unknown"
-                    stitched = _stitch_chunks_dedup([c.content for c in doc_chunks])
-                    context_blocks.append(f"[from {filename}]\n{stitched}")
-                formatted_context = format_rag_context(context_blocks)
-                return {
-                    "context": formatted_context,
-                    "sources": unique_sources,
-                }
-        # File was renamed / deleted between turns: fall through to the
-        # broader retrieval paths so the chat doesn't dead-end.
+        if result is not None:
+            return result
 
     if overview_mode and session_id:
-        # Most recent document for this session, sampled up to top_k chunks.
-        recent_doc = (
-            db.query(models.Document)
-            .filter(models.Document.session_id == session_id)
-            .order_by(models.Document.created_at.desc())
-            .first()
-        )
-        if recent_doc:
-            chunks = (
-                db.query(models.DocumentChunk)
-                .filter(models.DocumentChunk.document_id == recent_doc.id)
-                .order_by(models.DocumentChunk.id)
-                .limit(top_k)
-                .all()
-            )
-            if chunks:
-                context_blocks = [f"[from {recent_doc.filename}]\n{c.content}" for c in chunks]
-                formatted_context = "\n\n=== FILE EXCERPTS ===\n"
-                formatted_context += "\n\n---\n\n".join(context_blocks)
-                return {
-                    "context": formatted_context,
-                    "sources": [recent_doc.filename],
-                }
+        result = _retrieve_session_overview(db, session_id, top_k)
+        if result is not None:
+            return result
 
-    results = await search_chunks(client, db, query, workspace_id=workspace_id, session_id=session_id, threshold=0.65, top_k=top_k)
-    if not results:
-        return None
-
-    unique_sources = list({chunk.document.filename for chunk in results})
-    context_blocks = [_label_chunk(chunk) for chunk in results]
-    formatted_context = format_rag_context(context_blocks)
-    return {
-        "context": formatted_context,
-        "sources": unique_sources,
-    }
+    return await _retrieve_workspace_wide(
+        client, db, query, workspace_id, session_id, top_k,
+    )

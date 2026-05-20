@@ -18,12 +18,8 @@ stream.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import pathlib
 import re
-import subprocess
-import time
 from typing import Any, Optional
 
 import httpx
@@ -37,142 +33,15 @@ from config import settings
 from core import cookie_auth, llm_router
 from core.audit import EventType, log_event
 from db import database, models
+from services import llama_swap_config, llama_swap_status
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 _logger = logging.getLogger("pryzm.admin")
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-_YAML_PATH = _REPO_ROOT / "infra" / "llama-swap-config.yaml"
-_LLAMA_CACHE = _REPO_ROOT / "infra" / "llama_models"
-_yaml = ruamel.yaml.YAML()
-_yaml.preserve_quotes = True
 _yaml_lock = asyncio.Lock()
 
-# In-memory map of model_id → download tracking metadata. Populated by
-# add_model() when the request carries the HF picker's hints; consumed
-# by the status SSE to emit real {bytes, total} progress events. Cleared
-# on health pass or model delete. Lost on backend restart — by design,
-# admin can just stop watching and re-open the panel.
-_active_downloads: dict[str, dict] = {}
-
-
-def _blobs_dir_for_repo(repo: str) -> pathlib.Path:
-    """Map an HF repo like `bartowski/foo-GGUF` to the cache's blobs path."""
-    if "/" not in repo:
-        return _LLAMA_CACHE / "hub" / f"models--{repo}" / "blobs"
-    org, name = repo.split("/", 1)
-    return _LLAMA_CACHE / "hub" / f"models--{org}--{name}" / "blobs"
-
-
-def _partial_blob_size(blobs_dir: pathlib.Path, blob_hash: str) -> int:
-    """Return current on-disk size of the blob, picking up partial/incomplete
-    variants llama.cpp might write during download. 0 if nothing is present yet."""
-    if not blobs_dir.is_dir():
-        return 0
-    try:
-        for path in blobs_dir.glob(f"{blob_hash}*"):
-            try:
-                return path.stat().st_size
-            except OSError:
-                pass
-    except OSError:
-        pass
-    return 0
-
-# Match the bits we care about inside the multi-line cmd string.
-# `-hf <repo>` with `:quant` optional, since the `-hff <filename>` form replaces
-# the colon shortcut for repos that don't expose preset metadata on the HF API.
-_HF_RE = re.compile(r"-hf\s+(\S+?)(?::(\S+))?(?=\s|$)")
-_HFF_RE = re.compile(r"-hff\s+(\S+)")
-_NGL_RE = re.compile(r"-ngl\s+(\d+)")
-_CTX_RE = re.compile(r"--ctx-size\s+(\d+)")
 _ID_VALID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _REPO_QUANT_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+$")
-# Extract a quant tag from a GGUF filename for display (e.g. "Q4_K_M" from
-# "model-Q4_K_M.gguf"). Used only when the cmd uses `-hff` instead of `:quant`,
-# so the admin UI can still show "Q4_K_M" alongside the repo.
-_QUANT_FROM_FILE_RE = re.compile(
-    r"-((?:IQ|Q|UD-Q|UD-IQ)\d+(?:_[A-Z]+)*|F\d+|BF\d+)\.gguf$",
-    re.IGNORECASE,
-)
-
-
-def _read_yaml() -> dict:
-    with open(_YAML_PATH) as f:
-        return _yaml.load(f) or {}
-
-
-def _write_yaml(data: dict) -> None:
-    with open(_YAML_PATH, "w") as f:
-        _yaml.dump(data, f)
-
-
-def _reload_llama_swap() -> None:
-    start = time.perf_counter()
-    subprocess.run(
-        ["docker", "compose", "kill", "-s", "HUP", "llama-swap"],
-        cwd=_REPO_ROOT, check=True, timeout=5, capture_output=True,
-    )
-    duration_ms = int((time.perf_counter() - start) * 1000)
-    _logger.info("admin.llama_swap_reloaded duration_ms=%d", duration_ms)
-
-
-def _parse_model_row(model_id: str, cfg: dict) -> dict:
-    cmd = " ".join((cfg.get("cmd") or "").split())  # collapse newlines/whitespace
-    hf_match = _HF_RE.search(cmd)
-    hff_match = _HFF_RE.search(cmd)
-    ngl_match = _NGL_RE.search(cmd)
-    ctx_match = _CTX_RE.search(cmd)
-    groups = cfg.get("groups") or []
-
-    repo = hf_match.group(1) if hf_match else None
-    quant = hf_match.group(2) if hf_match else None
-    filename = hff_match.group(1) if hff_match else None
-    # Newer entries omit `:quant` from `-hf` and use `-hff <filename>` instead
-    # — derive a display quant from the filename so the UI keeps its label.
-    if filename and not quant:
-        m = _QUANT_FROM_FILE_RE.search(filename)
-        if m:
-            quant = m.group(1)
-
-    return {
-        "id": model_id,
-        "repo": repo,
-        "quant": quant,
-        "filename": filename,
-        "ngl": int(ngl_match.group(1)) if ngl_match else None,
-        "ctx_size": int(ctx_match.group(1)) if ctx_match else None,
-        "group": groups[0] if groups else None,
-        "tags": list(cfg.get("tags") or []),
-    }
-
-
-def _build_cmd_block(
-    repo: str,
-    quant: str,
-    filename: str | None,
-    ngl: int,
-    ctx_size: int,
-    group: str,
-) -> str:
-    """Render a multi-line `cmd:` value matching the style of existing entries.
-    When `filename` is provided (HF picker path), emit the explicit-filename
-    form which bypasses the HF API's preset metadata lookup — some repos
-    (e.g. bartowski's larger Gemma variants) don't expose it and return 404.
-    Falls back to the `:quant` shortcut for manual entries without a filename.
-    Chat models get k/v cache quantisation; embedding doesn't."""
-    if filename:
-        hf_lines = f"-hf {repo}\n-hff {filename}"
-    else:
-        hf_lines = f"-hf {repo}:{quant}"
-    base = (
-        f"/app/llama-server --port ${{PORT}}\n"
-        f"{hf_lines}\n"
-        f"-ngl {ngl} --ctx-size {ctx_size} --jinja --flash-attn on"
-    )
-    if group == "on-demand":
-        base += "\n--cache-type-k q8_0 --cache-type-v q8_0"
-    return base
 
 
 class AddModelRequest(BaseModel):
@@ -243,9 +112,9 @@ async def _fetch_running_model_ids() -> set[str]:
 
 @router.get("/models")
 async def list_models() -> list[dict]:
-    data = _read_yaml()
+    data = llama_swap_config.read_yaml()
     models_cfg = data.get("models") or {}
-    rows = [_parse_model_row(mid, cfg) for mid, cfg in models_cfg.items()]
+    rows = [llama_swap_config.parse_model_row(mid, cfg) for mid, cfg in models_cfg.items()]
     loaded_ids = await _fetch_running_model_ids()
     for row in rows:
         row["loaded"] = row["id"] in loaded_ids
@@ -278,13 +147,13 @@ async def add_model(
         raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
-        data = _read_yaml()
+        data = llama_swap_config.read_yaml()
         models_cfg = data.setdefault("models", {})
         if req.id in models_cfg:
             raise HTTPException(status_code=409, detail=f"model id already exists: {req.id}")
         models_cfg[req.id] = {
             "cmd": ruamel.yaml.scalarstring.PreservedScalarString(
-                _build_cmd_block(
+                llama_swap_config.build_cmd_block(
                     repo, quant, req.expected_filename,
                     req.ngl, req.ctx_size, req.group,
                 ),
@@ -292,23 +161,18 @@ async def add_model(
             "groups": [req.group],
             "tags": list(req.tags),
         }
-        _write_yaml(data)
-        try:
-            _reload_llama_swap()
-        except subprocess.CalledProcessError as e:
-            _logger.warning(
-                "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
-            # Don't fail the request — the YAML is written; SIGHUP can be retried manually.
-        llm_router.reload_router_from_yaml(_YAML_PATH)
+        llama_swap_config.write_yaml(data)
+        llama_swap_config.reload_llama_swap()
+        llm_router.reload_router_from_yaml(llama_swap_config.YAML_PATH)
 
     # Stash progress-tracking metadata for the status SSE. Only populated
     # when the HF picker passes hints; manual adds skip and fall back to
     # the indeterminate spinner.
     if req.expected_blob_hash and req.expected_size:
-        _active_downloads[req.id] = {
+        llama_swap_status._active_downloads[req.id] = {
             "blob_hash": req.expected_blob_hash,
             "expected_size": int(req.expected_size),
-            "blobs_dir": _blobs_dir_for_repo(repo),
+            "blobs_dir": llama_swap_status.blobs_dir_for_repo(repo),
             "filename": req.expected_filename,
         }
 
@@ -328,7 +192,7 @@ async def add_model(
     )
     db.commit()
     background_tasks.add_task(_warmup_model, req.id)
-    return _parse_model_row(req.id, data["models"][req.id])
+    return llama_swap_config.parse_model_row(req.id, data["models"][req.id])
 
 
 @router.put("/models/{model_id}")
@@ -343,7 +207,7 @@ async def update_model(
         raise HTTPException(status_code=400, detail="group must be 'on-demand', 'always-on', or 'inactive'")
 
     async with _yaml_lock:
-        data = _read_yaml()
+        data = llama_swap_config.read_yaml()
         models_cfg = data.get("models") or {}
         if model_id not in models_cfg:
             raise HTTPException(status_code=404, detail=f"model not found: {model_id}")
@@ -351,7 +215,7 @@ async def update_model(
         existing = models_cfg[model_id]
         # Re-extract identity (repo + quant-or-filename) from the existing cmd;
         # identity is not editable through this endpoint.
-        current = _parse_model_row(model_id, existing)
+        current = llama_swap_config.parse_model_row(model_id, existing)
         if not current["repo"] or not (current["quant"] or current["filename"]):
             raise HTTPException(
                 status_code=500,
@@ -374,20 +238,16 @@ async def update_model(
             changed_fields.append("tags")
 
         existing["cmd"] = ruamel.yaml.scalarstring.PreservedScalarString(
-            _build_cmd_block(
+            llama_swap_config.build_cmd_block(
                 current["repo"], current["quant"], current["filename"],
                 new_ngl, new_ctx, new_group,
             ),
         )
         existing["groups"] = [new_group]
         existing["tags"] = list(new_tags)
-        _write_yaml(data)
-        try:
-            _reload_llama_swap()
-        except subprocess.CalledProcessError as e:
-            _logger.warning(
-                "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
-        llm_router.reload_router_from_yaml(_YAML_PATH)
+        llama_swap_config.write_yaml(data)
+        llama_swap_config.reload_llama_swap()
+        llm_router.reload_router_from_yaml(llama_swap_config.YAML_PATH)
 
     _logger.info(
         "admin.model_updated id=%s ngl=%d ctx_size=%d group=%s tags=%s",
@@ -399,7 +259,7 @@ async def update_model(
         payload={"model_id": model_id, "changed_fields": changed_fields},
     )
     db.commit()
-    return _parse_model_row(model_id, data["models"][model_id])
+    return llama_swap_config.parse_model_row(model_id, data["models"][model_id])
 
 
 @router.delete("/models/{model_id}")
@@ -410,7 +270,7 @@ async def delete_model(
     admin: models.User = Depends(cookie_auth.require_admin),
 ) -> dict:
     async with _yaml_lock:
-        data = _read_yaml()
+        data = llama_swap_config.read_yaml()
         models_cfg = data.get("models") or {}
         if model_id not in models_cfg:
             raise HTTPException(status_code=404, detail=f"model not found: {model_id}")
@@ -427,14 +287,10 @@ async def delete_model(
         )
         db.commit()
         del models_cfg[model_id]
-        _write_yaml(data)
-        _active_downloads.pop(model_id, None)
-        try:
-            _reload_llama_swap()
-        except subprocess.CalledProcessError as e:
-            _logger.warning(
-                "admin.llama_swap_reload_failed stderr=%s", e.stderr.decode(errors="replace") if e.stderr else "")
-        llm_router.reload_router_from_yaml(_YAML_PATH)
+        llama_swap_config.write_yaml(data)
+        llama_swap_status._active_downloads.pop(model_id, None)
+        llama_swap_config.reload_llama_swap()
+        llm_router.reload_router_from_yaml(llama_swap_config.YAML_PATH)
 
     _logger.info("admin.model_removed id=%s", model_id)
     return {"deleted": model_id}
@@ -442,107 +298,10 @@ async def delete_model(
 
 @router.get("/models/{model_id}/status")
 async def model_status(model_id: str) -> StreamingResponse:
-    """Live SSE feed for the watch-while-loading panel.
-
-    Three concurrent sources pump events into a shared queue:
-      - log_producer: forwards llama-swap's /api/events log lines
-      - progress_producer: stat()s the partial blob on disk every 2s and
-        emits {progress: {bytes, total}} — gives a real percentage for
-        downloads tracked via the HF picker
-      - health_producer: polls /upstream/<id>/health and signals completion
-    """
-    base = settings.LLM_SERVER_URL.rstrip("/")
-    events_url = f"{base}/api/events"
-    health_url = f"{base}/upstream/{model_id}/health"
-    deadline = time.monotonic() + 600  # 10-minute cap; multi-GB downloads need headroom
-
-    async def gen():
-        yield json.dumps({"status": "subscribed", "id": model_id}) + "\n"
-        timeout = httpx.Timeout(connect=5.0, read=None, write=5.0, pool=5.0)
-        queue: asyncio.Queue[str] = asyncio.Queue()
-        loaded = False
-
-        async with httpx.AsyncClient(timeout=timeout) as client:
-
-            async def log_producer() -> None:
-                try:
-                    async with client.stream("GET", events_url) as resp:
-                        async for line in resp.aiter_lines():
-                            if not line.startswith("data:"):
-                                continue
-                            try:
-                                evt = json.loads(line[len("data:"):].strip())
-                            except json.JSONDecodeError:
-                                continue
-                            if evt.get("type") != "logData":
-                                continue
-                            for log_line in (evt.get("data") or "").splitlines():
-                                if log_line.strip():
-                                    await queue.put(json.dumps({"log": log_line}) + "\n")
-                except Exception:
-                    # llama-swap dropped the SSE — let the main loop time out on health
-                    pass
-
-            async def progress_producer() -> None:
-                while True:
-                    entry = _active_downloads.get(model_id)
-                    if entry:
-                        current = _partial_blob_size(entry["blobs_dir"], entry["blob_hash"])
-                        await queue.put(json.dumps({
-                            "progress": {
-                                "bytes": current,
-                                "total": entry["expected_size"],
-                            }
-                        }) + "\n")
-                    await asyncio.sleep(2.0)
-
-            async def health_producer() -> bool:
-                while time.monotonic() < deadline:
-                    try:
-                        r = await client.get(health_url, timeout=2.0)
-                        if r.status_code == 200:
-                            return True
-                    except Exception:
-                        pass
-                    await asyncio.sleep(1.0)
-                return False
-
-            log_task = asyncio.create_task(log_producer())
-            progress_task = asyncio.create_task(progress_producer())
-            health_task = asyncio.create_task(health_producer())
-
-            try:
-                while True:
-                    if health_task.done():
-                        try:
-                            loaded = health_task.result()
-                        except Exception:
-                            loaded = False
-                        break
-                    if time.monotonic() > deadline:
-                        break
-                    try:
-                        event = await asyncio.wait_for(queue.get(), timeout=0.5)
-                        yield event
-                    except asyncio.TimeoutError:
-                        continue
-            finally:
-                for t in (log_task, progress_task, health_task):
-                    t.cancel()
-                # Drain any final queued events so the client sees them.
-                while not queue.empty():
-                    try:
-                        yield queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
-
-        _active_downloads.pop(model_id, None)
-        if loaded:
-            yield json.dumps({"status": "loaded", "id": model_id}) + "\n"
-        else:
-            yield json.dumps({"status": "error", "id": model_id, "detail": "load timed out"}) + "\n"
-
-    return StreamingResponse(gen(), media_type="application/x-ndjson")
+    return StreamingResponse(
+        llama_swap_status.stream_status(model_id),
+        media_type="application/x-ndjson",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -18,22 +18,10 @@ from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models
 from schemas import (InferenceRequest, SessionResponse, SessionUpdate,
                      MessageHistory, BranchRequest, MessageUpdate)
-from services import condense, ingest_broker
+from services import chat_pipeline, condense
 from tools.registry import build_tool_set
 
 _log = logging.getLogger(__name__)
-
-
-def _attachment_filenames(db: Session, attachment_ids: list[str], workspace_id: str) -> list[str]:
-    """Best-effort filename lookup for the audit payload. Cross-workspace
-    ids silently drop out — the analyze endpoint already filters those."""
-    if not attachment_ids:
-        return []
-    rows = db.query(models.Document.filename).filter(
-        models.Document.id.in_(attachment_ids),
-        models.Document.workspace_id == workspace_id,
-    ).all()
-    return [r[0] for r in rows]
 
 
 def _accumulate_tool_event(acc: list, event: dict) -> None:
@@ -128,67 +116,6 @@ def _error_envelope(exc: Exception) -> dict:
 
 
 router = APIRouter(tags=["AI Chat"])
-
-
-# Bound on how long /analyze will wait for in-flight attachments to
-# finish ingestion. Larger than typical captioning (~10-15s) so we
-# don't bail prematurely; smaller than a runaway "stuck task" so we
-# can degrade gracefully to "no RAG context for that doc" instead.
-_ATTACHMENT_WAIT_TIMEOUT_SECONDS = 60.0
-
-
-async def _wait_for_processing_attachments(
-    attachment_ids: list[str],
-    workspace_id: str,
-    db: Session,
-) -> None:
-    """Wait for any 'processing' attachments to reach terminal state.
-
-    Subscribes to the ingest broker for each in-flight doc and awaits
-    the first terminal event (or the global timeout). Already-terminal
-    docs are skipped. Reads status fresh from DB after subscribing —
-    if it flipped between the check and subscribe, we won't block.
-    """
-    if not attachment_ids:
-        return
-    docs = (
-        db.query(models.Document)
-        .filter(
-            models.Document.id.in_(attachment_ids),
-            models.Document.workspace_id == workspace_id,
-        )
-        .all()
-    )
-    processing_ids = [d.id for d in docs if d.status == "processing"]
-    if not processing_ids:
-        return
-
-    broker = ingest_broker.broker()
-    queues: dict[str, asyncio.Queue] = {
-        doc_id: broker.subscribe(doc_id) for doc_id in processing_ids
-    }
-    deadline = asyncio.get_event_loop().time() + _ATTACHMENT_WAIT_TIMEOUT_SECONDS
-    try:
-        for doc_id, queue in queues.items():
-            # Re-check status — task may have finished between subscribe
-            # call above and now. Avoids waiting on an already-terminal
-            # row that never publishes again.
-            db.expire_all()
-            doc = db.query(models.Document).filter(models.Document.id == doc_id).first()
-            if doc is None or doc.status in ("ready", "error"):
-                continue
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                break
-            try:
-                await asyncio.wait_for(queue.get(), timeout=remaining)
-            except asyncio.TimeoutError:
-                # Bail out of the wait; the auto-RAG path will still run,
-                # just without context from the still-processing doc.
-                break
-    finally:
-        for doc_id, queue in queues.items():
-            broker.unsubscribe(doc_id, queue)
 
 
 def _message_in_workspace_or_404(
@@ -352,99 +279,21 @@ async def analyze_data(
     # multiple sessions stream concurrently.
     db = database.SessionLocal()
     try:
-        chat_session = None
+        chat_session = await chat_pipeline.resolve_or_create_session(
+            db, user, workspace, request.prompt, request.session_id,
+            http_client, engine_config, http_request,
+        )
 
-        if request.session_id:
-            chat_session = (
-                db.query(models.Session)
-                .filter(
-                    models.Session.id == request.session_id,
-                    models.Session.workspace_id == workspace.id,
-                )
-                .first()
-            )
-            if chat_session is None:
-                raise HTTPException(status_code=404, detail="Session not found.")
-
-        if not chat_session:
-            generated_title = await ai_engine.generate_title(http_client, request.prompt, engine_config=engine_config)
-            chat_session = models.Session(
-                title=generated_title,
-                workspace_id=workspace.id,
-                user_id=user.id,
-            )
-            db.add(chat_session)
-            db.commit()
-            db.refresh(chat_session)
-            log_event(
-                db,
-                EventType.CHAT_SESSION_CREATED,
-                user=user,
-                workspace=workspace,
-                session=chat_session,
-                resource_type="session",
-                resource_id=chat_session.id,
-                payload={
-                    "title": chat_session.title,
-                    "source": "analyze",
-                },
-                request=http_request,
-            )
-            db.commit()
-        elif chat_session.title in ["Document Upload Session", "New Diagnostic Session", "New Diagnostic Chat"]:
-            chat_session.title = await ai_engine.generate_title(http_client, request.prompt, engine_config=engine_config)
-            db.commit()
-            db.refresh(chat_session)
-
-        if request.attachments:
-            # Scope the claim to documents the caller already owns. Without this
-            # filter, a client could attach foreign-workspace document ids and the
-            # update would re-parent them into the caller's workspace — silent
-            # cross-workspace data theft.
-            db.query(models.Document).filter(
-                models.Document.id.in_(request.attachments),
-                models.Document.workspace_id == workspace.id,
-            ).update(
-                {"session_id": chat_session.id},
-                synchronize_session=False,
-            )
-            db.commit()
-
-            # Frontend may have submitted before all attached docs finished
-            # processing. Wait for terminal status on each via the broker
-            # so auto-RAG sees the captions when we hit knowledge.retrieve_*.
-            # Bounded so a stuck ingestion doesn't deadlock the chat call.
-            await _wait_for_processing_attachments(
-                request.attachments, workspace.id, db,
-            )
+        await chat_pipeline.claim_attachments(
+            db, workspace.id, chat_session, request.attachments,
+        )
 
         user_message_id: Optional[str] = None
         if not request.skip_db_save:
-            user_msg = models.Message(session_id=chat_session.id, role="user", content=request.prompt)
-            db.add(user_msg)
-            db.commit()
-            db.refresh(user_msg)
-            user_message_id = user_msg.id
-
-            log_event(
-                db,
-                EventType.CHAT_MESSAGE_SENT,
-                user=user,
-                workspace=workspace,
-                session=chat_session,
-                resource_type="message",
-                resource_id=user_msg.id,
-                payload={
-                    "content_preview": request.prompt[:200],
-                    "token_count": len(request.prompt) // 4,
-                    "has_attachments": bool(request.attachments),
-                    "attachment_filenames": _attachment_filenames(
-                        db, request.attachments or [], workspace.id
-                    ),
-                },
-                request=http_request,
+            user_message_id = chat_pipeline.persist_user_message(
+                db, chat_session, request.prompt, user, workspace,
+                request.attachments, http_request,
             )
-            db.commit()
 
         history = db.query(models.Message).filter(models.Message.session_id == chat_session.id).order_by(models.Message.created_at).all()
         safe_messages = build_safe_messages(history)
@@ -537,66 +386,22 @@ async def analyze_data(
                 # `done` event can carry its real DB id; clients use that
                 # id to swap their optimistic placeholder without refetching.
                 if full_response.strip():
-                    save_db = database.SessionLocal()
-                    try:
-                        ai_msg = models.Message(
-                            session_id=session_id,
-                            role="assistant",
-                            content=full_response,
-                            status="complete",
-                            tool_calls=_finalize_tool_calls(tool_calls_acc) or None,
-                            referenced_docs=referenced_docs,
-                            reasoning_content=full_reasoning.strip() or None,
-                            reasoning_duration_s=reasoning_duration_s,
-                        )
-                        save_db.add(ai_msg)
-                        save_db.commit()
-                        save_db.refresh(ai_msg)
-                        assistant_message_id = ai_msg.id
-
-                        usage_for_audit = _last_chat_metric_snapshot() or {}
-                        prompt_tokens = int(usage_for_audit.get("prompt_tokens") or 0)
-                        completion_tokens = int(usage_for_audit.get("completion_tokens") or 0)
-                        tool_names = sorted({tc.get("name") for tc in tool_calls_acc if tc.get("name")})
-                        log_event(
-                            save_db,
-                            EventType.CHAT_MESSAGE_RECEIVED,
-                            user=save_db.query(models.User).filter_by(id=user.id).first(),
-                            workspace=save_db.query(models.Workspace).filter_by(id=workspace_id).first(),
-                            session=save_db.query(models.Session).filter_by(id=session_id).first(),
-                            resource_type="message",
-                            resource_id=ai_msg.id,
-                            payload={
-                                "content_preview": full_response[:200],
-                                # Which model + tier the router picked. Captured
-                                # from the upfront `route` SSE event so it's
-                                # accurate even when the metric snapshot's
-                                # `model` field is empty (e.g. tool-only turns).
-                                "model": route_model or usage_for_audit.get("model") or "",
-                                "tier": route_tier or "",
-                                # Tools that actually fired this turn.
-                                "tools_used": tool_names,
-                                "tools_count": len(tool_calls_acc),
-                                # Reasoning visibility: surfaces whether the
-                                # model spent time thinking and how long.
-                                "reasoning": reasoning_duration_s is not None,
-                                "reasoning_duration_s": reasoning_duration_s,
-                                # Token + timing breakdown.
-                                "prompt_tokens": prompt_tokens,
-                                "completion_tokens": completion_tokens,
-                                "token_count": prompt_tokens + completion_tokens,
-                                "duration_ms": int(usage_for_audit.get("duration_ms") or 0),
-                                "ttft_ms": int(usage_for_audit.get("ttft_ms") or 0),
-                                "tokens_per_sec": float(usage_for_audit.get("tokens_per_sec") or 0.0),
-                                "finished_cleanly": True,
-                            },
-                        )
-                        save_db.commit()
-                    except Exception as e:
-                        save_db.rollback()
-                        _log.exception("Failed to save assistant message: %s", e)
-                    finally:
-                        save_db.close()
+                    usage_for_audit = _last_chat_metric_snapshot() or {}
+                    assistant_message_id = chat_pipeline.persist_assistant_message(
+                        session_id=session_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        full_response=full_response,
+                        status="complete",
+                        tool_calls_acc=tool_calls_acc,
+                        tool_calls_for_row=_finalize_tool_calls(tool_calls_acc),
+                        referenced_docs=referenced_docs,
+                        reasoning=full_reasoning,
+                        reasoning_duration_s=reasoning_duration_s,
+                        route_meta={"model": route_model, "tier": route_tier},
+                        usage=usage_for_audit,
+                        finished_cleanly=True,
+                    )
 
                 # The terminating chunk now carries an aggregate `usage` block so
                 # bench_llm.py can read it directly without scraping logs. Token counts
@@ -632,46 +437,21 @@ async def analyze_data(
                     status = "failed"
 
                 if full_response.strip():
-                    background_db = database.SessionLocal()
-                    try:
-                        ai_msg = models.Message(
-                            session_id=session_id,
-                            role="assistant",
-                            content=full_response,
-                            status=status,
-                            reasoning_content=full_reasoning.strip() or None,
-                            reasoning_duration_s=reasoning_duration_s,
-                        )
-                        background_db.add(ai_msg)
-                        background_db.commit()
-                        background_db.refresh(ai_msg)
-
-                        log_event(
-                            background_db,
-                            EventType.CHAT_MESSAGE_RECEIVED,
-                            user=background_db.query(models.User).filter_by(id=user.id).first(),
-                            workspace=background_db.query(models.Workspace).filter_by(id=workspace_id).first(),
-                            session=background_db.query(models.Session).filter_by(id=session_id).first(),
-                            resource_type="message",
-                            resource_id=ai_msg.id,
-                            payload={
-                                "content_preview": full_response[:200],
-                                "model": route_model or "",
-                                "tier": route_tier or "",
-                                "tools_used": sorted({tc.get("name") for tc in tool_calls_acc if tc.get("name")}),
-                                "tools_count": len(tool_calls_acc),
-                                "reasoning": reasoning_duration_s is not None,
-                                "reasoning_duration_s": reasoning_duration_s,
-                                "finished_cleanly": False,
-                                "status": status,
-                            },
-                        )
-                        background_db.commit()
-                    except Exception as e:
-                        background_db.rollback()
-                        _log.exception("Failed to save assistant message: %s", e)
-                    finally:
-                        background_db.close()
+                    chat_pipeline.persist_assistant_message(
+                        session_id=session_id,
+                        workspace_id=workspace_id,
+                        user_id=user_id,
+                        full_response=full_response,
+                        status=status,
+                        tool_calls_acc=tool_calls_acc,
+                        tool_calls_for_row=None,
+                        referenced_docs=None,
+                        reasoning=full_reasoning,
+                        reasoning_duration_s=reasoning_duration_s,
+                        route_meta={"model": route_model, "tier": route_tier},
+                        usage=None,
+                        finished_cleanly=False,
+                    )
 
     # Schedule condensation to run after the response is fully sent.
     # The advisory lock in condense_for_session ensures only one condenser

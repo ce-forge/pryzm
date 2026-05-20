@@ -11,6 +11,7 @@ from core.prompt_manager import MICRO_PROMPTS
 from db import database, models
 from main import app
 from routers import admin as admin_router
+from services import llama_swap_config
 
 
 # ---------------------------------------------------------------------------
@@ -572,8 +573,8 @@ def model_admin_client(db_session, tmp_path, monkeypatch):
     """Mirrors tests/test_admin_models.py: temp yaml + stubbed sighup/warmup."""
     yaml_path = tmp_path / "llama-swap-config.yaml"
     yaml_path.write_text(_FIXTURE_YAML)
-    monkeypatch.setattr(admin_router, "_YAML_PATH", yaml_path)
-    monkeypatch.setattr(admin_router, "_reload_llama_swap", lambda: None)
+    monkeypatch.setattr(llama_swap_config, "YAML_PATH", yaml_path)
+    monkeypatch.setattr(llama_swap_config, "reload_llama_swap", lambda: None)
 
     async def _stub_warmup(model_id: str) -> None:
         return None

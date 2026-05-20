@@ -118,15 +118,15 @@ def test_session_created_via_branch_emits_event(db_session):
 # --- _audit_chat_event helper direct calls ---
 
 def test_audit_chat_event_writes_rag_retrieved(db_session, redirect_session_local):
-    from core.ai_engine import _audit_chat_event
+    from core.audit import log_event_in_new_session
     user = _seed_user(db_session)
     ws = _seed_workspace(db_session, user.id)
     s = _seed_session(db_session, user.id, ws.id)
 
-    _audit_chat_event(
-        user.id, ws.id, s.id,
+    log_event_in_new_session(
         EventType.CHAT_RAG_RETRIEVED,
-        {
+        user_id=user.id, workspace_id=ws.id, session_id=s.id,
+        payload={
             "query_preview": "what is x",
             "num_results": 2,
             "source_filenames": ["a.pdf", "b.png"],
@@ -145,13 +145,13 @@ def test_audit_chat_event_writes_rag_retrieved(db_session, redirect_session_loca
 
 
 def test_audit_chat_event_writes_web_search(db_session, redirect_session_local):
-    from core.ai_engine import _audit_chat_event
+    from core.audit import log_event_in_new_session
     user = _seed_user(db_session)
     ws = _seed_workspace(db_session, user.id)
-    _audit_chat_event(
-        user.id, ws.id, None,
+    log_event_in_new_session(
         EventType.CHAT_WEB_SEARCH,
-        {
+        user_id=user.id, workspace_id=ws.id, session_id=None,
+        payload={
             "query_preview": "k8s lb",
             "query_refined": "kubernetes load balancer setup guide",
             "k_requested": 5,
@@ -178,13 +178,13 @@ def test_audit_chat_event_writes_web_search(db_session, redirect_session_local):
 
 
 def test_audit_chat_event_writes_tool_invoked(db_session, redirect_session_local):
-    from core.ai_engine import _audit_chat_event
+    from core.audit import log_event_in_new_session
     user = _seed_user(db_session)
     ws = _seed_workspace(db_session, user.id)
-    _audit_chat_event(
-        user.id, ws.id, None,
+    log_event_in_new_session(
         EventType.CHAT_TOOL_INVOKED,
-        {
+        user_id=user.id, workspace_id=ws.id, session_id=None,
+        payload={
             "tool_name": "ping_hostname",
             "arg_values": {"hostname": "example.com"},
             "succeeded": True,
@@ -200,13 +200,13 @@ def test_audit_chat_event_writes_tool_invoked(db_session, redirect_session_local
 def test_audit_chat_event_tolerates_unknown_session_id(db_session, redirect_session_local):
     """If the session_id doesn't resolve (already deleted), the event still
     writes with session_id=NULL."""
-    from core.ai_engine import _audit_chat_event
+    from core.audit import log_event_in_new_session
     user = _seed_user(db_session)
     ws = _seed_workspace(db_session, user.id)
-    _audit_chat_event(
-        user.id, ws.id, "deadbeef-not-a-real-id",
+    log_event_in_new_session(
         EventType.CHAT_TOOL_INVOKED,
-        {"tool_name": "x", "arg_values": {}, "succeeded": True},
+        user_id=user.id, workspace_id=ws.id, session_id="deadbeef-not-a-real-id",
+        payload={"tool_name": "x", "arg_values": {}, "succeeded": True},
     )
     events = db_session.query(models.AuditEvent).filter_by(
         event_type="chat.tool_invoked", user_id=user.id,
