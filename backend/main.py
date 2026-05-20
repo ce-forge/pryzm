@@ -20,6 +20,7 @@ from routers import admin_sessions as admin_sessions_router
 from routers import bug_reports as bug_reports_router
 from routers import notifications as notifications_router
 from core import cookie_auth, llm_router
+from core.origin_check import OriginCheckMiddleware
 from services import model_prewarm
 from services.tasks import garbage_collection_task
 
@@ -173,6 +174,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Origin allowlist for state-changing requests. Reuses CORS_ORIGINS as the
+# trust list; absent Origin is permitted so curl + native clients still work.
+app.add_middleware(OriginCheckMiddleware, allowed_origins=settings.CORS_ORIGINS)
 app.add_middleware(RequestLogger)
 
 
