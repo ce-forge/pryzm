@@ -56,6 +56,37 @@ _FETCH_WALL_CLOCK_S = 25.0
 _MAX_CHARS_PER_PAGE = 3000
 
 
+# Word list for the SearxNG time_range heuristic. The presence of any of
+# these in the refined query nudges SearxNG to a recency-biased ranking
+# (`time_range=month`).
+#
+# Short-window words ("today", "this week", "yesterday") are INTENTIONALLY
+# excluded. They're already strong keyword signals SearxNG ranks on directly;
+# adding a time_range filter on top double-restricts and excludes evergreen
+# URLs (e.g. nrl.com/draw, a static URL that always carries the current
+# round's fixtures) which are exactly the right answer for those queries.
+#
+# Historical phrasings ("Q1 2025", "March 2023") are also absent — they
+# don't need recency biasing and would be hurt by it.
+_RECENCY_WORDS = (
+    "current", "latest", "recent", "recently", "now",
+    "this month", "upcoming", "new ", "newly", "fresh",
+)
+
+
+def _detect_time_range(query: str) -> str | None:
+    """Return SearxNG `time_range=month` when the query carries a recency
+    signal, else None. Case-insensitive substring match — false positives
+    cost only a slightly more-recent ranking; false negatives cost the
+    freshness signal we wanted."""
+    if not query:
+        return None
+    q = query.lower()
+    if any(w in q for w in _RECENCY_WORDS):
+        return "month"
+    return None
+
+
 WEB_SEARCH_DIRECTIVE = (
     "Use `web_search` for factual questions whose answer may have changed since "
     "training (current events, recent vendor releases, newly-published docs, "
@@ -108,12 +139,22 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         query_raw=query, query_refined=query,
     )
 
-    # Refine the search query via the always-on small model: normalises
-    # phrasing, fixes typos, and injects today's date so time-bound questions
-    # like "this week" produce a year/month-anchored query. Falls back to the
-    # raw query on any failure — never blocks the tool turn.
+    # Refine the search query via the always-on small model: fixes typos,
+    # strips filler, preserves user intent (including time words). Falls back
+    # to the raw query on any failure — never blocks the tool turn.
     async with httpx.AsyncClient() as refine_client:
         refined_query = await refine_query(refine_client, query)
+
+    # SearxNG `time_range` filter when the query carries a recency signal —
+    # heavily improves freshness on currency-sensitive queries ("latest X",
+    # "current Y", "this week's Z"). Historical references ("Q1 2025",
+    # "March 2023") do NOT match these words, so they're left unfiltered.
+    search_params: dict[str, str] = {
+        "q": refined_query, "format": "json", "language": "en",
+    }
+    time_range = _detect_time_range(refined_query)
+    if time_range:
+        search_params["time_range"] = time_range
 
     # SearxNG call stays synchronous (requests library). It blocks the event
     # loop until the local SearxNG responds, but Pryzm is single-user and
@@ -123,7 +164,7 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     try:
         resp = requests.get(
             f"{settings.SEARXNG_URL}/search",
-            params={"q": refined_query, "format": "json", "language": "en"},
+            params=search_params,
             timeout=settings.TOOL_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()

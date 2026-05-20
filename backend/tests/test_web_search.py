@@ -13,6 +13,7 @@ import pytest
 import requests
 
 from tools._web_fetch import FetchResult
+from tools.web import _detect_time_range
 
 
 @pytest.fixture(autouse=True)
@@ -194,3 +195,33 @@ async def test_body_is_truncated_to_max_chars(monkeypatch):
     # Extracted body inside the Source block should not exceed ~3000 chars.
     assert len(out) < 3500
     assert "Sentence." in out
+
+
+def test_detect_time_range_recency_words_trigger_month():
+    """Vague currency words → time_range=month so SearxNG returns recently-
+    published content for currency-sensitive queries."""
+    assert _detect_time_range("Python latest stable release") == "month"
+    assert _detect_time_range("Microsoft 365 admin center recent changes") == "month"
+    assert _detect_time_range("current ms365 admin center changes") == "month"
+    assert _detect_time_range("upcoming Microsoft Build sessions") == "month"
+    assert _detect_time_range("new pgvector features") == "month"
+
+
+def test_detect_time_range_short_window_words_do_not_trigger():
+    """Short-window words ("today", "this week", "yesterday") are NOT in the
+    trigger list — they're strong keyword signals on their own, and stacking
+    time_range on top excludes evergreen URLs (e.g. nrl.com/draw) that lack
+    a recent publish date but ARE the canonical answer."""
+    assert _detect_time_range("nrl schedule this week") is None
+    assert _detect_time_range("what happened today") is None
+    assert _detect_time_range("yesterday's outage") is None
+
+
+def test_detect_time_range_no_recency_signal():
+    """Evergreen, historical, and how-to queries get no time_range filter —
+    they should rank purely on relevance, not freshness."""
+    assert _detect_time_range("Cloudflare R2 pricing") is None
+    assert _detect_time_range("CrowdStrike outage 2024 cause") is None
+    assert _detect_time_range("how to enable BitLocker via Group Policy") is None
+    assert _detect_time_range("Q1 2025 Azure AD changes") is None
+    assert _detect_time_range("") is None
