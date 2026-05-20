@@ -91,15 +91,29 @@ def slugify(display_name: str) -> str:
     return s
 
 
-def slugify_unique(db: Session, display_name: str) -> str:
-    """Slugify the display name, then append -2, -3, ... until unique."""
+def slugify_unique(db: Session, display_name: str, user_id: str | None = None) -> str:
+    """Slugify the display name, then append -2, -3, ... until unique.
+
+    The uniqueness check is scoped to a single user when `user_id` is
+    given. The DB enforces per-user uniqueness via the partial index
+    `uq_workspaces_user_slug`, so a global check would both produce
+    suffixes nobody asked for AND leak other users' chosen slugs through
+    the `-2` suffix pattern.
+
+    `user_id=None` is preserved for admin/template paths that
+    intentionally scope across all users.
+    """
     base = slugify(display_name)
     candidate = base
     n = 2
-    while db.query(models.Workspace).filter(models.Workspace.slug == candidate).first():
+    while True:
+        q = db.query(models.Workspace).filter(models.Workspace.slug == candidate)
+        if user_id is not None:
+            q = q.filter(models.Workspace.user_id == user_id)
+        if q.first() is None:
+            return candidate
         candidate = f"{base}-{n}"
         n += 1
-    return candidate
 
 
 def read_default_prompt(slug: str) -> str:
