@@ -44,14 +44,13 @@ async def refine_query(
     today_str = today or date.today().isoformat()
     prompt = (
         _REFINE_PREPROMPT.format(today=today_str)
-        + f"\n\nQuestion: {raw_query.strip()}\nSearch query:"
+        + f"\n\nQuestion: {raw_query.strip()}"
     )
     try:
         out = await llm_server.generate(
             client,
             prompt=prompt,
             model=model,
-            options={"max_tokens": 60, "temperature": 0.2},
         )
     except Exception:
         return raw_query

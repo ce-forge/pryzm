@@ -113,7 +113,6 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     # raw query on any failure — never blocks the tool turn.
     async with httpx.AsyncClient() as refine_client:
         refined_query = await refine_query(refine_client, query)
-    _LAST_STATS["query_refined"] = refined_query
 
     # SearxNG call stays synchronous (requests library). It blocks the event
     # loop until the local SearxNG responds, but Pryzm is single-user and
@@ -139,7 +138,7 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     hits = (payload.get("results") or [])[:capped]
     if not hits:
         _set_stats(
-            k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
+            k_requested=capped, k_returned_by_searxng=len(hits), k_fetched_ok=0, k_failed=0,
             failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
             query_raw=query, query_refined=refined_query,
         )
@@ -204,6 +203,8 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
             failure_reasons=failure_reasons,
             fetch_wall_clock_ms=fetch_wall_clock_ms,
             extracted_bytes_total=0,
+            query_raw=query,
+            query_refined=refined_query,
         )
         summary = ", ".join(f"{n}× {r}" for r, n in sorted(failure_reasons.items()))
         return (
@@ -220,6 +221,8 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         failure_reasons=failure_reasons,
         fetch_wall_clock_ms=fetch_wall_clock_ms,
         extracted_bytes_total=extracted_bytes_total,
+        query_raw=query,
+        query_refined=refined_query,
     )
 
     blocks: list[str] = []
