@@ -12,7 +12,7 @@ const TABS = [
   { href: "/admin/system", label: "System" },
   { href: "/admin/engine", label: "Engine" },
   { href: "/admin/audit", label: "Audit" },
-  { href: "/admin/bug-reports", label: "Bug reports" },
+  { href: "/admin/bug-reports", label: "Alerts" },
 ];
 
 function AdminShell({ children }: { children: ReactNode }) {

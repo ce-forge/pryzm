@@ -226,14 +226,14 @@ export default function AdminUserDetailPage() {
         </div>
       </section>
 
-      {/* Open bug reports */}
+      {/* Open alerts */}
       <section>
         <SectionHeading
-          title="Open bug reports"
+          title="Open alerts"
           subtitle={`${openBugs.length} open or acknowledged of ${bugs.length} total`}
         />
         {openBugs.length === 0 ? (
-          <EmptyHint>No open bug reports from this user.</EmptyHint>
+          <EmptyHint>No open alerts from this user.</EmptyHint>
         ) : (
           <div className="border border-[#2a2a2c] rounded overflow-x-auto">
             <table className="w-full text-sm min-w-[600px]">
@@ -281,7 +281,7 @@ export default function AdminUserDetailPage() {
             href="/admin/bug-reports"
             className="text-sky-400 hover:underline"
           >
-            bug reports tab
+            alerts tab
           </Link>
           .
         </div>

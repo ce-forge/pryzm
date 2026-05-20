@@ -266,7 +266,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
                   onDeleteRequest={onDeleteRequest}
                   saveEdit={msgActions.saveEdit}
                   branchSession={msgActions.branchSession}
-                  rerunAssistant={msgActions.rerunAssistant}
+                  thumbsDown={msgActions.thumbsDown}
                 />
               </React.Fragment>
             );

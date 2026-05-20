@@ -53,7 +53,7 @@ interface ChatBubbleProps {
   onDeleteRequest: (id: string, index: number) => void;
   saveEdit: (msgId: string | undefined, index: number, newContent: string, rerun: boolean) => void;
   branchSession: (msgId: string) => void;
-  rerunAssistant: (index: number) => void;
+  thumbsDown: (index: number) => Promise<void>;
 }
 
 function ChatBubbleImpl({
@@ -69,7 +69,7 @@ function ChatBubbleImpl({
   onDeleteRequest,
   saveEdit,
   branchSession,
-  rerunAssistant,
+  thumbsDown,
 }: ChatBubbleProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(message.content);
@@ -170,15 +170,20 @@ function ChatBubbleImpl({
           {!isStreaming && (
             <MessageActions
               content={displayContent}
-              timestamp={message.timestamp}
+              // Assistant messages get no timestamp + no rerun affordance —
+              // user can edit the prompt above and re-send if they want a
+              // fresh answer. The thumbs-down lets them quickly flag a bad
+              // reply to the admin alerts queue.
+              timestamp={message.role === 'user' ? message.timestamp : undefined}
               isUser={message.role === 'user'}
               onDelete={() => onDeleteRequest(message.id!, index)}
               onEdit={() => { setIsEditing(true); setEditValue(message.content); }}
               onBranch={() => branchSession(message.id!)}
-              onRerun={() => message.role === 'user'
-                ? saveEdit(message.id, index, message.content, true)
-                : rerunAssistant(index)
+              onRerun={message.role === 'user'
+                ? () => saveEdit(message.id, index, message.content, true)
+                : undefined
               }
+              onThumbsDown={message.role === 'user' ? undefined : () => thumbsDown(index)}
             />
           )}
         </div>
@@ -204,8 +209,8 @@ const ChatBubble = React.memo(ChatBubbleImpl, (prev, next) => {
     prev.searchQuery === next.searchQuery &&
     prev.isStreaming === next.isStreaming &&
     prev.index === next.index &&
-    prev.rerunAssistant === next.rerunAssistant &&
-    prev.saveEdit === next.saveEdit
+    prev.saveEdit === next.saveEdit &&
+    prev.thumbsDown === next.thumbsDown
   );
 });
 

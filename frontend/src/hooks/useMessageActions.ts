@@ -88,17 +88,23 @@ export function useMessageActions(
     }
   }, [activeSessionKey, navigateToSession, notifySessionCreated, workspace]);
 
-  const rerunAssistant = useCallback(async (index: number) => {
-    if (index === 0 || messages[index].role !== 'assistant') return;
-    const userMsg = messages[index - 1];
-    if (!userMsg || userMsg.role !== 'user') return;
+  const thumbsDown = useCallback(async (index: number) => {
+    const msg = messages[index];
+    if (!msg || msg.role !== 'assistant') return;
+    const params = new URLSearchParams();
+    if (activeSessionKey) params.set("session_id", activeSessionKey);
+    const path = `/api/bug-reports${params.toString() ? "?" + params.toString() : ""}`;
+    const r = await apiFetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        category: "feedback_negative",
+        message: (msg.content || "").slice(0, 1000),
+        include_session: true,
+      }),
+    });
+    if (!r.ok) throw new Error("thumbs-down submit failed");
+  }, [messages, activeSessionKey]);
 
-    await apiFetch(`/sessions/${activeSessionKey}/truncate/${userMsg.id}?workspace=${workspace}`, { method: "DELETE" });
-
-    const truncated = messages.slice(0, index);
-    replaceMessages(workspace, activeSessionKey, truncated);
-    sendMessage(userMsg.content, activeSessionKey, [], true, currentModes);
-  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace, currentModes]);
-
-  return { deleteMessage, saveEdit, branchSession, rerunAssistant };
+  return { deleteMessage, saveEdit, branchSession, thumbsDown };
 }

@@ -191,7 +191,8 @@ class AdminTemplateApplyRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 BUG_CATEGORY = Literal[
-    "incorrect_info", "vision_wrong", "tool_error", "slow", "ui_bug", "other",
+    "incorrect_info", "vision_wrong", "tool_error", "slow", "ui_bug",
+    "feedback_negative", "other",
 ]
 
 
