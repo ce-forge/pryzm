@@ -176,10 +176,14 @@ class AdminTemplateUpdate(BaseModel):
     engine_config: Optional[dict] = None
 
 
-class AdminTemplateInstantiate(BaseModel):
+class AdminTemplateApplyTarget(BaseModel):
     user_id: str
-    slug: Optional[str] = None
+    action: Literal["update", "adopt", "create"]
     owner_can_edit: bool = False
+
+
+class AdminTemplateApplyRequest(BaseModel):
+    targets: list[AdminTemplateApplyTarget]
 
 
 # ---------------------------------------------------------------------------

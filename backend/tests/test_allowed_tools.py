@@ -442,10 +442,14 @@ class TestPatchWorkspacesClamp:
 
 
 # ---------------------------------------------------------------------------
-# POST /admin/templates/{id}/instantiate clamp
+# POST /admin/templates/{id}/apply — create action filter
 # ---------------------------------------------------------------------------
 
-class TestInstantiateClamp:
+class TestApplyCreateClamp:
+    """The create action via /apply silently drops tools the target user
+    isn't allowed to have, mirroring the push/update path. The modal
+    surfaces this via the `dropped_tools` field on each outcome so admin
+    sees what was filtered."""
     def _make_template(self, db_session, slug, enabled_tools):
         t = models.WorkspaceTemplate(
             slug=slug,
@@ -457,33 +461,42 @@ class TestInstantiateClamp:
         db_session.add(t); db_session.commit(); db_session.refresh(t)
         return t
 
-    def test_instantiate_succeeds_when_template_within_cap(self, db_session):
+    def _create(self, c, template_id, user_id):
+        return c.post(f"/api/admin/templates/{template_id}/apply", json={
+            "targets": [{"user_id": user_id, "action": "create", "owner_can_edit": False}],
+        })
+
+    def test_create_succeeds_with_no_drops_when_within_cap(self, db_session):
         try:
             c, _ = _admin_client(db_session)
             target = _seed_user(db_session, "alice", allowed_tools=["web_search"])
             t = self._make_template(db_session, "t1", ["web_search"])
-            r = c.post(f"/api/admin/templates/{t.id}/instantiate",
-                json={"user_id": target.id, "owner_can_edit": False})
+            r = self._create(c, t.id, target.id)
             assert r.status_code == 200, r.text
+            body = r.json()
+            assert body["outcomes"][0]["action"] == "create"
+            assert body["outcomes"][0]["dropped_tools"] == []
         finally:
             app.dependency_overrides.clear()
 
-    def test_instantiate_fails_when_template_exceeds_cap(self, db_session):
+    def test_create_drops_tools_when_template_exceeds_cap(self, db_session):
         try:
             c, _ = _admin_client(db_session)
             target = _seed_user(db_session, "bob", allowed_tools=["web_search"])
             t = self._make_template(db_session, "t2", ["web_search", "execute_ping"])
-            r = c.post(f"/api/admin/templates/{t.id}/instantiate",
-                json={"user_id": target.id, "owner_can_edit": False})
-            assert r.status_code == 400
-            assert "execute_ping" in r.json()["detail"]
+            r = self._create(c, t.id, target.id)
+            assert r.status_code == 200, r.text
+            outcome = r.json()["outcomes"][0]
+            assert outcome["dropped_tools"] == ["execute_ping"]
+            ws = db_session.query(models.Workspace).filter_by(id=outcome["workspace_id"]).one()
+            assert ws.enabled_tools == ["web_search"]
         finally:
             app.dependency_overrides.clear()
 
-    def test_instantiate_for_admin_user_bypasses_cap(self, db_session):
+    def test_create_for_admin_user_keeps_all_tools(self, db_session):
         try:
             c, _ = _admin_client(db_session)
-            # Target user is also an admin → bypass
+            # Target user is also an admin → no cap applies
             target = models.User(
                 username="carol",
                 password_hash=cookie_auth.hash_password("carol-pw-12chars"),
@@ -493,9 +506,10 @@ class TestInstantiateClamp:
             )
             db_session.add(target); db_session.commit(); db_session.refresh(target)
             t = self._make_template(db_session, "t3", ["web_search", "execute_ping"])
-            r = c.post(f"/api/admin/templates/{t.id}/instantiate",
-                json={"user_id": target.id, "owner_can_edit": False})
+            r = self._create(c, t.id, target.id)
             assert r.status_code == 200, r.text
+            outcome = r.json()["outcomes"][0]
+            assert outcome["dropped_tools"] == []
         finally:
             app.dependency_overrides.clear()
 
@@ -636,10 +650,12 @@ class TestResetFilter:
 
 
 # ---------------------------------------------------------------------------
-# POST /admin/templates/{id}/push filter + extended response + audit
+# POST /admin/templates/{id}/apply — update action filter + audit
 # ---------------------------------------------------------------------------
 
-class TestPushFilter:
+class TestApplyUpdateFilter:
+    """Update action via /apply filters tools per-user and reports drops
+    in each outcome. Aggregate audit event lists the filtered users."""
     def _make_template(self, db_session, slug, enabled_tools):
         t = models.WorkspaceTemplate(
             slug=slug,
@@ -665,21 +681,26 @@ class TestPushFilter:
         db_session.add(ws); db_session.commit(); db_session.refresh(ws)
         return ws
 
-    def test_push_no_filtering_when_users_uncapped(self, db_session):
+    def _apply_update(self, c, template_id, user_ids):
+        return c.post(f"/api/admin/templates/{template_id}/apply", json={
+            "targets": [{"user_id": uid, "action": "update"} for uid in user_ids],
+        })
+
+    def test_apply_update_no_drops_when_users_uncapped(self, db_session):
         try:
             c, _ = _admin_client(db_session)
             t = self._make_template(db_session, "tp1", ["web_search", "execute_ping"])
             u = _seed_user(db_session, "alice")  # no cap
             self._make_instance(db_session, u.id, "alice-tp1", t.id)
-            r = c.post(f"/api/admin/templates/{t.id}/push")
+            r = self._apply_update(c, t.id, [u.id])
             assert r.status_code == 200, r.text
             body = r.json()
-            assert body["filtered"] == []
-            assert body["affected_count"] == 1
+            assert len(body["outcomes"]) == 1
+            assert body["outcomes"][0]["dropped_tools"] == []
         finally:
             app.dependency_overrides.clear()
 
-    def test_push_filters_per_capped_user(self, db_session):
+    def test_apply_update_drops_per_capped_user(self, db_session):
         try:
             c, _ = _admin_client(db_session)
             t = self._make_template(db_session, "tp2", ["web_search", "execute_ping"])
@@ -687,36 +708,35 @@ class TestPushFilter:
             u2 = _seed_user(db_session, "bob2", allowed_tools=["web_search"])  # capped
             self._make_instance(db_session, u1.id, "a2-tp2", t.id)
             self._make_instance(db_session, u2.id, "b2-tp2", t.id)
-            r = c.post(f"/api/admin/templates/{t.id}/push")
+            r = self._apply_update(c, t.id, [u1.id, u2.id])
             assert r.status_code == 200, r.text
-            body = r.json()
-            assert body["affected_count"] == 2
-            filtered = body["filtered"]
-            assert len(filtered) == 1
-            assert filtered[0]["username"] == "bob2"
-            assert filtered[0]["dropped_tools"] == ["execute_ping"]
+            outcomes = r.json()["outcomes"]
+            assert len(outcomes) == 2
+            by_user = {o["user_id"]: o for o in outcomes}
+            assert by_user[u1.id]["dropped_tools"] == []
+            assert by_user[u2.id]["dropped_tools"] == ["execute_ping"]
         finally:
             app.dependency_overrides.clear()
 
-    def test_push_filter_persisted_to_workspaces(self, db_session):
+    def test_apply_update_drops_persisted_to_workspace(self, db_session):
         try:
             c, _ = _admin_client(db_session)
             t = self._make_template(db_session, "tp3", ["web_search", "execute_ping"])
             u = _seed_user(db_session, "carol2", allowed_tools=["web_search"])
             ws = self._make_instance(db_session, u.id, "c2-tp3", t.id)
-            c.post(f"/api/admin/templates/{t.id}/push")
+            self._apply_update(c, t.id, [u.id])
             db_session.refresh(ws)
             assert ws.enabled_tools == ["web_search"]
         finally:
             app.dependency_overrides.clear()
 
-    def test_push_audit_records_filtered(self, db_session):
+    def test_apply_update_audit_records_filtered(self, db_session):
         try:
             c, _ = _admin_client(db_session)
             t = self._make_template(db_session, "tp4", ["web_search", "execute_ping"])
             u = _seed_user(db_session, "dave2", allowed_tools=["web_search"])
             self._make_instance(db_session, u.id, "d2-tp4", t.id)
-            c.post(f"/api/admin/templates/{t.id}/push")
+            self._apply_update(c, t.id, [u.id])
             ev = (
                 db_session.query(models.AuditEvent)
                 .filter(models.AuditEvent.event_type == "admin.template.pushed")
@@ -725,9 +745,8 @@ class TestPushFilter:
             )
             assert ev is not None
             payload = ev.payload
-            assert "filtered" in payload
             assert payload["filtered"] == [
-                {"user_id": u.id, "username": "dave2", "dropped_tools": ["execute_ping"]}
+                {"user_id": u.id, "dropped_tools": ["execute_ping"]}
             ]
         finally:
             app.dependency_overrides.clear()
