@@ -1,3 +1,24 @@
+from urllib.parse import quote
+
+
+def safe_content_disposition(filename: str, disposition: str = "inline") -> str:
+    """Build an RFC 5987-compliant Content-Disposition header value.
+
+    Untrusted filenames can carry quote characters, control bytes, and
+    non-ASCII glyphs that break the plain `filename="..."` form. RFC 5987
+    pairs an ASCII-safe `filename=` with a percent-encoded `filename*=`
+    so legacy clients see a degraded but parseable name and modern
+    clients see the original.
+    """
+    ascii_safe = "".join(
+        c for c in filename if 32 <= ord(c) < 127 and c not in '"\\'
+    )
+    if not ascii_safe:
+        ascii_safe = "file"
+    encoded = quote(filename, safe="")
+    return f"{disposition}; filename=\"{ascii_safe}\"; filename*=UTF-8''{encoded}"
+
+
 def format_file_analyzed(sources: list) -> str:
     """Markdown banner for a turn whose RAG context came from attached files.
 
