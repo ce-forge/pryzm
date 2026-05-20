@@ -16,6 +16,8 @@ SearxNG can eat into the engine's outer budget.
 from __future__ import annotations
 
 import asyncio
+import json
+import os
 import time
 
 import httpx
@@ -27,6 +29,23 @@ from tools._web_query import refine_query
 from tools._web_rerank import rerank_chunks_by_query, split_into_chunks
 from tools._web_truncate import truncate_to_sentences
 from .registry import tool
+
+
+_TOOL_DIRECTIVES_PATH = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "core", "prompts", "tool_directives.default.json",
+)
+
+
+def _load_tool_directive(name: str) -> str:
+    """Load a named tool's system-prompt directive from the on-disk JSON file.
+
+    Keeps long LLM-facing prompts out of Python source. Sibling to
+    `micro_prompts.default.json` in core/prompts/.
+    """
+    with open(_TOOL_DIRECTIVES_PATH, "r") as f:
+        directives = json.load(f)
+    return directives[name]
 
 
 # Per-call stats stash for the engine's audit emission. Module-level and
@@ -87,42 +106,10 @@ def _detect_time_range(query: str) -> str | None:
     return None
 
 
-WEB_SEARCH_DIRECTIVE = (
-    "Use `web_search` whenever the answer depends on the current date, time, "
-    "or location — not just for facts that are evergreen knowledge from "
-    "training. Weather, traffic, exchange rates, store hours, today's news, "
-    "scheduled events, current prices, sports results, recent vendor releases, "
-    "and newly-published docs all qualify. Do NOT use it for questions "
-    "answerable from local knowledge-base documents or general background "
-    "knowledge.\n"
-    "For comparison or multi-entity questions (\"which is better, A or B\", "
-    "\"A vs B\", \"compare A and B\"):\n"
-    "  1. Start with a single combined search. Raise `num_results` to 5 or "
-    "more to widen the source pool for breadth.\n"
-    "  2. BEFORE writing your final reply, list each entity the user named "
-    "and check that the search results contain at least one authoritative "
-    "source for EACH (canonical wiki / docs / spec page — opinions and "
-    "third-party comparison blogs don't count as authoritative).\n"
-    "  3. If any entity is missing an authoritative source, you MUST issue a "
-    "follow-up `web_search` for that entity specifically — in the SAME turn, "
-    "before writing your reply. You can call `web_search` multiple times per "
-    "turn; do so when the first call left a side uncovered.\n"
-    "  4. Only after every entity has authoritative coverage, synthesise.\n"
-    "Skip steps 3-4 only when the single combined search already produced "
-    "authoritative data on every side. Don't over-search; don't under-search.\n"
-    "Results are returned as one or more `### Source [N]: <title>` blocks, each "
-    "containing the source URL on its own line and an extracted page body below. "
-    "Source numbering restarts at [1] within each `web_search` call — if you "
-    "issue multiple calls in one turn, cite using the source index from the "
-    "call that supplied the fact (e.g. \"the Eye of Ayak wiki page states... [1]\"). "
-    "When writing your reply, cite every factual claim by appending `[N]` "
-    "referring to the source index. Do not cite sources you did not use. The "
-    "user's UI shows the source list separately, so do NOT write a `**Sources**` "
-    "footer or list URLs in your reply — only the inline `[N]` markers. The "
-    "tool output begins with a `**Searched as:**` line and may end with a "
-    "`**Failed sources**` block — both are internal metadata. Do not echo "
-    "them in your reply."
-)
+# Tool directive lives in data/tool_directives.default.json — editable
+# without touching code, keeps the 30-line LLM-facing prompt out of the
+# Python module.
+WEB_SEARCH_DIRECTIVE = _load_tool_directive("web_search")
 
 
 @tool(
