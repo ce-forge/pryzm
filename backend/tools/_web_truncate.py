@@ -17,7 +17,15 @@ _SENTENCE_END = re.compile(r'(?<=[.!?])\s+')
 def truncate_to_sentences(text: str, max_chars: int) -> str:
     """Return at most `max_chars` chars of `text`, cut on a sentence boundary
     when possible. A single sentence longer than `max_chars` is hard-cut and
-    suffixed with `…`. Whitespace-only or empty input is returned unchanged."""
+    suffixed with `…`. Whitespace-only or empty input is returned unchanged.
+
+    Sentence detection is best-effort. The regex treats every `.`, `!`, `?`
+    followed by whitespace as a boundary, so abbreviations (`Mr.`, `U.S.`,
+    `e.g.`) produce fragment splits. The output still respects `max_chars`,
+    but fragments may appear in place of whole sentences. Good enough for
+    extracted web-page text feeding an LLM synthesis prompt; revisit if
+    a more demanding caller arrives.
+    """
     if not text or not text.strip():
         return text
     if len(text) <= max_chars:
