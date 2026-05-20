@@ -14,7 +14,10 @@ import { TerminalIcon } from "./Icons";
 type WebSource = { n: number; title: string; url: string };
 type WebFailure = { url: string; reason: string };
 
-function parseWebSearchResult(result: string): { sources: WebSource[]; failures: WebFailure[] } {
+function parseWebSearchResult(result: string): { searchedAs: string | null; sources: WebSource[]; failures: WebFailure[] } {
+  const searchedMatch = result.match(/^\*\*Searched as:\*\*\s*(.+?)$/m);
+  const searchedAs = searchedMatch ? searchedMatch[1].trim() : null;
+
   const sources: WebSource[] = [];
   const sourceRe = /^### Source \[(\d+)\]:\s*(.+?)\n(\S+)/gm;
   let m: RegExpExecArray | null;
@@ -32,12 +35,12 @@ function parseWebSearchResult(result: string): { sources: WebSource[]; failures:
     }
   }
 
-  return { sources, failures };
+  return { searchedAs, sources, failures };
 }
 
 function WebSearchResultPill({ result }: { result: string }) {
   const [expanded, setExpanded] = useState(false);
-  const { sources, failures } = parseWebSearchResult(result);
+  const { searchedAs, sources, failures } = parseWebSearchResult(result);
 
   return (
     <div className="-mt-1 mb-2">
@@ -52,6 +55,12 @@ function WebSearchResultPill({ result }: { result: string }) {
       </button>
       {expanded && (
         <div className="mt-2 rounded-lg bg-[#1e1f20] border border-[#333537] px-3 py-2 text-[12px] text-gray-200 flex flex-col gap-1.5">
+          {searchedAs && (
+            <div className="pb-2 mb-1 border-b border-[#333537] text-[11px] text-gray-400">
+              Searched as:{" "}
+              <span className="text-gray-200 font-mono">{searchedAs}</span>
+            </div>
+          )}
           {sources.map((s) => (
             <div key={s.n} className="flex flex-col">
               <div className="text-gray-300">

@@ -20,12 +20,18 @@ from core import llm_server
 
 
 _REFINE_PREPROMPT = (
-    "Rewrite the user's question as a concise Google search query. "
-    "Today is {today}. Output ONLY the search query — no quotes, no "
-    "prefix, no explanation. Preserve specifics from the question "
-    "(names, places, model numbers, version strings) rather than "
-    "generalising. If the question already reads like a good search "
-    "query, return it unchanged."
+    "Rewrite the user's question as a concise Google search query.\n"
+    "Today is {today}.\n\n"
+    "Rules:\n"
+    "1. Replace vague time references (\"this week\", \"today\", \"latest\", "
+    "\"current\", \"now\", \"recently\", \"upcoming\") with the explicit "
+    "month and year derived from today's date.\n"
+    "2. Fix typos.\n"
+    "3. Preserve specifics from the question — names, places, version "
+    "numbers, model numbers — do NOT generalise them away.\n"
+    "4. Strip filler like \"what is\", \"how do I\", \"can you tell me\".\n"
+    "5. Output ONLY the rewritten search query. No quotes, no prefix, "
+    "no explanation."
 )
 
 

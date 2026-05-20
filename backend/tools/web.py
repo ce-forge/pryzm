@@ -66,9 +66,10 @@ WEB_SEARCH_DIRECTIVE = (
     "When writing your reply, cite every factual claim by appending `[N]` "
     "referring to the source index. Do not cite sources you did not use. The "
     "user's UI shows the source list separately, so do NOT write a `**Sources**` "
-    "footer or list URLs in your reply — only the inline `[N]` markers. If a "
-    "`**Failed sources**` footer appears in the tool output, that is internal "
-    "metadata — do not echo it in your reply either."
+    "footer or list URLs in your reply — only the inline `[N]` markers. The "
+    "tool output begins with a `**Searched as:**` line and may end with a "
+    "`**Failed sources**` block — both are internal metadata. Do not echo "
+    "them in your reply."
 )
 
 
@@ -235,4 +236,8 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         failure_lines = "\n".join(f"- {url} — {reason}" for url, reason in failures)
         out += f"\n\n**Failed sources**\n{failure_lines}"
 
-    return out
+    # Prepend the actual search query we used (after refinement) so the UI
+    # can surface it in the source pill. The directive already tells the
+    # model to ignore internal metadata; this header is one more such
+    # marker the model should not echo.
+    return f"**Searched as:** {refined_query}\n\n{out}"
