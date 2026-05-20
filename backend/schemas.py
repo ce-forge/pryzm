@@ -33,6 +33,14 @@ class SessionUpdate(BaseModel):
 class FolderUpdate(BaseModel):
     name: str
 
+
+class FolderResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    name: Optional[str] = None
+    workspace_id: str
+
 class ReferencedFile(BaseModel):
     id: str
     filename: str
