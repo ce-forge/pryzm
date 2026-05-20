@@ -360,6 +360,10 @@ async def stream_chat(
             prompt_len=len(prompt_for_routing),
         )
     else:
+        # Escalation re-entry — tier was passed in explicitly. Mode tier
+        # overrides do NOT apply here: escalation is a stronger signal
+        # ("this turn needs more compute") than a mode's default-model
+        # preference, so we honour the escalated tier verbatim.
         routed_model = router.small if tier is Tier.SMALL else router.large
 
     # Only models tagged `reasoning` in the catalog have their

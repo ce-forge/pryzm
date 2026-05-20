@@ -35,3 +35,18 @@ def test_resolve_routed_model_passthrough_when_no_hint():
     )
     assert model_id == "large-26b"
     assert reason == "complex_verb"
+
+
+def test_resolve_routed_model_falls_back_for_unknown_tier_hint():
+    """Unknown tier_hint (no matching `<name>_capable_model` method on the
+    router) → falls back to the default pick. Pins the generic-extension
+    contract: future modes can declare new tier_override values without
+    breaking the engine — they just no-op until the router gains a matching
+    lookup."""
+    catalog = {"small-2b": {"web"}, "large-26b": {"reasoning"}}
+    router = HeuristicRouter(catalog)
+    model_id, reason = _resolve_routed_model(
+        router, tier_hint="code", default_model_id="small-2b", default_reason="default",
+    )
+    assert model_id == "small-2b"
+    assert reason == "default"
