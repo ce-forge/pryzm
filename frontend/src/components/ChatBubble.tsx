@@ -157,7 +157,7 @@ function ChatBubbleImpl({
               messages.tool_calls JSONB column. Only renders on assistant
               turns that actually executed tools. */}
           {message.role !== "user" && toolCalls && toolCalls.length > 0 && (
-            <ToolCallsBlock calls={toolCalls} />
+            <ToolCallsBlock calls={toolCalls} isStreaming={isStreaming} />
           )}
 
           {/* Inline image previews for any image documents the auto-RAG
