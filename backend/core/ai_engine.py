@@ -4,7 +4,7 @@ import inspect
 import logging
 import re
 import time
-from typing import Awaitable, Callable, Optional
+from typing import AsyncIterator, Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -169,31 +169,34 @@ async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
     return await asyncio.to_thread(func, **safe_args)
 
 
-async def stream_chat(
-    client: httpx.AsyncClient,
-    messages: list,
-    *,
+def _prepare_system_message(
     workspace_id: str,
-    engine_config: EngineConfig,
     tool_set: ResolvedToolSet,
-    session_id: str = None,
-    is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
-    tier: Optional[Tier] = None,
-    escalated: bool = False,
-    modes: Optional[list[str]] = None,
-    user_id: Optional[str] = None,
-):
-    # Substitute {tool_names} placeholder in the workspace's stored
-    # system prompt. We need the system_prompt from the DB but do NOT
-    # need a full workspace fetch — retrieve it with a targeted query.
+    modes: Optional[list[str]],
+    messages: list,
+) -> tuple[Optional[dict], list, ResolvedToolSet, dict, Optional[list], str]:
+    """Resolve the workspace's system prompt, apply per-turn modes, render
+    tool directives, split memory from history, and trim to the recent window.
+
+    Returns:
+        system_msg: {role, content} or None if the workspace is missing.
+        recent_messages: history clipped to MEMORY_CONTEXT_WINDOW.
+        tool_set: post-modes-gating tool set.
+        workspace_tools: callable map keyed by name.
+        tools_payload: OpenAI-shape tool definitions or None.
+        memory_content: condensed summary string (empty if no memory row).
+
+    The memory-log injection into system_msg happens in the orchestrator,
+    after routing — the route event must precede it (the wire order tests
+    depend on `route` being yielded before any content).
+    """
     db = database.SessionLocal()
     try:
         workspace = db.query(models.Workspace).filter(
             models.Workspace.id == workspace_id
         ).first()
         if not workspace:
-            yield f"\n[Engine Error: Workspace {workspace_id} not found.]"
-            return
+            return None, [], tool_set, {}, None, ""
         system_prompt_raw = workspace.system_prompt or ""
     finally:
         db.close()
@@ -220,7 +223,6 @@ async def stream_chat(
 
     memory_content = ""
     active_messages = []
-
     for m in messages:
         if m.get("role") == "memory":
             try:
@@ -232,15 +234,41 @@ async def stream_chat(
             active_messages.append(m)
 
     recent_limit = settings.MEMORY_CONTEXT_WINDOW
-    recent_messages = active_messages[-recent_limit:] if len(active_messages) > recent_limit else active_messages
+    recent_messages = (
+        active_messages[-recent_limit:]
+        if len(active_messages) > recent_limit
+        else active_messages
+    )
 
-    # Route BEFORE the RAG/clean-text step below mutates recent_messages[-1] —
-    # the heuristic needs the original user text (incl. the [Attached_File:]
-    # marker) to detect attachments. If `tier` was passed in, we're inside an
-    # escalation re-entry and skip the router.
+    return system_msg, recent_messages, tool_set, workspace_tools, tools_payload, memory_content
+
+
+def _resolve_route(
+    recent_messages: list,
+    tier: Optional[Tier],
+) -> tuple[str, Tier, bool]:
+    """Pick the model + tier for this turn.
+
+    Two paths:
+    - tier is None → first entry; run the heuristic on the original user
+      text (including any [Attached_File:] marker, which the router uses
+      to detect attachments). Emit a `route` metric event.
+    - tier is set → escalation re-entry; honour the tier verbatim. Mode
+      tier overrides do NOT apply here: escalation is a stronger signal
+      ("this turn needs more compute") than a mode's default-model
+      preference.
+
+    Returns (routed_model, tier, surface_reasoning). `surface_reasoning`
+    gates whether reasoning_content streams to the UI — only catalog
+    entries tagged `reasoning` get their CoT surfaced.
+    """
     router = get_router()
     if tier is None:
-        last_user = recent_messages[-1] if recent_messages and recent_messages[-1].get("role") == "user" else None
+        last_user = (
+            recent_messages[-1]
+            if recent_messages and recent_messages[-1].get("role") == "user"
+            else None
+        )
         prompt_for_routing = (last_user or {}).get("content", "") or ""
         attachments_for_routing = ["file"] if "[Attached_File:" in prompt_for_routing else []
         history_for_routing = recent_messages[:-1] if last_user else recent_messages
@@ -254,17 +282,480 @@ async def stream_chat(
             prompt_len=len(prompt_for_routing),
         )
     else:
-        # Escalation re-entry — tier was passed in explicitly. Mode tier
-        # overrides do NOT apply here: escalation is a stronger signal
-        # ("this turn needs more compute") than a mode's default-model
-        # preference, so we honour the escalated tier verbatim.
         routed_model = router.small if tier is Tier.SMALL else router.large
 
-    # Only models tagged `reasoning` in the catalog have their
-    # `reasoning_content` surfaced to the UI. Small chat models emit
-    # short, low-signal chain-of-thought that adds noise on regular
-    # turns; gating here keeps the pill (and DB column) empty for them.
     surface_reasoning = "reasoning" in router.catalog.get(routed_model, set())
+    return routed_model, tier, surface_reasoning
+
+
+async def _run_auto_rag(
+    client: httpx.AsyncClient,
+    workspace_id: str,
+    session_id: Optional[str],
+    user_id: Optional[str],
+    recent_messages: list,
+) -> AsyncIterator:
+    """Upfront auto-RAG for the last user message.
+
+    Two ways to scope auto-RAG to a specific document:
+      1. Explicit [Attached_File:X] marker from this turn's upload.
+      2. Natural-language filename mention that matches a Document
+         already in this session/workspace (e.g. "what's in
+         screenshot.png" referring to an earlier upload).
+    Marker path strips the marker from the visible user text; mention
+    path leaves the filename in place (it's part of the real prompt).
+
+    Mutates `recent_messages[-1]` in place: when attached, the content
+    becomes a context-prefixed prompt; otherwise just the cleaned text.
+    Yields SSE events (file_analyzed string, files_referenced dict,
+    error string) so the caller streams them through unchanged.
+    """
+    if not (recent_messages and recent_messages[-1].get("role") == "user"):
+        return
+
+    last_query = recent_messages[-1].get("content", "")
+    marker_filenames = re.findall(r'\[Attached_File:\s*([^\]]+?)\s*\]', last_query)
+    has_attachment = bool(marker_filenames)
+    attached_filenames: list[str] = marker_filenames
+    clean_user_text = (
+        re.sub(r'\[Attached_File:.*?\]', '', last_query).strip()
+        if has_attachment else last_query.strip()
+    )
+
+    if not has_attachment:
+        mention_match = _match_session_filename_mentions(
+            last_query, workspace_id=workspace_id, session_id=session_id,
+        )
+        if mention_match:
+            attached_filenames = mention_match
+            has_attachment = True
+
+    if not has_attachment:
+        recent_messages[-1]["content"] = clean_user_text
+        return
+
+    # No user text alongside the attachment → caller wants an overview
+    # of the file, not a semantic search. Flag instead of magic-string.
+    overview_mode = not clean_user_text
+    rag_query = clean_user_text if clean_user_text else ""
+    db = database.SessionLocal()
+    try:
+        rag_data = await knowledge.retrieve_relevant_chunks(
+            client, db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
+            overview_mode=overview_mode,
+            restrict_to_filenames=attached_filenames or None,
+        )
+        if rag_data and rag_data.get("context"):
+            rag_context = rag_data["context"]
+            sources_list = rag_data["sources"]
+            log_event_in_new_session(
+                EventType.CHAT_RAG_RETRIEVED,
+                user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                payload={
+                    "query_preview": (rag_query or "")[:200],
+                    "num_results": len(sources_list),
+                    "source_filenames": list(sources_list),
+                    "mode": "auto",
+                },
+            )
+            # Single source of truth for image content is the caption
+            # written at upload time (see services/image_describe.py). We
+            # deliberately do NOT re-attach the original bytes here — the
+            # caption is detailed (text-extraction-first) and the
+            # duplicate analysis was costing 700-1000 prompt tokens per
+            # turn for no real fidelity gain on typical follow-up
+            # questions.
+            recent_messages[-1]["content"] = (
+                f"I have attached a file. Relevant context:\n{rag_context}\n\n"
+                f"My message: {clean_user_text}\n\n"
+                f"{MICRO_PROMPTS['rag_file_upload_instruction']}"
+            )
+            yield format_file_analyzed(sources_list)
+            # Surface image-typed sources to the frontend so it can render
+            # an inline preview below the assistant turn. Non-image
+            # sources (PDF/text) are filtered out by _image_document_refs
+            # because we don't persist their bytes for re-rendering.
+            image_refs = _image_document_refs(db, sources_list, workspace_id, session_id)
+            if image_refs:
+                yield {"type": "files_referenced", "files": image_refs}
+    except Exception as rag_err:
+        yield format_error(str(rag_err), "File Read Error")
+    finally:
+        db.close()
+
+
+async def _run_agent_loop(
+    client: httpx.AsyncClient,
+    full_messages: list,
+    *,
+    routed_model: str,
+    tools_payload: Optional[list],
+    workspace_tools: dict,
+    surface_reasoning: bool,
+    workspace_id: str,
+    session_id: Optional[str],
+    user_id: Optional[str],
+    is_disconnected: Optional[Callable[[], Awaitable[bool]]],
+    exit_state: dict,
+) -> AsyncIterator:
+    """Agentic loop: stream from llama-server, dispatch tool calls, recurse
+    until either a clean assistant reply lands or MAXIMUM_TOOL_LOOPS is hit.
+
+    Yields the same event shapes stream_chat used to yield directly:
+        - str: content / fallback word
+        - {type: reasoning_chunk, chunk}
+        - {type: reasoning_done, duration_s}
+        - {type: tool_call, name, args}
+        - {type: tool_result, name, result}
+        - {type: files_referenced, files}
+
+    `exit_state` is mutated in place with two keys before this generator
+    exits: `finished_cleanly` (bool) and `had_tool_error` (bool). The
+    orchestrator reads them to decide whether to escalate. Using a dict
+    (instead of a function attribute) keeps the state per-call so two
+    concurrent /analyze requests can't trample each other.
+    """
+    max_loops = settings.MAXIMUM_TOOL_LOOPS
+    loop_count = 0
+    finished_cleanly = False
+    had_tool_error = False
+
+    while loop_count < max_loops:
+        if is_disconnected and await is_disconnected():
+            exit_state["finished_cleanly"] = finished_cleanly
+            exit_state["had_tool_error"] = had_tool_error
+            return
+
+        loop_count += 1
+
+        # Stream from llama-server. reasoning_content and content deltas
+        # forward to the caller in real time; tool_calls deltas accumulate
+        # by index for end-of-stream detection. See
+        # docs/internal/2026-05-20-llama-server-sse-shape.md for the wire
+        # format we're consuming.
+        acc_content = ""
+        acc_reasoning = ""
+        acc_tool_calls: dict[int, dict] = {}
+        reasoning_started_at: float | None = None
+        reasoning_done_emitted = False
+
+        async for delta in llm_server.chat_stream(
+            client,
+            messages=full_messages,
+            tools=tools_payload,
+            model=routed_model,
+        ):
+            if is_disconnected and await is_disconnected():
+                exit_state["finished_cleanly"] = finished_cleanly
+                exit_state["had_tool_error"] = had_tool_error
+                return
+
+            rc = delta.get("reasoning_content")
+            if rc:
+                # Accumulate regardless of surface_reasoning so the message
+                # reconstruction below carries it (the router downstream may
+                # want it for logging). Only forward to the client when the
+                # model is tagged.
+                acc_reasoning += rc
+                if surface_reasoning:
+                    if reasoning_started_at is None:
+                        reasoning_started_at = time.perf_counter()
+                    yield {"type": "reasoning_chunk", "chunk": rc}
+
+            ct = delta.get("content")
+            if ct:
+                # First content token closes the reasoning phase.
+                if reasoning_started_at is not None and not reasoning_done_emitted:
+                    yield {
+                        "type": "reasoning_done",
+                        "duration_s": round(
+                            time.perf_counter() - reasoning_started_at, 1,
+                        ),
+                    }
+                    reasoning_done_emitted = True
+                acc_content += ct
+                yield ct
+
+            # Tool-call deltas: llama-server streams the function name and
+            # opening `{` on the first delta of a slot, then arguments
+            # token-by-token across subsequent deltas. Key by `index` and
+            # concatenate the arguments string.
+            for tc_delta in (delta.get("tool_calls") or []):
+                idx = tc_delta.get("index", 0)
+                slot = acc_tool_calls.setdefault(idx, {
+                    "id": None,
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                })
+                if tc_delta.get("id"):
+                    slot["id"] = tc_delta["id"]
+                fn = tc_delta.get("function") or {}
+                if fn.get("name"):
+                    slot["function"]["name"] = fn["name"]
+                if fn.get("arguments"):
+                    slot["function"]["arguments"] += fn["arguments"]
+
+        # finish_reason=length can end the stream mid-think before any
+        # content arrives — close the reasoning channel so the UI gets
+        # a duration even in that case.
+        if reasoning_started_at is not None and not reasoning_done_emitted:
+            yield {
+                "type": "reasoning_done",
+                "duration_s": round(
+                    time.perf_counter() - reasoning_started_at, 1,
+                ),
+            }
+
+        # Reconstruct the message dict the rest of the loop body expects
+        # (tool-call branch, stall-detection, fallback).
+        message = {
+            "role": "assistant",
+            "content": acc_content,
+            "reasoning_content": acc_reasoning,
+        }
+        tool_calls_list = [acc_tool_calls[i] for i in sorted(acc_tool_calls)]
+        if tool_calls_list:
+            message["tool_calls"] = tool_calls_list
+
+        if message.get("tool_calls"):
+            full_messages.append(message)
+            for tool_call in message["tool_calls"]:
+                func_name = tool_call["function"]["name"]
+                if func_name not in workspace_tools:
+                    continue
+
+                # Inject implicit params before the tool runs.
+                raw_args = tool_call["function"].get("arguments", {})
+                if isinstance(raw_args, str):
+                    try:
+                        raw_args = json.loads(raw_args)
+                    except Exception:
+                        raw_args = {}
+                func = workspace_tools[func_name]
+                valid_params = inspect.signature(func).parameters.keys()
+                if "workspace_id" in valid_params:
+                    raw_args["workspace_id"] = workspace_id
+                if "session_id" in valid_params:
+                    raw_args["session_id"] = session_id
+
+                # Rebuild tool_call with enriched args so _execute_tool picks
+                # them up (it re-reads arguments from the dict).
+                enriched_call = {
+                    "function": {"name": func_name, "arguments": raw_args}
+                }
+
+                # Hide auto-injected context params from the user-visible
+                # System Action line — they're plumbing, not signal. The user
+                # cares about `query` / `hostname` / `port` etc., not
+                # workspace_id or session_id which are always the same.
+                _hidden = {"workspace_id", "session_id"}
+                display_args = {k: v for k, v in raw_args.items()
+                                if k in valid_params and k not in _hidden}
+                yield {"type": "tool_call", "name": func_name, "args": display_args}
+
+                try:
+                    result = await asyncio.wait_for(
+                        _execute_tool(enriched_call, workspace_tools),
+                        timeout=settings.TOOL_TIMEOUT_SECONDS,
+                    )
+                except asyncio.TimeoutError:
+                    result = (
+                        f"Tool {func_name} timed out after "
+                        f"{settings.TOOL_TIMEOUT_SECONDS}s. "
+                        "Continue with what you have."
+                    )
+                    had_tool_error = True
+                except Exception as tool_err:
+                    result = f"Tool execution failed: {str(tool_err)}"
+                    had_tool_error = True
+
+                # Snapshot tool-specific observability stats BEFORE the yield.
+                # The yield suspends the generator and lets other concurrent
+                # /analyze requests run their own tool calls, which would
+                # overwrite a module-level stash like tools.web._LAST_STATS
+                # before we read it.
+                _web_stats_snapshot: dict = {}
+                if func_name == "web_search":
+                    from tools.web import get_last_stats as _web_stats
+                    _web_stats_snapshot = _web_stats()
+
+                yield {"type": "tool_result", "name": func_name, "result": result}
+
+                # Emit specialized audit event per tool — search_knowledge_base
+                # → chat.rag_retrieved, web_search → chat.web_search, everything
+                # else → chat.tool_invoked. No double-emit.
+                is_error_result = isinstance(result, str) and (
+                    result.startswith("Tool execution failed:")
+                    or "timed out after" in result
+                )
+                succeeded = not is_error_result
+                audit_args = {
+                    k: v for k, v in raw_args.items()
+                    if k not in ("workspace_id", "session_id")
+                }
+                if func_name == "search_knowledge_base":
+                    source_filenames = []
+                    if isinstance(result, str):
+                        source_filenames = list(set(
+                            re.findall(r'\[from ([^\]]+)\]', result)
+                        ))
+                    log_event_in_new_session(
+                        EventType.CHAT_RAG_RETRIEVED,
+                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                        payload={
+                            "query_preview": str(audit_args.get("query", ""))[:200],
+                            "num_results": len(source_filenames),
+                            "source_filenames": source_filenames,
+                            "mode": "tool",
+                        },
+                    )
+                elif func_name == "web_search":
+                    log_event_in_new_session(
+                        EventType.CHAT_WEB_SEARCH,
+                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                        payload={
+                            "query_preview": str(audit_args.get("query", ""))[:200],
+                            "query_refined": str(_web_stats_snapshot.get("query_refined", ""))[:200],
+                            "k_requested": _web_stats_snapshot.get("k_requested", 0),
+                            "k_returned_by_searxng": _web_stats_snapshot.get("k_returned_by_searxng", 0),
+                            "k_fetched_ok": _web_stats_snapshot.get("k_fetched_ok", 0),
+                            "k_failed": _web_stats_snapshot.get("k_failed", 0),
+                            "failure_reasons": _web_stats_snapshot.get("failure_reasons", {}),
+                            "fetch_wall_clock_ms": _web_stats_snapshot.get("fetch_wall_clock_ms", 0),
+                            "extracted_bytes_total": _web_stats_snapshot.get("extracted_bytes_total", 0),
+                            "synthesis_model_id": routed_model,
+                        },
+                    )
+                else:
+                    tool_payload = {
+                        "tool_name": func_name,
+                        "arg_values": audit_args,
+                        "succeeded": succeeded,
+                    }
+                    if not succeeded and isinstance(result, str):
+                        tool_payload["error_message"] = result[:200]
+                    log_event_in_new_session(
+                        EventType.CHAT_TOOL_INVOKED,
+                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                        payload=tool_payload,
+                    )
+
+                # When search_knowledge_base returns chunks from image
+                # documents, surface them as files_referenced so the inline
+                # preview renders. Mirrors the auto-RAG path's emission.
+                # Filenames are parsed from the result's `[from <filename>]`
+                # markers that _label_chunk emits.
+                if func_name == "search_knowledge_base" and isinstance(result, str):
+                    from_filenames = re.findall(r'\[from ([^\]]+)\]', result)
+                    if from_filenames:
+                        tool_db = database.SessionLocal()
+                        try:
+                            refs = _image_document_refs(
+                                tool_db, list(set(from_filenames)),
+                                workspace_id, session_id,
+                            )
+                        finally:
+                            tool_db.close()
+                        if refs:
+                            yield {"type": "files_referenced", "files": refs}
+
+                full_messages.append({
+                    "role": "tool",
+                    "content": str(result),
+                    "name": func_name,
+                    "tool_call_id": tool_call["id"],
+                })
+            continue
+
+        else:
+            # Stall + empty-content fallbacks. In streaming mode the content
+            # already reached the client during the chat_stream loop above;
+            # if the accumulated content is a known stall phrase or genuinely
+            # empty, append a fallback so the user sees something useful. The
+            # stall outputs are very short (`thought.`, `thoughts:`), so the
+            # appended fallback reads naturally as a continuation.
+            stripped = acc_content.strip().lower()
+            is_thought_stall = (
+                stripped in {"thought", "thoughts", "thought.", "thought:"}
+                or "i must wait for the search results" in stripped
+            )
+
+            fallback_text = ""
+            if is_thought_stall:
+                fallback_text = MICRO_PROMPTS["fallback_thought_loop"]
+            elif not acc_content.strip():
+                if loop_count > 1:
+                    # Only claim failure if a tool actually errored. If tools
+                    # succeeded and the model just had nothing to add (e.g.,
+                    # after a `rename_chat_session` that returned "Success!
+                    # ..."), say nothing — the tool result block already
+                    # shows what happened.
+                    if had_tool_error:
+                        fallback_text = MICRO_PROMPTS["fallback_tool_failure"]
+                else:
+                    fallback_text = MICRO_PROMPTS["fallback_generic"]
+
+            if fallback_text:
+                prefix = "\n\n" if acc_content.strip() else ""
+                words = (prefix + fallback_text).split(" ")
+                for i, word in enumerate(words):
+                    if is_disconnected and await is_disconnected():
+                        exit_state["finished_cleanly"] = finished_cleanly
+                        exit_state["had_tool_error"] = had_tool_error
+                        return
+                    yield word + (" " if i < len(words) - 1 else "")
+                    await asyncio.sleep(0.01)
+                # Reflect what was actually sent to the client so downstream
+                # persistence (routers/chat.py's full_response accumulator)
+                # matches the user's view.
+                acc_content = acc_content + prefix + fallback_text
+
+            finished_cleanly = True
+            break
+
+    exit_state["finished_cleanly"] = finished_cleanly
+    exit_state["had_tool_error"] = had_tool_error
+
+
+async def stream_chat(
+    client: httpx.AsyncClient,
+    messages: list,
+    *,
+    workspace_id: str,
+    engine_config: EngineConfig,
+    tool_set: ResolvedToolSet,
+    session_id: str = None,
+    is_disconnected: Optional[Callable[[], Awaitable[bool]]] = None,
+    tier: Optional[Tier] = None,
+    escalated: bool = False,
+    modes: Optional[list[str]] = None,
+    user_id: Optional[str] = None,
+):
+    """Orchestrate one turn of the agentic loop.
+
+    Phases (each a helper above):
+      1. prepare — workspace lookup, mode application, tool directives,
+         memory split, history trim.
+      2. route — pick model/tier (or honour escalation re-entry).
+      3. auto-rag — upfront file-attached / filename-mentioned retrieval.
+      4. agent loop — chat call + tool dispatch + recursion until clean.
+      5. escalate — re-enter once with the LARGE tier when the loop
+         exhausted iterations or hit a tool error.
+    """
+    (
+        system_msg,
+        recent_messages,
+        tool_set,
+        workspace_tools,
+        tools_payload,
+        memory_content,
+    ) = _prepare_system_message(workspace_id, tool_set, modes, messages)
+
+    if system_msg is None:
+        yield f"\n[Engine Error: Workspace {workspace_id} not found.]"
+        return
+
+    routed_model, tier, surface_reasoning = _resolve_route(recent_messages, tier)
 
     # Tell the client which tier this turn picked and whether it's
     # reasoning-tagged, so the ProcessingAnimation can switch its label
@@ -278,381 +769,37 @@ async def stream_chat(
     }
 
     if memory_content:
-        system_msg["content"] += f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of earlier interactions in this session.]\n{memory_content}"
+        system_msg["content"] += (
+            f"\n\n[SYSTEM MEMORY LOG: The following is a dense summary of "
+            f"earlier interactions in this session.]\n{memory_content}"
+        )
 
-    if recent_messages and recent_messages[-1].get("role") == "user":
-        last_query = recent_messages[-1].get("content", "")
-        # Two ways to scope auto-RAG to a specific document:
-        #   1. Explicit [Attached_File:X] marker from this turn's upload.
-        #   2. Natural-language filename mention that matches a Document
-        #      already in this session/workspace (e.g. "what's in
-        #      screenshot.png" referring to an earlier upload).
-        # Marker path strips the marker from the visible user text;
-        # mention path leaves the filename in place (it's part of the
-        # real prompt).
-        marker_filenames = re.findall(r'\[Attached_File:\s*([^\]]+?)\s*\]', last_query)
-        has_attachment = bool(marker_filenames)
-        attached_filenames: list[str] = marker_filenames
-        clean_user_text = re.sub(r'\[Attached_File:.*?\]', '', last_query).strip() if has_attachment else last_query.strip()
-
-        if not has_attachment:
-            mention_match = _match_session_filename_mentions(
-                last_query, workspace_id=workspace_id, session_id=session_id,
-            )
-            if mention_match:
-                attached_filenames = mention_match
-                has_attachment = True
-
-        if has_attachment:
-            # No user text alongside the attachment → caller wants an overview
-            # of the file, not a semantic search. Flag instead of magic-string.
-            overview_mode = not clean_user_text
-            rag_query = clean_user_text if clean_user_text else ""
-            db = database.SessionLocal()
-            try:
-                rag_data = await knowledge.retrieve_relevant_chunks(
-                    client, db, query=rag_query, workspace_id=workspace_id, session_id=session_id,
-                    overview_mode=overview_mode,
-                    restrict_to_filenames=attached_filenames or None,
-                )
-                if rag_data and rag_data.get("context"):
-                    rag_context = rag_data["context"]
-                    sources_list = rag_data["sources"]
-                    log_event_in_new_session(
-                        EventType.CHAT_RAG_RETRIEVED,
-                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
-                        payload={
-                            "query_preview": (rag_query or "")[:200],
-                            "num_results": len(sources_list),
-                            "source_filenames": list(sources_list),
-                            "mode": "auto",
-                        },
-                    )
-                    # Single source of truth for image content is the
-                    # caption written at upload time (see
-                    # services/image_describe.py). We deliberately do NOT
-                    # re-attach the original bytes here — the caption is
-                    # detailed (text-extraction-first) and the duplicate
-                    # analysis was costing 700-1000 prompt tokens per
-                    # turn for no real fidelity gain on typical
-                    # follow-up questions. If a future need surfaces for
-                    # pixel-level review, that warrants its own spec
-                    # rather than always-on re-attach.
-                    recent_messages[-1]["content"] = (
-                        f"I have attached a file. Relevant context:\n{rag_context}\n\n"
-                        f"My message: {clean_user_text}\n\n"
-                        f"{MICRO_PROMPTS['rag_file_upload_instruction']}"
-                    )
-                    yield format_file_analyzed(sources_list)
-                    # Surface image-typed sources to the frontend so it
-                    # can render an inline preview below the assistant
-                    # turn. Non-image sources (PDF/text) are filtered out
-                    # by _image_document_refs because we don't persist
-                    # their bytes for re-rendering.
-                    image_refs = _image_document_refs(db, sources_list, workspace_id, session_id)
-                    if image_refs:
-                        yield {"type": "files_referenced", "files": image_refs}
-            except Exception as rag_err:
-                yield format_error(str(rag_err), "File Read Error")
-            finally:
-                db.close()
-        else:
-            recent_messages[-1]["content"] = clean_user_text
+    async for event in _run_auto_rag(
+        client, workspace_id, session_id, user_id, recent_messages,
+    ):
+        yield event
 
     full_messages = [system_msg] + recent_messages
-    max_loops = settings.MAXIMUM_TOOL_LOOPS
-    loop_count = 0
-    finished_cleanly = False
-    had_tool_error = False
+    exit_state: dict = {"finished_cleanly": False, "had_tool_error": False}
 
     try:
-        while loop_count < max_loops:
-            if is_disconnected and await is_disconnected():
-                return
+        async for event in _run_agent_loop(
+            client,
+            full_messages,
+            routed_model=routed_model,
+            tools_payload=tools_payload,
+            workspace_tools=workspace_tools,
+            surface_reasoning=surface_reasoning,
+            workspace_id=workspace_id,
+            session_id=session_id,
+            user_id=user_id,
+            is_disconnected=is_disconnected,
+            exit_state=exit_state,
+        ):
+            yield event
 
-            loop_count += 1
-
-            # Stream from llama-server. reasoning_content and content
-            # deltas forward to the caller in real time; tool_calls
-            # deltas accumulate by index for end-of-stream detection.
-            # See docs/internal/2026-05-20-llama-server-sse-shape.md
-            # for the wire format we're consuming.
-            acc_content = ""
-            acc_reasoning = ""
-            acc_tool_calls: dict[int, dict] = {}
-            reasoning_started_at: float | None = None
-            reasoning_done_emitted = False
-
-            async for delta in llm_server.chat_stream(
-                client,
-                messages=full_messages,
-                tools=tools_payload,
-                model=routed_model,
-            ):
-                if is_disconnected and await is_disconnected():
-                    return
-
-                rc = delta.get("reasoning_content")
-                if rc:
-                    # Accumulate regardless of surface_reasoning so the
-                    # message reconstruction below carries it (the
-                    # router downstream may want it for logging). Only
-                    # forward to the client when the model is tagged.
-                    acc_reasoning += rc
-                    if surface_reasoning:
-                        if reasoning_started_at is None:
-                            reasoning_started_at = time.perf_counter()
-                        yield {"type": "reasoning_chunk", "chunk": rc}
-
-                ct = delta.get("content")
-                if ct:
-                    # First content token closes the reasoning phase.
-                    if reasoning_started_at is not None and not reasoning_done_emitted:
-                        yield {
-                            "type": "reasoning_done",
-                            "duration_s": round(
-                                time.perf_counter() - reasoning_started_at, 1,
-                            ),
-                        }
-                        reasoning_done_emitted = True
-                    acc_content += ct
-                    yield ct
-
-                # Tool-call deltas: llama-server streams the function name
-                # and opening `{` on the first delta of a slot, then
-                # arguments token-by-token across subsequent deltas. Key
-                # by `index` and concatenate the arguments string.
-                for tc_delta in (delta.get("tool_calls") or []):
-                    idx = tc_delta.get("index", 0)
-                    slot = acc_tool_calls.setdefault(idx, {
-                        "id": None,
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""},
-                    })
-                    if tc_delta.get("id"):
-                        slot["id"] = tc_delta["id"]
-                    fn = tc_delta.get("function") or {}
-                    if fn.get("name"):
-                        slot["function"]["name"] = fn["name"]
-                    if fn.get("arguments"):
-                        slot["function"]["arguments"] += fn["arguments"]
-
-            # finish_reason=length can end the stream mid-think before any
-            # content arrives — close the reasoning channel so the UI gets
-            # a duration even in that case.
-            if reasoning_started_at is not None and not reasoning_done_emitted:
-                yield {
-                    "type": "reasoning_done",
-                    "duration_s": round(
-                        time.perf_counter() - reasoning_started_at, 1,
-                    ),
-                }
-
-            # Reconstruct the message dict the rest of the loop body
-            # expects (tool-call branch, stall-detection, fallback).
-            message = {
-                "role": "assistant",
-                "content": acc_content,
-                "reasoning_content": acc_reasoning,
-            }
-            tool_calls_list = [acc_tool_calls[i] for i in sorted(acc_tool_calls)]
-            if tool_calls_list:
-                message["tool_calls"] = tool_calls_list
-
-            if message.get("tool_calls"):
-                full_messages.append(message)
-                for tool_call in message["tool_calls"]:
-                    func_name = tool_call["function"]["name"]
-                    if func_name not in workspace_tools:
-                        continue
-
-                    # Inject implicit params before the tool runs.
-                    raw_args = tool_call["function"].get("arguments", {})
-                    if isinstance(raw_args, str):
-                        try:
-                            raw_args = json.loads(raw_args)
-                        except Exception:
-                            raw_args = {}
-                    func = workspace_tools[func_name]
-                    valid_params = inspect.signature(func).parameters.keys()
-                    if "workspace_id" in valid_params:
-                        raw_args["workspace_id"] = workspace_id
-                    if "session_id" in valid_params:
-                        raw_args["session_id"] = session_id
-
-                    # Rebuild tool_call with enriched args so _execute_tool
-                    # picks them up (it re-reads arguments from the dict).
-                    enriched_call = {
-                        "function": {"name": func_name, "arguments": raw_args}
-                    }
-
-                    # Hide auto-injected context params from the user-visible
-                    # System Action line — they're plumbing, not signal. The
-                    # user cares about `query` / `hostname` / `port` etc., not
-                    # workspace_id or session_id which are always the same.
-                    _hidden = {"workspace_id", "session_id"}
-                    display_args = {k: v for k, v in raw_args.items()
-                                    if k in valid_params and k not in _hidden}
-                    yield {"type": "tool_call", "name": func_name, "args": display_args}
-
-                    try:
-                        result = await asyncio.wait_for(
-                            _execute_tool(enriched_call, workspace_tools),
-                            timeout=settings.TOOL_TIMEOUT_SECONDS,
-                        )
-                    except asyncio.TimeoutError:
-                        result = (
-                            f"Tool {func_name} timed out after "
-                            f"{settings.TOOL_TIMEOUT_SECONDS}s. "
-                            "Continue with what you have."
-                        )
-                        had_tool_error = True
-                    except Exception as tool_err:
-                        result = f"Tool execution failed: {str(tool_err)}"
-                        had_tool_error = True
-
-                    # Snapshot tool-specific observability stats BEFORE the
-                    # yield. The yield suspends the generator and lets other
-                    # concurrent /analyze requests run their own tool calls,
-                    # which would overwrite a module-level stash like
-                    # tools.web._LAST_STATS before we read it.
-                    _web_stats_snapshot: dict = {}
-                    if func_name == "web_search":
-                        from tools.web import get_last_stats as _web_stats
-                        _web_stats_snapshot = _web_stats()
-
-                    yield {"type": "tool_result", "name": func_name, "result": result}
-
-                    # Emit specialized audit event per tool — search_knowledge_base
-                    # → chat.rag_retrieved, web_search → chat.web_search, everything
-                    # else → chat.tool_invoked. No double-emit.
-                    is_error_result = isinstance(result, str) and (
-                        result.startswith("Tool execution failed:")
-                        or "timed out after" in result
-                    )
-                    succeeded = not is_error_result
-                    audit_args = {
-                        k: v for k, v in raw_args.items()
-                        if k not in ("workspace_id", "session_id")
-                    }
-                    if func_name == "search_knowledge_base":
-                        source_filenames = []
-                        if isinstance(result, str):
-                            source_filenames = list(set(
-                                re.findall(r'\[from ([^\]]+)\]', result)
-                            ))
-                        log_event_in_new_session(
-                            EventType.CHAT_RAG_RETRIEVED,
-                            user_id=user_id, workspace_id=workspace_id, session_id=session_id,
-                            payload={
-                                "query_preview": str(audit_args.get("query", ""))[:200],
-                                "num_results": len(source_filenames),
-                                "source_filenames": source_filenames,
-                                "mode": "tool",
-                            },
-                        )
-                    elif func_name == "web_search":
-                        log_event_in_new_session(
-                            EventType.CHAT_WEB_SEARCH,
-                            user_id=user_id, workspace_id=workspace_id, session_id=session_id,
-                            payload={
-                                "query_preview": str(audit_args.get("query", ""))[:200],
-                                "query_refined": str(_web_stats_snapshot.get("query_refined", ""))[:200],
-                                "k_requested": _web_stats_snapshot.get("k_requested", 0),
-                                "k_returned_by_searxng": _web_stats_snapshot.get("k_returned_by_searxng", 0),
-                                "k_fetched_ok": _web_stats_snapshot.get("k_fetched_ok", 0),
-                                "k_failed": _web_stats_snapshot.get("k_failed", 0),
-                                "failure_reasons": _web_stats_snapshot.get("failure_reasons", {}),
-                                "fetch_wall_clock_ms": _web_stats_snapshot.get("fetch_wall_clock_ms", 0),
-                                "extracted_bytes_total": _web_stats_snapshot.get("extracted_bytes_total", 0),
-                                "synthesis_model_id": routed_model,
-                            },
-                        )
-                    else:
-                        tool_payload = {
-                            "tool_name": func_name,
-                            "arg_values": audit_args,
-                            "succeeded": succeeded,
-                        }
-                        if not succeeded and isinstance(result, str):
-                            tool_payload["error_message"] = result[:200]
-                        log_event_in_new_session(
-                            EventType.CHAT_TOOL_INVOKED,
-                            user_id=user_id, workspace_id=workspace_id, session_id=session_id,
-                            payload=tool_payload,
-                        )
-
-                    # When search_knowledge_base returns chunks from image
-                    # documents, surface them as files_referenced so the
-                    # inline preview renders. Mirrors the auto-RAG path's
-                    # emission. Filenames are parsed from the result's
-                    # `[from <filename>]` markers that _label_chunk emits.
-                    if func_name == "search_knowledge_base" and isinstance(result, str):
-                        from_filenames = re.findall(r'\[from ([^\]]+)\]', result)
-                        if from_filenames:
-                            tool_db = database.SessionLocal()
-                            try:
-                                refs = _image_document_refs(
-                                    tool_db, list(set(from_filenames)),
-                                    workspace_id, session_id,
-                                )
-                            finally:
-                                tool_db.close()
-                            if refs:
-                                yield {"type": "files_referenced", "files": refs}
-
-                    full_messages.append({
-                        "role": "tool",
-                        "content": str(result),
-                        "name": func_name,
-                        "tool_call_id": tool_call["id"],
-                    })
-                continue
-
-            else:
-                # Stall + empty-content fallbacks. In streaming mode the
-                # content already reached the client during the chat_stream
-                # loop above; if the accumulated content is a known stall
-                # phrase or genuinely empty, append a fallback so the user
-                # sees something useful. The stall outputs are very short
-                # (`thought.`, `thoughts:`), so the appended fallback reads
-                # naturally as a continuation.
-                stripped = acc_content.strip().lower()
-                is_thought_stall = (
-                    stripped in {"thought", "thoughts", "thought.", "thought:"}
-                    or "i must wait for the search results" in stripped
-                )
-
-                fallback_text = ""
-                if is_thought_stall:
-                    fallback_text = MICRO_PROMPTS["fallback_thought_loop"]
-                elif not acc_content.strip():
-                    if loop_count > 1:
-                        # Only claim failure if a tool actually errored.
-                        # If tools succeeded and the model just had nothing
-                        # to add (e.g., after a `rename_chat_session` that
-                        # returned "Success! ..."), say nothing — the tool
-                        # result block already shows what happened.
-                        if had_tool_error:
-                            fallback_text = MICRO_PROMPTS["fallback_tool_failure"]
-                    else:
-                        fallback_text = MICRO_PROMPTS["fallback_generic"]
-
-                if fallback_text:
-                    prefix = "\n\n" if acc_content.strip() else ""
-                    words = (prefix + fallback_text).split(" ")
-                    for i, word in enumerate(words):
-                        if is_disconnected and await is_disconnected():
-                            return
-                        yield word + (" " if i < len(words) - 1 else "")
-                        await asyncio.sleep(0.01)
-                    # Reflect what was actually sent to the client so
-                    # downstream persistence (routers/chat.py's
-                    # full_response accumulator) matches the user's view.
-                    acc_content = acc_content + prefix + fallback_text
-
-                finished_cleanly = True
-                break
+        finished_cleanly = exit_state["finished_cleanly"]
+        had_tool_error = exit_state["had_tool_error"]
 
         # Escalation gate. Two triggers per [[project-router-escalation-triggers]]:
         # max-iterations (loop exhausted without a clean answer) or tool-error
@@ -665,6 +812,7 @@ async def stream_chat(
             escalation_reason = "tool_error"
 
         if tier is Tier.SMALL and not escalated and escalation_reason:
+            router = get_router()
             emit_escalate(
                 from_model=routed_model,
                 to_model=router.large,
