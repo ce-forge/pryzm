@@ -5,7 +5,9 @@ import { useParams } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/utils/apiClient";
 import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
+import { StatusBadge } from "@/components/admin/StatusBadge";
 import Identicon from "@/components/Identicon";
+import { payloadSummary } from "@/utils/auditPayload";
 
 interface AdminUser {
   id: string;
@@ -44,13 +46,6 @@ interface AdminBugReport {
 }
 
 const RECENT_ACTIVITY_LIMIT = 20;
-
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  open: { bg: "bg-amber-500/15", text: "text-amber-300" },
-  acknowledged: { bg: "bg-sky-500/15", text: "text-sky-300" },
-  resolved: { bg: "bg-emerald-500/15", text: "text-emerald-300" },
-  dismissed: { bg: "bg-gray-500/15", text: "text-gray-400" },
-};
 
 export default function AdminUserDetailPage() {
   const params = useParams<{ user_id: string }>();
@@ -375,18 +370,6 @@ function FlagPill({ label, on }: { label: string; on: boolean }) {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const c =
-    STATUS_COLORS[status] ?? { bg: "bg-gray-500/15", text: "text-gray-300" };
-  return (
-    <span
-      className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium uppercase tracking-wide ${c.bg} ${c.text}`}
-    >
-      {status}
-    </span>
-  );
-}
-
 function EmptyHint({ children }: { children: React.ReactNode }) {
   return (
     <div className="border border-[#2a2a2c] rounded px-4 py-6 text-center text-xs text-gray-500">
@@ -395,11 +378,3 @@ function EmptyHint({ children }: { children: React.ReactNode }) {
   );
 }
 
-function payloadSummary(payload: Record<string, unknown>): string {
-  if (!payload || Object.keys(payload).length === 0) return "—";
-  if (payload._truncated && typeof payload._preview === "string") {
-    return payload._preview;
-  }
-  const s = JSON.stringify(payload);
-  return s.length > 140 ? s.slice(0, 140) + "…" : s;
-}
