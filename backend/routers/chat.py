@@ -594,7 +594,7 @@ async def analyze_data(
                         save_db.commit()
                     except Exception as e:
                         save_db.rollback()
-                        print(f"Failed to save assistant message: {e}")
+                        _log.exception("Failed to save assistant message: %s", e)
                     finally:
                         save_db.close()
 
@@ -669,7 +669,7 @@ async def analyze_data(
                         background_db.commit()
                     except Exception as e:
                         background_db.rollback()
-                        print(f"Failed to save assistant message: {e}")
+                        _log.exception("Failed to save assistant message: %s", e)
                     finally:
                         background_db.close()
 
