@@ -188,9 +188,12 @@ function ChatBubbleImpl({
 }
 
 const ChatBubble = React.memo(ChatBubbleImpl, (prev, next) => {
-  // Stable bubbles only re-render when their own message identity, displayed
-  // content, search highlight, or streaming flag changes. Callback props are
-  // assumed stabilized by useCallback at the parent.
+  // Stable bubbles re-render on message-identity / content / streaming changes,
+  // and also when the callback props' identity changes — those callbacks close
+  // over per-turn state like the globe-toggle modes, so a stale reference would
+  // make the rerun button fire with the wrong modes until the next unrelated
+  // re-render. Their identity is stabilised by useCallback at the parent, so
+  // checking them costs nothing when nothing actually changed.
   return (
     prev.message === next.message &&
     prev.displayContent === next.displayContent &&
@@ -200,7 +203,9 @@ const ChatBubble = React.memo(ChatBubbleImpl, (prev, next) => {
     prev.toolCalls === next.toolCalls &&
     prev.searchQuery === next.searchQuery &&
     prev.isStreaming === next.isStreaming &&
-    prev.index === next.index
+    prev.index === next.index &&
+    prev.rerunAssistant === next.rerunAssistant &&
+    prev.saveEdit === next.saveEdit
   );
 });
 

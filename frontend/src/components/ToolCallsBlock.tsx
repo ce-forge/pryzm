@@ -132,31 +132,43 @@ export default function ToolCallsBlock({ calls }: { calls: ToolCall[] }) {
 
   return (
     <div className="w-full flex flex-col gap-3">
-      {calls.map((tc, i) => (
-        <div key={i} className="w-full">
-          <blockquote className="bg-[#1a1b1c] border border-[#333537] border-l-4 border-l-blue-500 text-gray-300 px-4 py-3 rounded-r-lg my-2 flex items-start gap-3">
-            <TerminalIcon />
-            <div className="flex-1 text-[13px] break-words min-w-0">
-              <strong>Tool:</strong>{" "}
-              <code className="bg-[#2a2b2c] px-1.5 py-0.5 rounded text-[12px] font-mono">
-                {tc.name}
-              </code>
-              <ArgPills args={tc.args} />
+      {calls.map((tc, i) => {
+        // web_search renders as a self-contained pill (with a "Searched as:"
+        // header inside the expansion) — no separate "Tool: web_search → ..."
+        // blockquote, since it's redundant noise.
+        if (tc.name === "web_search") {
+          return (
+            <div key={i} className="w-full">
+              {tc.result ? (
+                <WebSearchResultPill result={tc.result} />
+              ) : (
+                <div className="text-[12px] text-gray-500 italic">🌐 searching the web…</div>
+              )}
             </div>
-          </blockquote>
-          {tc.result ? (
-            tc.name === "web_search" ? (
-              <WebSearchResultPill result={tc.result} />
-            ) : (
+          );
+        }
+        return (
+          <div key={i} className="w-full">
+            <blockquote className="bg-[#1a1b1c] border border-[#333537] border-l-4 border-l-blue-500 text-gray-300 px-4 py-3 rounded-r-lg my-2 flex items-start gap-3">
+              <TerminalIcon />
+              <div className="flex-1 text-[13px] break-words min-w-0">
+                <strong>Tool:</strong>{" "}
+                <code className="bg-[#2a2b2c] px-1.5 py-0.5 rounded text-[12px] font-mono">
+                  {tc.name}
+                </code>
+                <ArgPills args={tc.args} />
+              </div>
+            </blockquote>
+            {tc.result ? (
               <pre className="rounded-lg bg-[#1e1f20] border border-[#333537] px-3 py-2 text-[12px] text-gray-200 whitespace-pre-wrap overflow-x-auto -mt-1 mb-2">
                 {tc.result}
               </pre>
-            )
-          ) : (
-            <div className="text-[12px] text-gray-500 italic px-3 -mt-1 mb-2">running…</div>
-          )}
-        </div>
-      ))}
+            ) : (
+              <div className="text-[12px] text-gray-500 italic px-3 -mt-1 mb-2">running…</div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
