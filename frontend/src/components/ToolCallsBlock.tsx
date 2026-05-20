@@ -6,8 +6,35 @@
  * block uses `<pre>` for monospace display matching the inline `<code>`
  * styling elsewhere in the chat surface.
  */
+import { useState } from "react";
 import type { ToolCall } from "@/types/chat";
 import { TerminalIcon } from "./Icons";
+
+
+function WebSearchResultPill({ result }: { result: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const sourceCount = (result.match(/^### Source \[\d+\]:/gm) || []).length;
+  const failedCount = (result.match(/^- .+? — /gm) || []).length;
+
+  return (
+    <div className="-mt-1 mb-2">
+      <button
+        type="button"
+        onClick={() => setExpanded((e) => !e)}
+        className="text-[12px] text-gray-300 bg-[#1e1f20] border border-[#333537] rounded-lg px-3 py-1.5 hover:bg-[#252627] transition-colors cursor-pointer"
+      >
+        🌐 Searched: {sourceCount} source{sourceCount === 1 ? "" : "s"}
+        {failedCount > 0 ? ` (${failedCount} failed)` : ""}
+        {expanded ? " ▼" : " ▶"}
+      </button>
+      {expanded && (
+        <pre className="mt-2 rounded-lg bg-[#1e1f20] border border-[#333537] px-3 py-2 text-[12px] text-gray-200 whitespace-pre-wrap overflow-x-auto">
+          {result}
+        </pre>
+      )}
+    </div>
+  );
+}
 
 
 function ArgPills({ args }: { args: Record<string, unknown> }) {
@@ -61,9 +88,13 @@ export default function ToolCallsBlock({ calls }: { calls: ToolCall[] }) {
             </div>
           </blockquote>
           {tc.result ? (
-            <pre className="rounded-lg bg-[#1e1f20] border border-[#333537] px-3 py-2 text-[12px] text-gray-200 whitespace-pre-wrap overflow-x-auto -mt-1 mb-2">
-              {tc.result}
-            </pre>
+            tc.name === "web_search" ? (
+              <WebSearchResultPill result={tc.result} />
+            ) : (
+              <pre className="rounded-lg bg-[#1e1f20] border border-[#333537] px-3 py-2 text-[12px] text-gray-200 whitespace-pre-wrap overflow-x-auto -mt-1 mb-2">
+                {tc.result}
+              </pre>
+            )
           ) : (
             <div className="text-[12px] text-gray-500 italic px-3 -mt-1 mb-2">running…</div>
           )}
