@@ -27,10 +27,13 @@ from tools._web_truncate import truncate_to_sentences
 from .registry import tool
 
 
-# Per-call stats stash for the engine's audit emission. The engine reads
-# `get_last_stats()` immediately after each web_search call. Single-flight
-# per process — concurrent web_search calls would race, but the engine
-# serializes tool calls inside a single chat turn so this is safe today.
+# Per-call stats stash for the engine's audit emission. Module-level and
+# single-flight by design — the engine reads `get_last_stats()` synchronously
+# right after `web_search` returns (no `await`/`yield` in between) and
+# snapshots into a local. Without that synchronous snapshot, a concurrent
+# /analyze request's `web_search` could overwrite the stash between
+# completion and read. Don't paper over this with a lock — fix the call
+# site to snapshot.
 _LAST_STATS: dict = {}
 
 

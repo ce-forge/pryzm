@@ -617,6 +617,16 @@ async def stream_chat(
                         result = f"Tool execution failed: {str(tool_err)}"
                         had_tool_error = True
 
+                    # Snapshot tool-specific observability stats BEFORE the
+                    # yield. The yield suspends the generator and lets other
+                    # concurrent /analyze requests run their own tool calls,
+                    # which would overwrite a module-level stash like
+                    # tools.web._LAST_STATS before we read it.
+                    _web_stats_snapshot: dict = {}
+                    if func_name == "web_search":
+                        from tools.web import get_last_stats as _web_stats
+                        _web_stats_snapshot = _web_stats()
+
                     yield {"type": "tool_result", "name": func_name, "result": result}
 
                     # Emit specialized audit event per tool — search_knowledge_base
@@ -648,20 +658,18 @@ async def stream_chat(
                             },
                         )
                     elif func_name == "web_search":
-                        from tools.web import get_last_stats as _web_stats
-                        stats = _web_stats()
                         _audit_chat_event(
                             user_id, workspace_id, session_id,
                             EventType.CHAT_WEB_SEARCH,
                             {
                                 "query_preview": str(audit_args.get("query", ""))[:200],
-                                "k_requested": stats.get("k_requested", 0),
-                                "k_returned_by_searxng": stats.get("k_returned_by_searxng", 0),
-                                "k_fetched_ok": stats.get("k_fetched_ok", 0),
-                                "k_failed": stats.get("k_failed", 0),
-                                "failure_reasons": stats.get("failure_reasons", {}),
-                                "fetch_wall_clock_ms": stats.get("fetch_wall_clock_ms", 0),
-                                "extracted_bytes_total": stats.get("extracted_bytes_total", 0),
+                                "k_requested": _web_stats_snapshot.get("k_requested", 0),
+                                "k_returned_by_searxng": _web_stats_snapshot.get("k_returned_by_searxng", 0),
+                                "k_fetched_ok": _web_stats_snapshot.get("k_fetched_ok", 0),
+                                "k_failed": _web_stats_snapshot.get("k_failed", 0),
+                                "failure_reasons": _web_stats_snapshot.get("failure_reasons", {}),
+                                "fetch_wall_clock_ms": _web_stats_snapshot.get("fetch_wall_clock_ms", 0),
+                                "extracted_bytes_total": _web_stats_snapshot.get("extracted_bytes_total", 0),
                                 "synthesis_model_id": routed_model,
                             },
                         )
