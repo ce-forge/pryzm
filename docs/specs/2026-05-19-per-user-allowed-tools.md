@@ -87,14 +87,17 @@ def filter_allowed_tools(
 
 ## Write sites
 
-| Endpoint | Target user | Behavior |
-|---|---|---|
-| `POST /workspaces` | current_user | `enforce_allowed_tools` after computing `enabled_tools` (default `[]` or from `clone_from`). Hard error on disallowed. |
-| `PATCH /workspaces/{slug}` | `ws.user` | When payload includes `enabled_tools`, run `enforce_allowed_tools` on the new list. Stored value untouched if request omits the field — that is how grandfathering works. |
-| `POST /workspaces/{slug}/reset` | `ws.user` | `filter_allowed_tools` on the template's tool list. Other fields (system_prompt, color, engine_config) propagate unconditionally. Response carries `dropped_tools` so the frontend can show a notice. |
-| `POST /admin/templates/{id}/instantiate` | `payload.user_id` | `enforce_allowed_tools` against the template's tool list. Hard error on disallowed — instantiate is one-shot, admin gets a clear actionable failure. |
-| `POST /admin/templates/{id}/push` | each instance's `ws.user` | Per-recipient `filter_allowed_tools` against the template's tool list. Other fields propagate unconditionally. Response shape extends today's `{ ok, affected_count }` with `filtered: [{ user_id, username, dropped_tools }]`. |
-| `PUT /admin/workspaces/{id}` | `ws.user` | When payload includes `enabled_tools`, run `enforce_allowed_tools`. Admin sees the same error a user would; explicit lists are explicit intent. |
+The earlier `POST /admin/templates/{id}/instantiate` and `POST /admin/templates/{id}/push` endpoints have since merged into a single `POST /admin/templates/{id}/apply` with per-target action verbs (`create`, `update`, `adopt`). The cap behavior per verb is what matters here, not the route shape.
+
+| Endpoint | Action verb | Target user | Behavior |
+|---|---|---|---|
+| `POST /workspaces` | — | current_user | `enforce_allowed_tools` after computing `enabled_tools` (default `[]` or from `clone_from`). Hard error on disallowed. |
+| `PATCH /workspaces/{slug}` | — | `ws.user` | When payload includes `enabled_tools`, run `enforce_allowed_tools` on the new list. Stored value untouched if request omits the field — that is how grandfathering works. |
+| `POST /workspaces/{slug}/reset` | — | `ws.user` | `filter_allowed_tools` on the template's tool list. Other fields (system_prompt, color, engine_config) propagate unconditionally. Response carries `dropped_tools` so the frontend can show a notice. |
+| `POST /admin/templates/{id}/apply` | `create` (instantiate) | `target_user_id` | **Strict.** `enforce_allowed_tools(target_user, template.enabled_tools)`. Hard error on disallowed — create is one-shot, admin gets a clear actionable failure. |
+| `POST /admin/templates/{id}/apply` | `update` (push) | each instance's `ws.user` | **Filter.** Per-recipient `filter_allowed_tools` against the template's tool list silently drops disallowed tools. Other fields propagate unconditionally. Response carries `filtered: [{ user_id, username, dropped_tools }]`. |
+| `POST /admin/templates/{id}/apply` | `adopt` | `ws.user` | **Filter.** Same as `update` — bulk re-alignment, `filter_allowed_tools` quietly clamps. |
+| `PUT /admin/workspaces/{id}` | — | `ws.user` | When payload includes `enabled_tools`, run `enforce_allowed_tools`. Admin sees the same error a user would; explicit lists are explicit intent. |
 
 ### Grandfathering
 

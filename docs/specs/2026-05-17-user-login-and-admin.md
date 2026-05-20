@@ -66,6 +66,8 @@ Index on `expires_at` for the cleanup sweeper.
 | `template_id` | UUID FK workspaces, nullable, on delete SET NULL | which template this was instantiated from |
 | `owner_can_edit` | bool, default false | gates whether the workspace's `user_id` user can edit settings |
 
+Superseded by `docs/specs/2026-05-18-workspace-template-split.md` — templates live in their own `workspace_templates` table, and the `is_template` column on `workspaces` was never shipped. The `template_id` and `owner_can_edit` columns landed as designed.
+
 Unique constraint changes: today `UNIQUE(slug)` globally; under Pattern B, `UNIQUE(user_id, slug)` for per-user workspaces and `UNIQUE(slug) WHERE is_template = true` for templates. Templates keep globally unique slugs so admin can refer to them unambiguously.
 
 ### Modified: `folders`
@@ -181,7 +183,7 @@ The 404-not-403 convention matches the rest of the codebase (no info leak about 
 - `POST /api/auth/login`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
-- `POST /api/auth/password` — change own password; invalidates sessions other than the current one
+- `POST /api/auth/password` — reachable only while `users.must_change_password=true` (the forced-change flow on first login or after admin reset). Voluntary self-service password change is closed and returns 403. All credential resets go through admin via `/api/admin/users/{id}/reset-password`, which sets `must_change_password=true` and invalidates the user's sessions.
 
 **User workspaces (the workspace's owner)**
 - `GET /api/workspaces` — list current user's workspaces
@@ -225,9 +227,9 @@ First-boot admin user is a chicken-and-egg problem ("you need an admin to create
 - `PRYZM_BOOTSTRAP_ADMIN_USERNAME` (default `admin`)
 - `PRYZM_BOOTSTRAP_ADMIN_PASSWORD` — if set AND `users` table is empty, create an admin with this password.
 
-If the env is unset and the `users` table is empty, the backend refuses to start with a clear error pointing at the env var.
+If the env is unset and the `users` table is empty, bootstrap mints a one-shot random password via `secrets.token_urlsafe(18)` and prints it to the WARNING log under a clearly delimited `=== PRYZM BOOTSTRAP ADMIN PASSWORD ===` banner. The admin row is created with `must_change_password=True`, so the operator is forced to set a real password on first login and the logged value is single-use.
 
-After first boot the env is ignored (table is no longer empty). Bootstrap admin should rotate the password from the UI immediately. The bootstrap admin is also auto-granted instances of all current builtin templates (`it_copilot`, `personal`) so their first-launch UX matches today's behavior.
+After first boot the env is ignored (table is no longer empty). The bootstrap admin is also auto-granted instances of all current builtin templates (`it_copilot`, `personal`) so their first-launch UX matches today's behavior.
 
 ## Migration from bearer token
 

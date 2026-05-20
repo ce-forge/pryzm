@@ -94,7 +94,7 @@ def render_tool_directives(tool_set: "ResolvedToolSet") -> str:
     return f"== AVAILABLE TOOLS ==\n\n{body}"
 
 
-def tool(properties, required=None, system_prompt_directive=""):
+def tool(properties, required=None, system_prompt_directive="", audit_event_type=None):
     """A decorator that turns a Python function into an LLM-callable tool.
 
     Per-workspace gating happens via `Workspace.enabled_tools` (the JSONB
@@ -106,6 +106,12 @@ def tool(properties, required=None, system_prompt_directive=""):
     to call the tool (NOT what it does — that's the JSON-schema description).
     Empty string = the tool gets no per-tool line in the rendered block (it
     still gets listed in {tool_names} as today).
+
+    audit_event_type: optional `EventType` value the engine should emit for
+    invocations of this tool. When None, the engine falls back to
+    `EventType.CHAT_TOOL_INVOKED`. Tools that want a specialised audit shape
+    also return `(content_str, audit_payload_dict)` so the engine can merge
+    the dict into the default payload.
     """
     if required is None:
         required = []
@@ -120,6 +126,7 @@ def tool(properties, required=None, system_prompt_directive=""):
             )
         AVAILABLE_TOOLS[name] = func
         func.system_prompt_directive = system_prompt_directive
+        func.audit_event_type = audit_event_type
 
         TOOL_DEFINITIONS.append({
             "type": "function",

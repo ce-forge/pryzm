@@ -82,7 +82,7 @@ async def test_returns_structured_source_blocks_for_each_fetched_page(monkeypatc
 
     with patch("tools.web.requests.get") as mock_get:
         mock_get.return_value = _mock_searx_response(_fake_hits(3))
-        out = await web_search("anything", num_results=3)
+        out, _audit = await web_search("anything", num_results=3)
 
     assert "### Source [1]: Title 1" in out
     assert "https://example.com/p1" in out
@@ -106,7 +106,7 @@ async def test_failed_sources_listed_in_footer_others_still_returned(monkeypatch
 
     with patch("tools.web.requests.get") as mock_get:
         mock_get.return_value = _mock_searx_response(_fake_hits(3))
-        out = await web_search("anything", num_results=3)
+        out, _audit = await web_search("anything", num_results=3)
 
     assert "### Source [1]: Title 1" in out
     # Failed sources don't get numbered blocks.
@@ -130,7 +130,7 @@ async def test_all_fail_returns_single_line_error(monkeypatch):
 
     with patch("tools.web.requests.get") as mock_get:
         mock_get.return_value = _mock_searx_response(_fake_hits(2))
-        out = await web_search("anything", num_results=2)
+        out, _audit = await web_search("anything", num_results=2)
 
     assert "### Source" not in out
     assert "none could be fetched" in out
@@ -142,7 +142,7 @@ async def test_no_searxng_results_returns_no_results_message():
 
     with patch("tools.web.requests.get") as mock_get:
         mock_get.return_value = _mock_searx_response([])
-        out = await web_search("zzzz no hits")
+        out, _audit = await web_search("zzzz no hits")
 
     assert "No results for" in out
 
@@ -153,7 +153,7 @@ async def test_searxng_unreachable_returns_failure_message():
 
     with patch("tools.web.requests.get") as mock_get:
         mock_get.side_effect = requests.ConnectionError("refused")
-        out = await web_search("anything")
+        out, _audit = await web_search("anything")
 
     assert "Web search failed" in out
 
@@ -170,7 +170,7 @@ async def test_num_results_clamped_at_eight(monkeypatch):
 
     with patch("tools.web.requests.get") as mock_get:
         mock_get.return_value = _mock_searx_response(_fake_hits(10))
-        out = await web_search("anything", num_results=20)
+        out, _audit = await web_search("anything", num_results=20)
 
     # 9th and 10th hits never get fetched.
     assert "### Source [8]" in out
@@ -190,7 +190,7 @@ async def test_body_is_truncated_to_max_chars(monkeypatch):
 
     with patch("tools.web.requests.get") as mock_get:
         mock_get.return_value = _mock_searx_response(_fake_hits(1))
-        out = await web_search("anything", num_results=1)
+        out, _audit = await web_search("anything", num_results=1)
 
     # Extracted body inside the Source block should not exceed ~3000 chars.
     assert len(out) < 3500

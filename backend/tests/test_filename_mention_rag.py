@@ -176,7 +176,7 @@ def test_search_tool_passes_filenames_through(monkeypatch):
     monkeypatch.setattr("tools.retrieval.search_chunks_sync", fake_search)
     monkeypatch.setattr("tools.retrieval.SessionLocal", lambda: _DummyDb())
 
-    out = search_knowledge_base(
+    out, _audit = search_knowledge_base(
         queries=["the IP"],
         workspace_id="ws-1",
         session_id="sess-1",

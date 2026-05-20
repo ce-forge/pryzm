@@ -89,7 +89,7 @@ Application code that attempts UPDATE or DELETE on the table fails loudly. DDL-l
 
 The event_type strings group by domain prefix. v1 surface:
 
-**`auth.*`** — login_success, login_failure, logout, password_changed, password_reset_by_admin, session_expired
+**`auth.*`** — login_success, login_failure, logout, password_changed, password_reset_by_admin
 
 **`admin.user.*`** — created, edited, deactivated, activated, deleted (payload includes `is_hard: bool`), promoted_to_admin, demoted_from_admin
 
@@ -121,10 +121,10 @@ For each event_type, the expected payload keys are documented (in code, alongsid
 |---|---|
 | `auth.login_failure` | `{username_attempted: str, reason: 'wrong_password' \| 'account_disabled' \| 'rate_limited'}` |
 | `chat.message_sent` | `{content_preview: str, token_count: int, has_attachments: bool, attachment_filenames: [str]}` |
-| `chat.message_received` | `{content_preview: str, token_count: int, model: str, finished_cleanly: bool}` |
+| `chat.message_received` | `{content_preview: str, token_count: int, model: str, finished_cleanly: bool, tier: str, tools_used: [str], tools_count: int, reasoning: str?, reasoning_duration_s: float?, prompt_tokens: int, completion_tokens: int, duration_ms: int, ttft_ms: int, tokens_per_sec: float}` |
 | `chat.tool_invoked` | `{tool_name: str, arg_values: dict, succeeded: bool, error_message: str?}` |
 | `chat.rag_retrieved` | `{query_preview: str, num_results: int, source_filenames: [str], mode: str}` |
-| `chat.web_search` | `{query_preview: str, num_results: int, result_urls: [str]}` |
+| `chat.web_search` | `{query_preview: str, query_refined: str, k_requested: int, k_returned_by_searxng: int, k_fetched_ok: int, k_failed: int, failure_reasons: dict, fetch_wall_clock_ms: int, extracted_bytes_total: int, synthesis_model_id: str}` |
 | `workspace.edited` | `{changed_fields: [str], previous_values: dict, new_values: dict}` |
 | `document.uploaded` | `{filename: str, mime: str, size_bytes: int, document_id: uuid}` |
 | `admin.template_pushed` | `{template_id: uuid, affected_workspace_count: int, affected_user_count: int, had_customizations_count: int}` |

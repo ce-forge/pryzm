@@ -32,7 +32,9 @@ async def test_tool_timeout_yields_clean_result():
 @pytest.mark.asyncio
 async def test_execute_tool_runs_sync_in_thread():
     """_execute_tool wraps sync callables in asyncio.to_thread so they don't
-    block the event loop; the return value is preserved."""
+    block the event loop; the return value is preserved. A bare-string
+    return surfaces as `(content, None)` — tools that want a specialised
+    audit shape return `(content, payload)` instead."""
     from core import ai_engine
 
     def echo_tool(value: str = "hello"):
@@ -41,8 +43,9 @@ async def test_execute_tool_runs_sync_in_thread():
     tool_call = {"function": {"name": "echo_tool", "arguments": {"value": "world"}}}
     fake_workspace_tools = {"echo_tool": echo_tool}
 
-    result = await ai_engine._execute_tool(tool_call, fake_workspace_tools)
-    assert result == "echo:world"
+    content, audit_payload = await ai_engine._execute_tool(tool_call, fake_workspace_tools)
+    assert content == "echo:world"
+    assert audit_payload is None
 
 
 @pytest.mark.asyncio
@@ -57,8 +60,9 @@ async def test_execute_tool_runs_async_directly():
     tool_call = {"function": {"name": "async_tool", "arguments": {"value": "y"}}}
     fake_workspace_tools = {"async_tool": async_tool}
 
-    result = await ai_engine._execute_tool(tool_call, fake_workspace_tools)
-    assert result == "async:y"
+    content, audit_payload = await ai_engine._execute_tool(tool_call, fake_workspace_tools)
+    assert content == "async:y"
+    assert audit_payload is None
 
 
 # ---------------------------------------------------------------------------
