@@ -7,13 +7,6 @@ from typing import Callable
 AVAILABLE_TOOLS = {}
 TOOL_DEFINITIONS = []
 
-# Per-tool workspace allowlist. Maps tool name -> list of workspace names
-# (e.g. "it_copilot", "personal") in which the tool is exposed to the LLM.
-# Populated by the @tool decorator. The eventual UI-driven workspace tool
-# config (see project_workspace_roadmap memory) will overlay this default.
-TOOL_WORKSPACES: dict[str, list[str]] = {}
-
-
 class ToolRegistrationError(Exception):
     """Raised when @tool registers a name that is already taken."""
 
@@ -101,14 +94,12 @@ def render_tool_directives(tool_set: "ResolvedToolSet") -> str:
     return f"== AVAILABLE TOOLS ==\n\n{body}"
 
 
-def tool(properties, required=None, workspaces=None, system_prompt_directive=""):
+def tool(properties, required=None, system_prompt_directive=""):
     """A decorator that turns a Python function into an LLM-callable tool.
 
-    workspaces: list of workspace names in which the tool is exposed. Defaults
-    to ["it_copilot"] to preserve historical behavior — every existing tool was
-    only available in the IT Copilot workspace. Pass a longer list to opt a
-    tool into additional workspaces (e.g. rename_chat_session is allowed in
-    "personal" too because users like that affordance everywhere).
+    Per-workspace gating happens via `Workspace.enabled_tools` (the JSONB
+    column on the row) resolved by `services.workspaces.resolve_tools_for_workspace`.
+    The registry knows which tools EXIST, not which workspaces may call them.
 
     system_prompt_directive: short text injected into the workspace's rendered
     system prompt under the `== AVAILABLE TOOLS ==` block. Describes WHEN/HOW
@@ -118,8 +109,6 @@ def tool(properties, required=None, workspaces=None, system_prompt_directive="")
     """
     if required is None:
         required = []
-    if workspaces is None:
-        workspaces = ["it_copilot"]
 
     def decorator(func):
         name = func.__name__
@@ -130,7 +119,6 @@ def tool(properties, required=None, workspaces=None, system_prompt_directive="")
                 "Each tool name must be unique across the registry."
             )
         AVAILABLE_TOOLS[name] = func
-        TOOL_WORKSPACES[name] = list(workspaces)
         func.system_prompt_directive = system_prompt_directive
 
         TOOL_DEFINITIONS.append({

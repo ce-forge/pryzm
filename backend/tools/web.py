@@ -142,7 +142,6 @@ WEB_SEARCH_DIRECTIVE = (
         },
     },
     required=["query"],
-    workspaces=["it_copilot", "personal"],
     system_prompt_directive=WEB_SEARCH_DIRECTIVE,
 )
 async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:

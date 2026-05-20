@@ -30,7 +30,6 @@ from utils.formatters import format_tool_results
         },
     },
     required=["queries"],
-    workspaces=["it_copilot", "personal"],
     system_prompt_directive=(
         "Call this for internal documentation or content from uploaded files; base your "
         "answer on the tool's output. If the user references a specific file — by name, "
