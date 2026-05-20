@@ -7,9 +7,11 @@ model to cite. Per-source failures (timeout, 4xx, 5xx, non-HTML, empty
 extraction) are listed in a `**Failed sources**` footer so the model can
 caveat without aborting the turn.
 
-Wall-clock budget for the fetch loop is 25s — under the engine's
-`TOOL_TIMEOUT_SECONDS=30` so the inner budget always trips first and the tool
-returns a partial result rather than getting cancelled by the outer guard.
+Wall-clock budget for the *fetch loop* is 25s — under the engine's
+`TOOL_TIMEOUT_SECONDS=30` so the inner budget trips first and the tool returns
+a structured error rather than getting cancelled by the outer guard. The
+SearxNG call runs before the fetch loop and uses its own timeout; a slow
+SearxNG can eat into the engine's outer budget.
 """
 from __future__ import annotations
 
@@ -41,7 +43,9 @@ WEB_SEARCH_DIRECTIVE = (
     "When writing your reply, cite every factual claim by appending `[N]` "
     "referring to the source index. End your reply with a `**Sources**` section "
     "listing each cited source as `[N] <URL>`. Do not cite sources you did not "
-    "use."
+    "use. If a `**Failed sources**` footer appears in the tool output, that is "
+    "internal metadata about pages we could not fetch — do not echo it in your "
+    "reply."
 )
 
 
@@ -68,8 +72,11 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     main content as structured per-source blocks ready for the model to cite."""
     capped = max(1, min(num_results, _MAX_RESULTS))
 
-    # SearxNG call stays synchronous (requests library) — it's a single fast
-    # local call and changing it to httpx would buy nothing here.
+    # SearxNG call stays synchronous (requests library). It blocks the event
+    # loop until the local SearxNG responds, but Pryzm is single-user and
+    # SearxNG is on the same host — the blocking window is sub-second in
+    # practice. Switching to httpx would make this awaitable but buys no
+    # real concurrency for this single-user workload.
     try:
         resp = requests.get(
             f"{settings.SEARXNG_URL}/search",
@@ -88,10 +95,10 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     urls_titles = [(h.get("url", ""), h.get("title", "(no title)")) for h in hits]
 
     # Fetch all URLs in parallel under a single wall-clock budget. asyncio.wait_for
-    # cancels the gather on timeout — for partial results we'd need to handle this
-    # case, but with the engine's outer TOOL_TIMEOUT_SECONDS=30 and our 25s inner,
-    # the typical case is "all done in well under 25s." Mark URLs that didn't
-    # come back as `timeout` on cancellation.
+    # cancels the gather on timeout, discarding even already-completed fetches —
+    # so a single 25s straggler in a batch of 8 wipes out the other 7. A
+    # shield-based variant could collect partials; v1 accepts the simpler
+    # all-or-timeout shape and marks every URL as `timeout` on cancellation.
     results: list[FetchResult] = []
     async with httpx.AsyncClient(
         headers={"user-agent": "Pryzm/1.0 (+self-hosted IT copilot)"},

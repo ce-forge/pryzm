@@ -47,12 +47,15 @@ async def fetch_and_extract(
     if not (content_type.startswith("text/html") or "xhtml" in content_type):
         return FetchResult(url=url, ok=False, failure_reason="non-html")
 
-    extracted = trafilatura.extract(
-        resp.text,
-        include_comments=False,
-        include_tables=True,
-        favor_recall=False,
-    )
+    try:
+        extracted = trafilatura.extract(
+            resp.text,
+            include_comments=False,
+            include_tables=True,
+            favor_recall=False,
+        )
+    except Exception:
+        return FetchResult(url=url, ok=False, failure_reason="error")
     if not extracted or not extracted.strip():
         return FetchResult(url=url, ok=False, failure_reason="empty")
 
