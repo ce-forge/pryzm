@@ -201,3 +201,30 @@ def test_get_router_raises_when_uninitialised(monkeypatch):
     monkeypatch.setattr(mod, "_router_singleton", None)
     with pytest.raises(RuntimeError, match="not initialised"):
         get_router()
+
+
+# ---------------------------------------------------------------------------
+# web_capable_model — picks the chat model with the `web` tag
+# ---------------------------------------------------------------------------
+
+
+def test_web_capable_model_returns_first_web_tagged_chat_model():
+    """A model carrying the `web` tag is returned. Embedding models are skipped
+    even if mistakenly carrying the tag."""
+    catalog = {
+        "small-2b": {"web"},
+        "large-26b": {"reasoning"},
+        "embed": {"embedding", "web"},
+    }
+    router = HeuristicRouter(catalog)
+    assert router.web_capable_model() == "small-2b"
+
+
+def test_web_capable_model_none_when_no_model_tagged():
+    """No `web` tag anywhere → None; caller falls back to the heuristic pick."""
+    catalog = {
+        "small-2b": set(),
+        "large-26b": {"reasoning", "code"},
+    }
+    router = HeuristicRouter(catalog)
+    assert router.web_capable_model() is None

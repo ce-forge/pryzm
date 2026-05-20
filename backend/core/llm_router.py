@@ -95,6 +95,17 @@ class HeuristicRouter:
                 return model_id
         return None
 
+    def web_capable_model(self) -> str | None:
+        """First chat model carrying the `web` tag, or None if no catalog
+        entry has it. Used by the web_search mode to route the synthesis
+        turn to a model designated for research output. Mirrors
+        vision_capable_model — tag-driven so the YAML stays the single
+        source of truth for which model handles which workload."""
+        for model_id, tags in self.catalog.items():
+            if "web" in tags and "embedding" not in tags:
+                return model_id
+        return None
+
     def _pick_tier(
         self,
         prompt: str,
