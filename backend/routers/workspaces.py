@@ -100,7 +100,7 @@ def create_workspace(
         )
 
     try:
-        slug = slugify_unique(db, stripped_display_name)
+        slug = slugify_unique(db, stripped_display_name, user_id=user.id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -15,13 +15,13 @@ from core import cookie_auth
 from core.audit import EventType, log_event
 from core.workspace_access import verify_workspace_owns, workspace_query_dep
 from db import database, models
-from schemas import FolderCreate, FolderUpdate
+from schemas import FolderCreate, FolderResponse, FolderUpdate
 
 
 router = APIRouter(tags=["Folders"])
 
 
-@router.get("/folders")
+@router.get("/folders", response_model=list[FolderResponse])
 def get_folders(
     workspace: models.Workspace = Depends(workspace_query_dep),
     db: Session = Depends(database.get_db),
