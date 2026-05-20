@@ -285,6 +285,22 @@ async def embed(client: httpx.AsyncClient, text: str, model: str) -> list[float]
     return data["data"][0]["embedding"]
 
 
+def embed_sync(text: str, model: str) -> list[float]:
+    """Sync embedding helper for tool dispatch paths that run outside the
+    async loop (e.g. search_chunks_sync). Shares the same wire format as
+    `embed` so a future change to the embeddings endpoint only edits one
+    place."""
+    import requests
+    url = f"{BASE_URL}/v1/embeddings"
+    payload = {"model": model, "input": text}
+    t0 = time.perf_counter()
+    resp = requests.post(url, json=payload, timeout=30.0)
+    resp.raise_for_status()
+    duration_s = time.perf_counter() - t0
+    emit_embed_metric(model=model, char_count=len(text), duration_s=duration_s)
+    return resp.json()["data"][0]["embedding"]
+
+
 async def list_models(client: httpx.AsyncClient) -> list[str]:
     """GET /v1/models. Returns the list of model ids. llama-swap reports its
     configured models here; the order matches infra/llama-swap-config.yaml."""

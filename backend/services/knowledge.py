@@ -300,16 +300,8 @@ def search_chunks_sync(
     filenames (case-insensitive)."""
     query_vector = None
     if query.strip():
-        import requests
-        url = f"{settings.LLM_SERVER_URL.strip().rstrip('/')}/v1/embeddings"
         try:
-            resp = requests.post(
-                url,
-                json={"model": llm_server.DEFAULT_EMBED_MODEL, "input": query},
-                timeout=30,
-            )
-            resp.raise_for_status()
-            query_vector = resp.json()["data"][0]["embedding"]
+            query_vector = llm_server.embed_sync(query, llm_server.DEFAULT_EMBED_MODEL)
         except Exception:
             query_vector = None
     return _query_chunks_hybrid(
