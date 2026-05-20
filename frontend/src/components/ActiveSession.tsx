@@ -104,6 +104,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     ai.stopInference(session.currentSession);
   }, [tester, ai, session.currentSession]);
 
+  // Pass the current globe state so rerun / edit-and-rerun re-invoke web_search
+  // when it was active for the original turn. Without this, the modes arg
+  // defaults to [] in useMessageActions and the tool gets silently gated out.
+  const currentModes = (webSearchAvailable && webSearchEnabled) ? ["web_search"] : [];
   const msgActions = useMessageActions(
     session.workspace,
     activeSessionKey,
@@ -112,6 +116,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     ai.sendMessage,
     session.navigateToSession,
     session.notifySessionCreated,
+    currentModes,
   );
 
   const onSubmit = useCallback(

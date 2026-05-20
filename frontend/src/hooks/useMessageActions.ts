@@ -8,9 +8,10 @@ export function useMessageActions(
   activeSessionKey: string,
   messages: Message[],
   replaceMessages: (workspaceSlug: string, sessionId: string, messages: Message[]) => void,
-  sendMessage: (text: string, sessionId: string | null, attachments?: string[], skipUserAdd?: boolean) => Promise<string>,
+  sendMessage: (text: string, sessionId: string | null, attachments?: string[], skipUserAdd?: boolean, modes?: string[]) => Promise<string>,
   navigateToSession: (id: string) => void,
   notifySessionCreated: (oldId: string, newId: string) => void,
+  currentModes: string[] = [],
 ) {
   const saveEdit = useCallback(async (msgId: string | undefined, index: number, newContent: string, rerun: boolean) => {
     if (!msgId || msgId.startsWith('temp-')) return;
@@ -47,11 +48,11 @@ export function useMessageActions(
         },
       );
 
-      if (rerun) sendMessage(newContent, activeSessionKey, [], true);
+      if (rerun) sendMessage(newContent, activeSessionKey, [], true, currentModes);
     } catch (err) {
       console.error("Message edit failed", err);
     }
-  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace]);
+  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace, currentModes]);
 
   const deleteMessage = useCallback(async (msgId: string | undefined, index: number) => {
     if (!msgId || msgId.startsWith('temp-')) return;
@@ -96,8 +97,8 @@ export function useMessageActions(
 
     const truncated = messages.slice(0, index);
     replaceMessages(workspace, activeSessionKey, truncated);
-    sendMessage(userMsg.content, activeSessionKey, [], true);
-  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace]);
+    sendMessage(userMsg.content, activeSessionKey, [], true, currentModes);
+  }, [messages, activeSessionKey, replaceMessages, sendMessage, workspace, currentModes]);
 
   return { deleteMessage, saveEdit, branchSession, rerunAssistant };
 }
