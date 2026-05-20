@@ -137,6 +137,13 @@ def _upstream_base() -> str:
     methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
 )
 async def proxy(path: str, request: Request) -> StreamingResponse:
+    # Reject relative segments. The catch-all path captures the URL verbatim;
+    # without this, an admin could request `/api/admin/engine/../foo` and the
+    # httpx client would resolve it against LLM_SERVER_URL — bounded today,
+    # but a path-rewriting bug upstream could turn this into intra-host SSRF.
+    if any(seg == ".." for seg in path.split("/")):
+        raise HTTPException(status_code=400, detail="Invalid proxy path.")
+
     base = _upstream_base()
     target_url = f"{base}/{path}"
     if request.url.query:
