@@ -117,8 +117,7 @@ def apply_modes(
     if directives:
         new_prompt = system_prompt + "\n\n" + "\n".join(directives)
 
-    # Tier hint: last-mode-wins if multiple modes request one. (No mode in v1
-    # uses this; reserved for code-mode etc.)
+    # Tier hint: last-mode-wins if multiple modes request one.
     tier_hint: Optional[str] = None
     for m in active:
         if m.tier_override:

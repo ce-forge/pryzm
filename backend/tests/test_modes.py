@@ -2,7 +2,8 @@
 
 A `Mode` is a small declarative bundle: which tools to force-include in the
 turn's tool set, an optional directive string appended to the system prompt,
-and an optional tier override for the router (unused by web_search v1).
+and an optional tier override for the router (consumed by web_search to route
+the synthesis turn to a web-tagged model).
 `apply_modes(tool_set, system_prompt, requested_modes)` returns a transformed
 (tool_set, system_prompt, tier_hint) tuple.
 """
@@ -186,9 +187,7 @@ def test_web_search_mode_carries_web_tier_override():
     """The shipped web_search mode declares tier_override='web' so the engine
     can route the synthesis turn to a web-tagged model. Round-trips through
     apply_modes."""
-    # Re-import to pick up the registered mode with the new field.
-    from core import modes as modes_module
-    assert modes_module.MODES["web_search"].tier_override == "web"
+    assert MODES["web_search"].tier_override == "web"
 
     # The real web_search tool is registered at import time; _make_tool_set
     # picks it up directly without a stub.
