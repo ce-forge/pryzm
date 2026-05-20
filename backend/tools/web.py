@@ -48,10 +48,10 @@ def _set_stats(**kwargs) -> None:
 
 
 _MAX_RESULTS = 8
-_DEFAULT_RESULTS = 5
+_DEFAULT_RESULTS = 3
 _PER_REQUEST_TIMEOUT_S = 8.0
 _FETCH_WALL_CLOCK_S = 25.0
-_MAX_CHARS_PER_PAGE = 6000
+_MAX_CHARS_PER_PAGE = 3000
 
 
 WEB_SEARCH_DIRECTIVE = (
@@ -92,6 +92,17 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     """Search the web via SearxNG, fetch the top hits, and return their extracted
     main content as structured per-source blocks ready for the model to cite."""
     capped = max(1, min(num_results, _MAX_RESULTS))
+
+    # Reset stats to a zero baseline at function entry. The engine reads
+    # get_last_stats() right after this coroutine returns; without the
+    # baseline reset, a tool cancellation (e.g. the engine's outer
+    # TOOL_TIMEOUT_SECONDS firing before we reach any later _set_stats
+    # call) would leave the previous call's stats in the stash and the
+    # audit row would silently misattribute them.
+    _set_stats(
+        k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
+        failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+    )
 
     # SearxNG call stays synchronous (requests library). It blocks the event
     # loop until the local SearxNG responds, but Pryzm is single-user and

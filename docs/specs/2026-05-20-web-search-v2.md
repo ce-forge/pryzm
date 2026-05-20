@@ -40,8 +40,8 @@ End-to-end, when the user sends a turn with the globe toggle on:
 1. Frontend sends `modes: ["web_search"]` in the inference request.
 2. Backend's `apply_modes()` activates the `web_search` mode, which force-includes the `web_search` tool and emits a `tier_override="web"` hint.
 3. The chat router picks a model. `stream_chat` consumes the tier hint: if a model carries the `web` tag, that model is used for this turn instead of the heuristic pick. If no model is tagged, the heuristic pick stands.
-4. Model invokes `web_search(query, num_results=5)`.
-5. Tool calls SearxNG, then fetches each result URL in parallel with a 25s wall-clock fetch budget (inside the engine's 30s outer tool timeout), extracts main content via trafilatura, caps each to 6000 chars.
+4. Model invokes `web_search(query, num_results=3)`.
+5. Tool calls SearxNG, then fetches each result URL in parallel with a 25s wall-clock fetch budget (inside the engine's 30s outer tool timeout), extracts main content via trafilatura in precision mode, caps each to 3000 chars.
 6. Tool returns one `### Source [N]: <title>` block per successful fetch with the URL on its own line and the extracted body below. Failed sources go in a `**Failed sources**` footer.
 7. Synthesis turn (same loop iteration's next LLM call) sees the structured blocks and the tool's `system_prompt_directive` telling it to cite each claim with `[N]` and end with a `**Sources**` footer.
 8. Frontend renders the tool-result block as a collapsed "Searched: 5 sources" pill; the assistant prose with inline `[N]` markers and the sources footer render through the normal markdown path.

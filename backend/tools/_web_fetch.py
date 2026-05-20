@@ -51,8 +51,8 @@ async def fetch_and_extract(
         extracted = trafilatura.extract(
             resp.text,
             include_comments=False,
-            include_tables=True,
-            favor_recall=False,
+            include_tables=False,
+            favor_precision=True,
         )
     except Exception:
         return FetchResult(url=url, ok=False, failure_reason="error")

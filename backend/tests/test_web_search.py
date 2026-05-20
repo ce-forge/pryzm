@@ -145,8 +145,8 @@ async def test_body_is_truncated_to_max_chars():
 
         out = await web_search("anything", num_results=1)
 
-    # Extracted body inside the Source block should not exceed ~6000 chars.
+    # Extracted body inside the Source block should not exceed ~3000 chars.
     # The block has small surrounding boilerplate so we check the body line
     # contains "Sentence." many times but the whole output stays bounded.
-    assert len(out) < 6500
+    assert len(out) < 3500
     assert "Sentence." in out
