@@ -74,6 +74,12 @@ def create_workspace(
     db: Session = Depends(database.get_db),
     user: models.User = Depends(cookie_auth.current_user),
 ):
+    if not user.is_admin and not user.can_create_workspaces:
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to create workspaces.",
+        )
+
     stripped_display_name = payload.display_name.strip()
 
     # Reject if this user already has a workspace with the same display name.
@@ -104,11 +110,7 @@ def create_workspace(
     engine_config = {"backend": "llama_cpp"}
 
     if payload.clone_from:
-        # NOTE: clone_from currently looks up by slug across all users —
-        # tests exercise cross-user cloning intentionally. Whether that
-        # leak is acceptable is a separate design question from the
-        # PATCH/DELETE scoping fix in this commit.
-        source = get_by_slug(db, payload.clone_from)
+        source = get_by_slug(db, payload.clone_from, user_id=user.id)
         system_prompt = source.system_prompt
         enabled_tools = list(source.enabled_tools or [])
         engine_config = dict(source.engine_config or engine_config)

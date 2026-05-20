@@ -91,4 +91,11 @@ class Settings(BaseSettings):
     # point is to diagnose the user's local network.
     NETWORK_TOOLS_ALLOW_PRIVATE: bool = False
 
+    # Session cookie Secure flag. Default False so plain-HTTP dev installs
+    # keep working out of the box (browser would otherwise drop the cookie
+    # and login appears to fail silently). Set PRYZM_COOKIE_SECURE=true on
+    # every TLS-fronted production deployment — this is part of the prod
+    # hardening checklist alongside flipping the password minimum length.
+    PRYZM_COOKIE_SECURE: bool = False
+
 settings = Settings()

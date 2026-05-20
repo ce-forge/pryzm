@@ -355,7 +355,16 @@ async def analyze_data(
         chat_session = None
 
         if request.session_id:
-            chat_session = db.query(models.Session).filter(models.Session.id == request.session_id).first()
+            chat_session = (
+                db.query(models.Session)
+                .filter(
+                    models.Session.id == request.session_id,
+                    models.Session.workspace_id == workspace.id,
+                )
+                .first()
+            )
+            if chat_session is None:
+                raise HTTPException(status_code=404, detail="Session not found.")
 
         if not chat_session:
             generated_title = await ai_engine.generate_title(http_client, request.prompt, engine_config=engine_config)

@@ -2,6 +2,7 @@
 instantiate templates for them, backfill existing chats/folders/workspaces.
 """
 import logging
+import secrets
 
 from sqlalchemy.orm import Session as DbSession
 
@@ -26,12 +27,20 @@ def ensure_bootstrap_admin(db: DbSession) -> models.User | None:
         password = env_password
         must_change = False
     else:
-        password = "admin"
+        # No env value: mint a random one-shot password instead of the
+        # historical default of "admin". Combined with must_change=True
+        # this gives a fresh install no predictable-credential window.
+        password = secrets.token_urlsafe(18)
         must_change = True
         logger.warning(
-            "Bootstrap admin created with default password 'admin' because "
-            "PRYZM_BOOTSTRAP_ADMIN_PASSWORD is unset. Change it via the admin "
-            "dashboard before exposing the app."
+            "=== PRYZM BOOTSTRAP ADMIN PASSWORD (one-shot, log-only) ===\n"
+            "username: %s\n"
+            "password: %s\n"
+            "This was generated because PRYZM_BOOTSTRAP_ADMIN_PASSWORD is "
+            "unset. Sign in once and the forced-change flow will require "
+            "you to pick a new one.",
+            settings.PRYZM_BOOTSTRAP_ADMIN_USERNAME,
+            password,
         )
 
     admin = models.User(

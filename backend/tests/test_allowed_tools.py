@@ -256,22 +256,23 @@ class TestPostWorkspacesClamp:
             app.dependency_overrides.clear()
 
     def test_cloning_blocked_when_source_exceeds_cap(self, db_session):
+        # The cloner owns the source workspace — clone_from is now scoped
+        # to the caller's own workspaces (S4). The test still asserts the
+        # tool-cap clamp fires when the source carries tools the user
+        # isn't allowed to have.
         try:
-            # Source workspace owned by someone else, has execute_ping
-            owner = _seed_user(db_session, "owner")
+            capped = _seed_user(db_session, "carol", allowed_tools=["web_search"])
             source = models.Workspace(
                 slug="src-clone-bad",
                 display_name="Source",
                 system_prompt="",
                 enabled_tools=["execute_ping"],
                 engine_config={"backend": "llama_cpp"},
-                user_id=owner.id,
+                user_id=capped.id,
                 owner_can_edit=True,
             )
             db_session.add(source); db_session.commit()
 
-            # Capped user clones it
-            capped = _seed_user(db_session, "carol", allowed_tools=["web_search"])
             c = _user_client(db_session, capped)
             r = c.post("/workspaces", json={
                 "display_name": "copy",
@@ -284,19 +285,18 @@ class TestPostWorkspacesClamp:
 
     def test_cloning_succeeds_when_source_within_cap(self, db_session):
         try:
-            owner = _seed_user(db_session, "owner2")
+            capped = _seed_user(db_session, "dave", allowed_tools=["web_search"])
             source = models.Workspace(
                 slug="src-clone-ok",
                 display_name="Source",
                 system_prompt="",
                 enabled_tools=["web_search"],
                 engine_config={"backend": "llama_cpp"},
-                user_id=owner.id,
+                user_id=capped.id,
                 owner_can_edit=True,
             )
             db_session.add(source); db_session.commit()
 
-            capped = _seed_user(db_session, "dave", allowed_tools=["web_search"])
             c = _user_client(db_session, capped)
             r = c.post("/workspaces", json={
                 "display_name": "copy ok",

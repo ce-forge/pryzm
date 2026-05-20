@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy.orm import Session as DbSession
 
+from config import settings
 from core import cookie_auth
 from core.audit import EventType, log_event
 from db import database, models
@@ -85,7 +86,7 @@ async def login(
         sid,
         max_age=int(cookie_auth.SESSION_IDLE_TIMEOUT.total_seconds()),
         httponly=True,
-        secure=False,  # set True behind TLS in production via env/config
+        secure=settings.PRYZM_COOKIE_SECURE,
         samesite="lax",
         path="/",
     )
