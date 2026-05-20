@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 import httpx
 
-from core.audit import EventType, log_event
+from core.audit import EventType, log_event, log_event_in_new_session
 from db import database, models
 from services import knowledge
 from config import settings
@@ -145,36 +145,6 @@ def _match_session_filename_mentions(
     finally:
         db.close()
 
-async def condense_chat_memory(
-    client: httpx.AsyncClient,
-    old_memory: str,
-    messages: list,
-    *,
-    engine_config: EngineConfig,
-) -> str:
-    """Runs asynchronously to summarize older messages and prevent context window overflow."""
-    chat_text = "\n".join([f"{m['role'].capitalize()}: {m['content']}" for m in messages if m['role'] in ['user', 'assistant']])
-
-    prompt = f"{MICRO_PROMPTS['memory_condenser_system']}\n\n"
-
-    if old_memory:
-        prompt += f"--- PREVIOUS MEMORY ---\n{old_memory}\n\n"
-    prompt += f"--- NEW CHAT HISTORY TO ADD ---\n{chat_text}\n"
-
-    try:
-        # Use the always-on small model. The on-demand tier may not fit
-        # in VRAM alongside reasoning-tier models that are resident, and
-        # summarisation doesn't need the larger model's capability.
-        response = await llm_server.generate(
-            client, prompt=prompt,
-            model=llm_server.DEFAULT_SMALL_CHAT_MODEL,
-            options={"num_ctx": 8192},
-        )
-        return response.strip()
-    except Exception as e:
-        print(f"Memory Condensation Failed: {e}")
-        return old_memory
-
 async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
     """Run one tool call from the agentic loop.
 
@@ -197,51 +167,6 @@ async def _execute_tool(tool_call: dict, workspace_tools: dict) -> str:
     if asyncio.iscoroutinefunction(func):
         return await func(**safe_args)
     return await asyncio.to_thread(func, **safe_args)
-
-
-def _audit_chat_event(
-    user_id: Optional[str],
-    workspace_id: str,
-    session_id: Optional[str],
-    event_type: str,
-    payload: dict,
-    resource_type: Optional[str] = None,
-    resource_id: Optional[str] = None,
-) -> None:
-    """Open a short-lived session, write one audit row, commit, close.
-
-    Used by stream_chat's tool loop and auto-RAG path. The router's DB
-    session is closed before the generator runs, so audit writes here
-    can't piggyback on it. Errors are swallowed — losing one chat audit
-    row should not break the user-visible response."""
-    audit_db = database.SessionLocal()
-    try:
-        user_obj = (
-            audit_db.query(models.User).filter_by(id=user_id).first()
-            if user_id
-            else None
-        )
-        ws_obj = audit_db.query(models.Workspace).filter_by(id=workspace_id).first()
-        sess_obj = (
-            audit_db.query(models.Session).filter_by(id=session_id).first()
-            if session_id
-            else None
-        )
-        log_event(
-            audit_db,
-            event_type,
-            user=user_obj,
-            workspace=ws_obj,
-            session=sess_obj,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            payload=payload,
-        )
-        audit_db.commit()
-    except Exception:
-        audit_db.rollback()
-    finally:
-        audit_db.close()
 
 
 async def stream_chat(
@@ -393,10 +318,10 @@ async def stream_chat(
                 if rag_data and rag_data.get("context"):
                     rag_context = rag_data["context"]
                     sources_list = rag_data["sources"]
-                    _audit_chat_event(
-                        user_id, workspace_id, session_id,
+                    log_event_in_new_session(
                         EventType.CHAT_RAG_RETRIEVED,
-                        {
+                        user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                        payload={
                             "query_preview": (rag_query or "")[:200],
                             "num_results": len(sources_list),
                             "source_filenames": list(sources_list),
@@ -616,10 +541,10 @@ async def stream_chat(
                             source_filenames = list(set(
                                 re.findall(r'\[from ([^\]]+)\]', result)
                             ))
-                        _audit_chat_event(
-                            user_id, workspace_id, session_id,
+                        log_event_in_new_session(
                             EventType.CHAT_RAG_RETRIEVED,
-                            {
+                            user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                            payload={
                                 "query_preview": str(audit_args.get("query", ""))[:200],
                                 "num_results": len(source_filenames),
                                 "source_filenames": source_filenames,
@@ -627,10 +552,10 @@ async def stream_chat(
                             },
                         )
                     elif func_name == "web_search":
-                        _audit_chat_event(
-                            user_id, workspace_id, session_id,
+                        log_event_in_new_session(
                             EventType.CHAT_WEB_SEARCH,
-                            {
+                            user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                            payload={
                                 "query_preview": str(audit_args.get("query", ""))[:200],
                                 "query_refined": str(_web_stats_snapshot.get("query_refined", ""))[:200],
                                 "k_requested": _web_stats_snapshot.get("k_requested", 0),
@@ -651,10 +576,10 @@ async def stream_chat(
                         }
                         if not succeeded and isinstance(result, str):
                             tool_payload["error_message"] = result[:200]
-                        _audit_chat_event(
-                            user_id, workspace_id, session_id,
+                        log_event_in_new_session(
                             EventType.CHAT_TOOL_INVOKED,
-                            tool_payload,
+                            user_id=user_id, workspace_id=workspace_id, session_id=session_id,
+                            payload=tool_payload,
                         )
 
                     # When search_knowledge_base returns chunks from image
@@ -766,30 +691,7 @@ async def stream_chat(
     except Exception as e:
         yield f"\n[Engine Error: {str(e)}]"
 
-async def generate_title(
-    client: httpx.AsyncClient,
-    prompt: str,
-    *,
-    engine_config: EngineConfig,
-) -> str:
-    clean_prompt = re.sub(r'\[Attached_File:.*?\]', '', prompt).strip()
-    if not clean_prompt:
-        return MICRO_PROMPTS["title_document_default"]
-
-    system_prompt = f"{MICRO_PROMPTS['title_generator_system']} Message: {clean_prompt}"
-
-    try:
-        text = await llm_server.generate(client, prompt=system_prompt, model=llm_server.DEFAULT_SMALL_CHAT_MODEL, options={"num_ctx": 4096})
-        text = text.strip(' \n"\'*.')
-        if not text:
-            return MICRO_PROMPTS["title_default"]
-        # Cap rather than discard — a 6-word title from the model is usually
-        # better than the first 3 words of the user's prompt. Truncate to
-        # 5 words + ellipsis only when the title is genuinely over-long.
-        title_words = text.split()
-        if len(title_words) > 5:
-            text = " ".join(title_words[:5]) + "..."
-        return text
-    except Exception:
-        words = clean_prompt.split()
-        return " ".join(words[:3]) + "..." if len(words) > 3 else MICRO_PROMPTS["title_default"]
+# generate_title lives in services/title.py — single-shot title call
+# isn't part of the agentic loop. Imports below keep callers working
+# through `ai_engine.generate_title` until the migration completes.
+from services.title import generate_title  # noqa: F401  (re-export)

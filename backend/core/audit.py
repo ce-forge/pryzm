@@ -11,12 +11,16 @@ as new domains land.
 """
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from fastapi import Request
 from sqlalchemy.orm import Session
 
-from db import models
+from db import database, models
+
+
+_log = logging.getLogger(__name__)
 
 
 class EventType:
@@ -126,3 +130,55 @@ def log_event(
     )
     db.add(event)
     return event
+
+
+def log_event_in_new_session(
+    event_type: str,
+    *,
+    user_id: Optional[str] = None,
+    workspace_id: Optional[str] = None,
+    session_id: Optional[str] = None,
+    resource_type: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    payload: Optional[dict[str, Any]] = None,
+) -> None:
+    """Open a short-lived DB session, write one audit row, commit, close.
+
+    For callers whose own DB session is already closed or unavailable —
+    notably the streaming generator in `ai_engine.stream_chat`, which
+    runs after the request handler's session was returned to the pool.
+    Looks the user/workspace/session up by id from the row references
+    so the audit row carries the same denormalised fields as a regular
+    `log_event` call. Errors are logged and swallowed: losing one chat
+    audit row should not break the user-visible response.
+    """
+    audit_db = database.SessionLocal()
+    try:
+        user_obj = (
+            audit_db.query(models.User).filter_by(id=user_id).first()
+            if user_id else None
+        )
+        ws_obj = (
+            audit_db.query(models.Workspace).filter_by(id=workspace_id).first()
+            if workspace_id else None
+        )
+        sess_obj = (
+            audit_db.query(models.Session).filter_by(id=session_id).first()
+            if session_id else None
+        )
+        log_event(
+            audit_db,
+            event_type,
+            user=user_obj,
+            workspace=ws_obj,
+            session=sess_obj,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            payload=payload,
+        )
+        audit_db.commit()
+    except Exception:
+        audit_db.rollback()
+        _log.exception("log_event_in_new_session failed for %s", event_type)
+    finally:
+        audit_db.close()
