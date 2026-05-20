@@ -6,6 +6,86 @@ import type { useSessionContext } from "@/context/SessionContext";
 
 type SessionApi = ReturnType<typeof useSessionContext>;
 
+/**
+ * Typed events parsed from the backend's NDJSON SSE stream. Each line
+ * arrives as a JSON object; `parseSseLine` is a pure mapper that turns
+ * those objects into one of these discriminated variants. Anything the
+ * stream loop doesn't act on returns `null` and is skipped.
+ */
+type StreamEvent =
+  | { kind: "started"; sessionId: string; userMessageId: string | null }
+  | { kind: "route"; isReasoning: boolean }
+  | { kind: "chunk"; content: string }
+  | { kind: "reasoning_chunk"; content: string }
+  | { kind: "reasoning_done"; durationS: number }
+  | { kind: "tool_call"; name: string; args: Record<string, unknown> }
+  | { kind: "tool_result"; result: string }
+  | { kind: "files_referenced"; files: ReferencedFile[] }
+  | { kind: "done"; assistantMessageId: string | null }
+  | { kind: "error"; message: string };
+
+function parseSseLine(parsed: unknown): StreamEvent | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const p = parsed as Record<string, unknown>;
+
+  if (typeof p.error === "string") {
+    return { kind: "error", message: p.error };
+  }
+
+  if (p.status === "started" && typeof p.session_id === "string") {
+    return {
+      kind: "started",
+      sessionId: p.session_id,
+      userMessageId: typeof p.user_message_id === "string" ? p.user_message_id : null,
+    };
+  }
+
+  if (p.done === true) {
+    return {
+      kind: "done",
+      assistantMessageId: typeof p.assistant_message_id === "string" ? p.assistant_message_id : null,
+    };
+  }
+
+  if (p.type === "route" && typeof p.is_reasoning === "boolean") {
+    return { kind: "route", isReasoning: p.is_reasoning };
+  }
+
+  if (p.type === "files_referenced" && Array.isArray(p.files)) {
+    return { kind: "files_referenced", files: p.files as ReferencedFile[] };
+  }
+
+  if (p.type === "tool_call" && typeof p.name === "string") {
+    return {
+      kind: "tool_call",
+      name: p.name,
+      args: (p.args as Record<string, unknown>) ?? {},
+    };
+  }
+
+  if (p.type === "tool_result") {
+    return { kind: "tool_result", result: typeof p.result === "string" ? p.result : "" };
+  }
+
+  if (p.type === "reasoning_chunk" && typeof p.chunk === "string") {
+    return { kind: "reasoning_chunk", content: p.chunk };
+  }
+
+  if (p.type === "reasoning_done" && typeof p.duration_s === "number") {
+    return { kind: "reasoning_done", durationS: p.duration_s };
+  }
+
+  // Plain content chunks have shape {chunk: "..."} with no `type` field.
+  // Typed events sometimes also carry a `chunk` field — those are handled
+  // above and must not fall through here, or reasoning text duplicates
+  // into the assistant content accumulator.
+  if (typeof p.chunk === "string" && p.type === undefined) {
+    return { kind: "chunk", content: p.chunk };
+  }
+
+  return null;
+}
+
 export interface InferenceApi {
   isProcessing: boolean;
   streamingContent: Record<string, string>;
@@ -77,6 +157,38 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
     [],
   );
 
+  // Walk the five streaming maps and copy the optimistic-keyed entry to
+  // the real-id key, then drop the optimistic key. Called once per send,
+  // the instant the backend hands back the real session id. Maps that
+  // weren't yet written for this send (e.g. tool-call map before any
+  // tool fires) skip via the `in` check.
+  const migrateStreamingMaps = useCallback((fromKey: string, toKey: string) => {
+    const migrate = <V,>(prev: Record<string, V>): Record<string, V> => {
+      if (!(fromKey in prev)) return prev;
+      const next = { ...prev, [toKey]: prev[fromKey] };
+      delete next[fromKey];
+      return next;
+    };
+    setStreamingContent(migrate);
+    setStreamingReasoning(migrate);
+    setStreamingIsReasoning(migrate);
+    setStreamingReasoningDurationS(migrate);
+    setStreamingToolCalls(migrate);
+  }, []);
+
+  const clearStreamingForSession = useCallback((sessionKey: string) => {
+    const drop = <V,>(prev: Record<string, V>): Record<string, V> => {
+      const next = { ...prev };
+      delete next[sessionKey];
+      return next;
+    };
+    setStreamingContent(drop);
+    setStreamingReasoning(drop);
+    setStreamingIsReasoning(drop);
+    setStreamingReasoningDurationS(drop);
+    setStreamingToolCalls(drop);
+  }, []);
+
   const sendMessage = useCallback(
     async (
       text: string,
@@ -93,6 +205,10 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
       const optimisticId = activeSessionId || newOptimisticSessionId();
       let realDbId: string | null = null;
+      // Single key every streaming-map write targets for this send. Starts
+      // as the optimistic id; flips to the real DB id atomically inside
+      // the `started` handler once the backend hands one back.
+      let liveKey = optimisticId;
       const ws = workspaceSlug;
 
       // Mark streaming BEFORE we touch the cache. The post-stream
@@ -102,16 +218,23 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
       // session is mid-stream by the time loadSessionData commits.
       sessionApi.streamingSessionIdsRef.current.add(optimisticId);
 
-      setStreamingContent((prev) => ({ ...prev, [optimisticId]: "" }));
-      setStreamingReasoning((prev) => ({ ...prev, [optimisticId]: "" }));
-      setStreamingIsReasoning((prev) => ({ ...prev, [optimisticId]: false }));
-      setStreamingReasoningDurationS((prev) => ({ ...prev, [optimisticId]: null }));
+      setStreamingContent((prev) => ({ ...prev, [liveKey]: "" }));
+      setStreamingReasoning((prev) => ({ ...prev, [liveKey]: "" }));
+      setStreamingIsReasoning((prev) => ({ ...prev, [liveKey]: false }));
+      setStreamingReasoningDurationS((prev) => ({ ...prev, [liveKey]: null }));
 
       let fullAssistantMessage = "";
       let fullReasoning = "";
       let reasoningDurationS: number | null = null;
       let referencedFiles: ReferencedFile[] | undefined;
       const pendingToolCalls: ToolCall[] = [];
+      // Index of the next unfilled tool_call awaiting a tool_result.
+      // The previous implementation walked pendingToolCalls backwards
+      // looking for result === "" — which mispairs whenever a tool
+      // legitimately returns the empty string. Backend emits one
+      // tool_result per tool_call in order, so a monotonic counter is
+      // the right primitive.
+      let nextToolResultIdx = 0;
       let pendingUserMessageId: string | null = null;
       let pendingAssistantMessageId: string | null = null;
 
@@ -145,7 +268,6 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
       const controller = new AbortController();
       abortControllersRef.current.set(optimisticId, controller);
-      // (streaming flag set near the top of sendMessage; nothing to do here)
 
       try {
         const res = await apiFetch(
@@ -180,164 +302,121 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
             lineBuffer = lines.pop() || "";
             for (const line of lines) {
               if (!line.trim()) continue;
+              let parsed: unknown;
               try {
-                const parsed = JSON.parse(line);
+                parsed = JSON.parse(line);
+              } catch {
+                continue;
+              }
+              const event = parseSseLine(parsed);
+              if (!event) continue;
 
-                if (parsed.error) {
-                  fullAssistantMessage = `⚠ ${parsed.error}`;
-                  setStreamingContent((prev) => {
-                    const next = { ...prev, [optimisticId]: fullAssistantMessage };
-                    if (realDbId !== null) next[realDbId] = fullAssistantMessage;
-                    return next;
-                  });
+              switch (event.kind) {
+                case "error": {
+                  fullAssistantMessage = `⚠ ${event.message}`;
+                  setStreamingContent((prev) => ({ ...prev, [liveKey]: fullAssistantMessage }));
                   break streamLoop;
                 }
 
-                // Backend now sends user_message_id alongside the started event
-                // when skip_db_save=false. Stash it; we apply the swap in
-                // `finally` so it lands once the bucket id is final.
-                if (parsed.status === "started" && parsed.user_message_id) {
-                  pendingUserMessageId = parsed.user_message_id;
-                }
-                if (parsed.done && parsed.assistant_message_id) {
-                  pendingAssistantMessageId = parsed.assistant_message_id;
-                }
+                case "started": {
+                  if (event.userMessageId) pendingUserMessageId = event.userMessageId;
 
-                // THE HANDOFF — atomic single migrate to the backend-returned id.
-                // Fires in two cases:
-                //   (a) brand-new chat: optimisticId → realDbId (the normal path).
-                //   (b) stale-id recovery: the URL had a session id we sent up,
-                //       but the backend couldn't find it (e.g. after a DB wipe
-                //       or a manual delete) and created a fresh one. The new id
-                //       differs from optimisticId; migrate so subsequent sends
-                //       in this turn target the real session instead of orphaning
-                //       another row.
-                if (
-                  parsed.status === "started" &&
-                  parsed.session_id &&
-                  parsed.session_id !== optimisticId
-                ) {
-                  const newDbId = parsed.session_id as string;
-                  realDbId = newDbId;
+                  // THE HANDOFF — atomic single migrate to the backend-returned id.
+                  // Fires in two cases:
+                  //   (a) brand-new chat: optimisticId → realDbId (the normal path).
+                  //   (b) stale-id recovery: the URL had a session id we sent up,
+                  //       but the backend couldn't find it (e.g. after a DB wipe
+                  //       or a manual delete) and created a fresh one. The new id
+                  //       differs from optimisticId; migrate so subsequent sends
+                  //       in this turn target the real session instead of orphaning
+                  //       another row.
+                  if (event.sessionId !== optimisticId) {
+                    const newDbId = event.sessionId;
+                    realDbId = newDbId;
 
-                  sessionApi.migrateBucket(ws, optimisticId, newDbId);
+                    sessionApi.migrateBucket(ws, optimisticId, newDbId);
 
-                  const ctrl = abortControllersRef.current.get(optimisticId);
-                  if (ctrl) abortControllersRef.current.set(newDbId, ctrl);
+                    const ctrl = abortControllersRef.current.get(optimisticId);
+                    if (ctrl) abortControllersRef.current.set(newDbId, ctrl);
 
-                  migratedIds.current.set(optimisticId, newDbId);
-                  sessionApi.streamingSessionIdsRef.current.add(newDbId);
+                    migratedIds.current.set(optimisticId, newDbId);
+                    sessionApi.streamingSessionIdsRef.current.add(newDbId);
 
-                  setStreamingContent((prev) => ({
-                    ...prev,
-                    [newDbId]: prev[optimisticId] ?? "",
-                  }));
-                  setStreamingReasoning((prev) => ({
-                    ...prev,
-                    [newDbId]: prev[optimisticId] ?? "",
-                  }));
-                  setStreamingIsReasoning((prev) => ({
-                    ...prev,
-                    [newDbId]: prev[optimisticId] ?? false,
-                  }));
-                  setStreamingReasoningDurationS((prev) => ({
-                    ...prev,
-                    [newDbId]: prev[optimisticId] ?? null,
-                  }));
+                    migrateStreamingMaps(optimisticId, newDbId);
+                    liveKey = newDbId;
 
-                  linkSessionRef.current?.(optimisticId, newDbId);
+                    linkSessionRef.current?.(optimisticId, newDbId);
 
-                  // Update the URL to the real DB session id BEFORE notifying
-                  // (which would otherwise trigger a loadSessionData against
-                  // the stale currentSession). Subsequent sends in the same
-                  // conversation rely on the URL being session-bound.
-                  if (typeof window !== "undefined") {
-                    const params = new URLSearchParams(window.location.search);
-                    const currentUrlId = params.get("session");
-                    if (!currentUrlId || currentUrlId === optimisticId) {
-                      sessionApi.navigateToSession(newDbId);
+                    // Update the URL to the real DB session id BEFORE notifying
+                    // (which would otherwise trigger a loadSessionData against
+                    // the stale currentSession). Subsequent sends in the same
+                    // conversation rely on the URL being session-bound.
+                    if (typeof window !== "undefined") {
+                      const params = new URLSearchParams(window.location.search);
+                      const currentUrlId = params.get("session");
+                      if (!currentUrlId || currentUrlId === optimisticId) {
+                        sessionApi.navigateToSession(newDbId);
+                      }
                     }
                   }
+                  break;
                 }
 
-                if (parsed.type === "files_referenced" && parsed.files) {
-                  referencedFiles = parsed.files;
+                case "done": {
+                  if (event.assistantMessageId) pendingAssistantMessageId = event.assistantMessageId;
+                  break;
                 }
 
-                if (parsed.type === "tool_call" && parsed.name) {
+                case "route": {
+                  const flag = event.isReasoning;
+                  setStreamingIsReasoning((prev) => ({ ...prev, [liveKey]: flag }));
+                  break;
+                }
+
+                case "files_referenced": {
+                  referencedFiles = event.files;
+                  break;
+                }
+
+                case "tool_call": {
                   pendingToolCalls.push({
-                    name: parsed.name,
-                    args: parsed.args ?? {},
+                    name: event.name,
+                    args: event.args,
                     result: "",
                   });
-                  setStreamingToolCalls((prev) => ({ ...prev, [optimisticId]: [...pendingToolCalls] }));
-                  if (realDbId !== null) {
-                    setStreamingToolCalls((prev) => ({ ...prev, [realDbId!]: [...pendingToolCalls] }));
+                  setStreamingToolCalls((prev) => ({ ...prev, [liveKey]: [...pendingToolCalls] }));
+                  break;
+                }
+
+                case "tool_result": {
+                  // Pair by ORDER via a monotonic counter so empty-string
+                  // results don't poison the lookup.
+                  if (nextToolResultIdx < pendingToolCalls.length) {
+                    pendingToolCalls[nextToolResultIdx].result = event.result;
+                    nextToolResultIdx += 1;
                   }
+                  setStreamingToolCalls((prev) => ({ ...prev, [liveKey]: [...pendingToolCalls] }));
+                  break;
                 }
 
-                if (parsed.type === "tool_result" && parsed.name) {
-                  // Pair by ORDER (back-to-front: complete the most recent
-                  // entry with empty result). Mirrors the backend pairing.
-                  for (let i = pendingToolCalls.length - 1; i >= 0; i--) {
-                    if (pendingToolCalls[i].result === "") {
-                      pendingToolCalls[i].result = parsed.result ?? "";
-                      break;
-                    }
-                  }
-                  setStreamingToolCalls((prev) => ({ ...prev, [optimisticId]: [...pendingToolCalls] }));
-                  if (realDbId !== null) {
-                    setStreamingToolCalls((prev) => ({ ...prev, [realDbId!]: [...pendingToolCalls] }));
-                  }
+                case "chunk": {
+                  fullAssistantMessage += event.content;
+                  setStreamingContent((prev) => ({ ...prev, [liveKey]: fullAssistantMessage }));
+                  break;
                 }
 
-                // Plain content chunks have shape {chunk: "..."} with no
-                // `type` field. Typed events (reasoning_chunk, tool_call,
-                // tool_result, files_referenced) also carry a `chunk` field
-                // in some cases — they must NOT be folded into the content
-                // accumulator, or reasoning text duplicates inside the
-                // assistant message body.
-                if (parsed.chunk && !parsed.type) {
-                  fullAssistantMessage += parsed.chunk;
-                  setStreamingContent((prev) => {
-                    const next = { ...prev, [optimisticId]: fullAssistantMessage };
-                    if (realDbId !== null) next[realDbId] = fullAssistantMessage;
-                    return next;
-                  });
+                case "reasoning_chunk": {
+                  fullReasoning += event.content;
+                  setStreamingReasoning((prev) => ({ ...prev, [liveKey]: fullReasoning }));
+                  break;
                 }
 
-                if (parsed.type === "reasoning_chunk" && parsed.chunk) {
-                  fullReasoning += parsed.chunk;
-                  setStreamingReasoning((prev) => {
-                    const next = { ...prev, [optimisticId]: fullReasoning };
-                    if (realDbId !== null) next[realDbId] = fullReasoning;
-                    return next;
-                  });
+                case "reasoning_done": {
+                  reasoningDurationS = event.durationS;
+                  const d = event.durationS;
+                  setStreamingReasoningDurationS((prev) => ({ ...prev, [liveKey]: d }));
+                  break;
                 }
-
-                if (parsed.type === "reasoning_done" && typeof parsed.duration_s === "number") {
-                  reasoningDurationS = parsed.duration_s;
-                  const d = parsed.duration_s as number;
-                  setStreamingReasoningDurationS((prev) => {
-                    const next = { ...prev, [optimisticId]: d };
-                    if (realDbId !== null) next[realDbId] = d;
-                    return next;
-                  });
-                }
-
-                // Backend emits this right after the router picks. Sets
-                // the per-session is_reasoning flag so the
-                // ProcessingAnimation can show `Thinking…` from the very
-                // first paint, before any reasoning chunks arrive.
-                if (parsed.type === "route" && typeof parsed.is_reasoning === "boolean") {
-                  setStreamingIsReasoning((prev) => {
-                    const next = { ...prev, [optimisticId]: parsed.is_reasoning };
-                    if (realDbId !== null) next[realDbId] = parsed.is_reasoning;
-                    return next;
-                  });
-                }
-              } catch {
-                /* malformed line, skip */
               }
             }
           }
@@ -368,40 +447,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
           pendingAssistantMessageId,
         );
 
-        setStreamingContent((prev) => {
-          const next = { ...prev };
-          delete next[optimisticId];
-          if (realDbId !== null) delete next[realDbId];
-          return next;
-        });
-
-        setStreamingReasoning((prev) => {
-          const next = { ...prev };
-          delete next[optimisticId];
-          if (realDbId !== null) delete next[realDbId];
-          return next;
-        });
-
-        setStreamingIsReasoning((prev) => {
-          const next = { ...prev };
-          delete next[optimisticId];
-          if (realDbId !== null) delete next[realDbId];
-          return next;
-        });
-
-        setStreamingReasoningDurationS((prev) => {
-          const next = { ...prev };
-          delete next[optimisticId];
-          if (realDbId !== null) delete next[realDbId];
-          return next;
-        });
-
-        setStreamingToolCalls((prev) => {
-          const next = { ...prev };
-          delete next[optimisticId];
-          if (realDbId !== null) delete next[realDbId];
-          return next;
-        });
+        clearStreamingForSession(liveKey);
 
         sessionApi.streamingSessionIdsRef.current.delete(optimisticId);
         if (realDbId !== null) sessionApi.streamingSessionIdsRef.current.delete(realDbId);
@@ -414,7 +460,7 @@ export function useInference(workspaceSlug: string, sessionApi: SessionApi): Inf
 
       return optimisticId;
     },
-    [workspaceSlug, sessionApi],
+    [workspaceSlug, sessionApi, migrateStreamingMaps, clearStreamingForSession],
   );
 
   const stopInference = useCallback((id?: string | null) => {

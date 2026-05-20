@@ -7,6 +7,8 @@ import { AuditEventDetailModal } from "@/components/admin/AuditEventDetailModal"
 import { EventTypeBadge } from "@/components/admin/EventTypeBadge";
 import Identicon from "@/components/Identicon";
 import { StatsPanel } from "@/components/admin/StatsPanel";
+import { payloadSummary } from "@/utils/auditPayload";
+import type { AdminUserRow } from "@/types/admin";
 
 interface AuditEvent {
   id: string;
@@ -19,11 +21,6 @@ interface AuditEvent {
   resource_id: string | null;
   payload: Record<string, unknown>;
   created_at: string | null;
-}
-
-interface AdminUserRow {
-  id: string;
-  username: string;
 }
 
 const TIME_PRESETS = [
@@ -334,12 +331,3 @@ function FilterColumn({
   );
 }
 
-function payloadSummary(payload: Record<string, unknown>): string {
-  if (!payload || Object.keys(payload).length === 0) return "—";
-  if (payload._truncated && typeof payload._preview === "string") {
-    return payload._preview;
-  }
-  // Compact JSON, trimmed.
-  const s = JSON.stringify(payload);
-  return s.length > 140 ? s.slice(0, 140) + "…" : s;
-}

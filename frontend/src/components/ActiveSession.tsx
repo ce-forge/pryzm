@@ -289,15 +289,11 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
         <ChatInput
           prompt={promptState.prompt}
           setPrompt={promptState.setPrompt}
-          uploads={uploader.uploads}
-          setUploads={uploader.setUploads}
           isProcessing={currentIsProcessing}
           isAutoTesting={currentIsTesting}
           handleInference={onSubmit}
           stopAutoTest={stopAllInference}
           handleKeyDown={(e) => promptState.handleKeyDown(e, onSubmit)}
-          runTestSuite={(type) => tester.runTestSuite(type, session.currentSession)}
-          processUploadQueue={(files) => uploader.processUploadQueue(files)}
           totalTokens={promptState.totalTokens}
           inputRef={textareaRef}
           webSearchAvailable={webSearchAvailable}

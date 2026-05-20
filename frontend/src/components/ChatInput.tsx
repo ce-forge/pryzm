@@ -3,6 +3,9 @@ import { FileUpload } from "@/types/chat";
 import { useOnClickOutside } from "@/hooks/useOnClickOutside";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
+import { useUploaderContext } from "@/context/UploaderContext";
+import { useTestSuiteContext } from "@/context/TestSuiteContext";
+import { useSessionMetaContext } from "@/context/SessionMetaContext";
 import { APP_CONFIG } from "@/utils/constants";
 import { apiFetch } from "@/utils/apiClient";
 import { PlusIcon, SendIcon, StopIcon, TerminalIcon, CancelIcon, DatabaseIcon, AlertIcon, GlobeIcon } from "./Icons";
@@ -49,15 +52,11 @@ function shortDisplayName(name: string): string {
 interface ChatInputProps {
   prompt: string;
   setPrompt: (p: string) => void;
-  uploads: FileUpload[];
-  setUploads: React.Dispatch<React.SetStateAction<FileUpload[]>>;
   isProcessing: boolean;
   isAutoTesting: boolean;
   handleInference: (e?: React.FormEvent) => void;
   stopAutoTest: () => void;
   handleKeyDown: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
-  runTestSuite: (type: "it_demo" | "memory_test" | "tool_chain") => void;
-  processUploadQueue: (files: FileUpload[]) => void;
   totalTokens: number;
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   webSearchAvailable: boolean;
@@ -66,13 +65,16 @@ interface ChatInputProps {
 }
 
 export default function ChatInput({
-  prompt, setPrompt, uploads, setUploads, isProcessing, isAutoTesting,
-  handleInference, stopAutoTest, handleKeyDown, runTestSuite,
-  processUploadQueue, totalTokens, inputRef,
+  prompt, setPrompt, isProcessing, isAutoTesting,
+  handleInference, stopAutoTest, handleKeyDown,
+  totalTokens, inputRef,
   webSearchAvailable, webSearchEnabled, setWebSearchEnabled,
 }: ChatInputProps) {
   const { user } = useAuth();
   const isAdmin = !!user?.is_admin;
+  const { uploads, setUploads, processUploadQueue } = useUploaderContext();
+  const tester = useTestSuiteContext();
+  const { currentSession } = useSessionMetaContext();
 
   const [isDragging, setIsDragging] = useState(false);
   const [showTestMenu, setShowTestMenu] = useState(false);
@@ -297,9 +299,9 @@ export default function ChatInput({
                         {showTestMenu && !isAutoTesting && (
                           <div className="absolute bottom-[110%] left-0 mb-2 w-48 bg-[#282a2c] border border-[#333537] rounded-2xl shadow-2xl z-50 py-2 overflow-hidden animate-in fade-in slide-in-from-bottom-2">
                             <div className="px-4 py-1 text-[10px] font-bold text-gray-500 uppercase tracking-widest border-b border-white/5 mb-1">Diagnostics</div>
-                            <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('it_demo'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run IT Demo</button>
-                            <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('memory_test'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Context Test</button>
-                            <button type="button" onClick={() => { setShowTestMenu(false); runTestSuite('tool_chain'); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Tool Chain</button>
+                            <button type="button" onClick={() => { setShowTestMenu(false); tester.runTestSuite('it_demo', currentSession); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run IT Demo</button>
+                            <button type="button" onClick={() => { setShowTestMenu(false); tester.runTestSuite('memory_test', currentSession); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Context Test</button>
+                            <button type="button" onClick={() => { setShowTestMenu(false); tester.runTestSuite('tool_chain', currentSession); }} className="w-full text-left px-4 py-2 text-xs hover:bg-[#333537] text-gray-300 transition-colors">Run Tool Chain</button>
                           </div>
                         )}
                       </>

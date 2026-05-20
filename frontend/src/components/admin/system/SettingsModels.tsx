@@ -2,6 +2,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { apiFetch } from "@/utils/apiClient";
 import { HuggingFaceSearch } from "@/components/admin/system/HuggingFaceSearch";
+import { useModelDownloadStream } from "@/hooks/useModelDownloadStream";
 
 type Model = {
   id: string;
@@ -28,12 +29,6 @@ export default function ModelsSection() {
   const [prefillFilename, setPrefillFilename] = useState<string | null>(null);
   const [prefillSize, setPrefillSize] = useState<number | null>(null);
   const [prefillBlobHash, setPrefillBlobHash] = useState<string | null>(null);
-  const [downloadId, setDownloadId] = useState<string | null>(null);
-  const [downloadLog, setDownloadLog] = useState<string[]>([]);
-  const [downloadStatus, setDownloadStatus] = useState<"streaming" | "loaded" | "error">("streaming");
-  const [downloadErr, setDownloadErr] = useState<string | null>(null);
-  const [downloadProgress, setDownloadProgress] = useState<{ bytes: number; total: number } | null>(null);
-  const sseRef = useRef<AbortController | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback(async () => {
@@ -49,6 +44,16 @@ export default function ModelsSection() {
       setIsLoading(false);
     }
   }, []);
+
+  const {
+    id: downloadId,
+    log: downloadLog,
+    status: downloadStatus,
+    err: downloadErr,
+    progress: downloadProgress,
+    start: startDownloadStream,
+    cancel: cancelDownload,
+  } = useModelDownloadStream({ onLoaded: refresh });
 
   // Initial + dep-change refresh of the models list. setState happens
   // inside `refresh`; the lint rule flags any call that ultimately
@@ -94,59 +99,6 @@ export default function ModelsSection() {
     }
   };
 
-  const startDownloadStream = useCallback(async (id: string) => {
-    setDownloadId(id);
-    setDownloadLog([]);
-    setDownloadStatus("streaming");
-    setDownloadErr(null);
-    setDownloadProgress(null);
-    const ac = new AbortController();
-    sseRef.current = ac;
-
-    try {
-      const res = await apiFetch(`/api/admin/models/${encodeURIComponent(id)}/status`, {
-        signal: ac.signal,
-      });
-      if (!res.ok || !res.body) throw new Error(`status stream HTTP ${res.status}`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let nl;
-        while ((nl = buf.indexOf("\n")) !== -1) {
-          const line = buf.slice(0, nl).trim();
-          buf = buf.slice(nl + 1);
-          if (!line) continue;
-          let evt: {
-            log?: string;
-            status?: string;
-            detail?: string;
-            progress?: { bytes: number; total: number };
-          };
-          try { evt = JSON.parse(line); } catch { continue; }
-          if (evt.log) setDownloadLog(prev => [...prev, evt.log!]);
-          if (evt.progress) setDownloadProgress(evt.progress);
-          if (evt.status === "loaded") { setDownloadStatus("loaded"); refresh(); }
-          if (evt.status === "error") { setDownloadStatus("error"); setDownloadErr(evt.detail || "unknown error"); }
-        }
-      }
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") {
-        setDownloadStatus("error");
-        setDownloadErr((e as Error).message);
-      }
-    }
-  }, [refresh]);
-
-  const cancelDownload = () => {
-    sseRef.current?.abort();
-    sseRef.current = null;
-    setDownloadId(null);
-  };
-
   // Hard-cancel: abort the watcher AND delete the model entry so the
   // partial download stops on the llama-swap side. SIGHUP kills the
   // running llama-server process for that model id, which kills its
@@ -159,8 +111,7 @@ export default function ModelsSection() {
         `stay cached on disk and resume if you re-add the same file later.`,
     );
     if (!ok) return;
-    sseRef.current?.abort();
-    sseRef.current = null;
+    cancelDownload();
     try {
       const res = await apiFetch(`/api/admin/models/${encodeURIComponent(id)}`, {
         method: "DELETE",
@@ -172,7 +123,6 @@ export default function ModelsSection() {
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
-    setDownloadId(null);
     refresh();
   };
 
