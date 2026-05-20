@@ -91,6 +91,12 @@ class Settings(BaseSettings):
     # point is to diagnose the user's local network.
     NETWORK_TOOLS_ALLOW_PRIVATE: bool = False
 
+    # get_public_ip() reaches out to api.ipify.org to discover the box's
+    # external IP. Defaults False so installs that opted out of egress
+    # diagnostics don't surprise the operator with outbound traffic on this
+    # one tool. Flip to True when public IP discovery is intentionally desired.
+    NETWORK_TOOLS_ALLOW_PUBLIC_IP: bool = False
+
     # Session cookie Secure flag. Default False so plain-HTTP dev installs
     # keep working out of the box (browser would otherwise drop the cookie
     # and login appears to fail silently). Set PRYZM_COOKIE_SECURE=true on

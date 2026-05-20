@@ -200,6 +200,11 @@ def ssl_inspect(hostname: str) -> str:
 @tool(properties={}, required=[])
 def get_public_ip() -> str:
     """Fetches the external Public IP Address of the network you are currently running on."""
+    if not settings.NETWORK_TOOLS_ALLOW_PUBLIC_IP:
+        return (
+            "Public IP lookup is disabled. Set NETWORK_TOOLS_ALLOW_PUBLIC_IP=true "
+            "to enable outbound egress to api.ipify.org for this tool."
+        )
     try:
         ip = requests.get('https://api.ipify.org', timeout=5).text
         return f"Your current Public IP Address is: {ip}"
