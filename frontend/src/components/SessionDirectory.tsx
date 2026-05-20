@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from "react";
 import { v4 as uuid } from "uuid";
-import { useSessionContext } from "@/context/SessionContext";
+import { useSessionMetaContext } from "@/context/SessionMetaContext";
 import { apiFetch } from "@/utils/apiClient";
 import SessionItem from "./SessionItem";
 import ConfirmModal from "./ConfirmModal";
@@ -23,7 +23,7 @@ interface FolderInfo {
 }
 
 export default function SessionDirectory() {
-  const session = useSessionContext();
+  const session = useSessionMetaContext();
 
   const workspace = session.workspace;
   const currentSessionId = session.currentSession;

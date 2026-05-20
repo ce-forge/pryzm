@@ -2,7 +2,7 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
-import { useSessionContext } from "@/context/SessionContext";
+import { useSessionMetaContext } from "@/context/SessionMetaContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWorkspaceContext } from "@/context/WorkspaceContext";
 import SessionDirectory from "./SessionDirectory";
@@ -19,7 +19,7 @@ interface SidebarProps {
 }
 
 export default function Sidebar({ isOpen, setIsOpen }: SidebarProps) {
-  const session = useSessionContext();
+  const session = useSessionMetaContext();
   const { user, logout } = useAuth();
   const { activeWorkspace } = useWorkspaceContext();
   const [showBugModal, setShowBugModal] = useState(false);

@@ -19,7 +19,19 @@ export function TestSuiteProvider({ children }: { children: React.ReactNode }) {
     return () => inference.setLinkSessionCallback(null);
   }, [inference, tester.linkSession]);
 
-  const value = useMemo(() => tester, [tester]);
+  // Memoise on the hook's output keys, not on the wrapper object itself —
+  // useTestSuite returns a fresh object every render, so a `[tester]` dep
+  // would trip on every parent render. `runTestSuite` and `stopTestSuite`
+  // are inline-recreated by the hook today; this memo recomputes when
+  // they do, which is correct (and as good as we can get without
+  // restructuring useTestSuite — F6's scope is provider-level).
+  // exhaustive-deps would suggest `tester` — the wrapper that recreates
+  // every render, which is what we're trying to dodge.
+  const value = useMemo(
+    () => tester,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tester.activeTestSessions, tester.runTestSuite, tester.stopTestSuite, tester.linkSession],
+  );
   return <TestSuiteContext.Provider value={value}>{children}</TestSuiteContext.Provider>;
 }
 
