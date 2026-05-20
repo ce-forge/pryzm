@@ -446,10 +446,14 @@ class TestPatchWorkspacesClamp:
 # ---------------------------------------------------------------------------
 
 class TestApplyCreateClamp:
-    """The create action via /apply silently drops tools the target user
-    isn't allowed to have, mirroring the push/update path. The modal
-    surfaces this via the `dropped_tools` field on each outcome so admin
-    sees what was filtered."""
+    """The create action via /apply is the STRICT site (spec:
+    2026-05-19-per-user-allowed-tools.md): instantiate refuses to spawn a
+    fresh workspace carrying tools the target user is barred from. The
+    user is surfaced via the `rejections` list rather than a silent
+    filter — admin sees the row and can either widen the cap or pick a
+    different template. The update/adopt actions remain filter sites for
+    continuity reasons.
+    """
     def _make_template(self, db_session, slug, enabled_tools):
         t = models.WorkspaceTemplate(
             slug=slug,
@@ -476,20 +480,29 @@ class TestApplyCreateClamp:
             body = r.json()
             assert body["outcomes"][0]["action"] == "create"
             assert body["outcomes"][0]["dropped_tools"] == []
+            assert body["rejections"] == []
         finally:
             app.dependency_overrides.clear()
 
-    def test_create_drops_tools_when_template_exceeds_cap(self, db_session):
+    def test_create_rejects_when_template_exceeds_cap(self, db_session):
+        """Strict site: instantiate refuses to silently drop tools."""
         try:
             c, _ = _admin_client(db_session)
             target = _seed_user(db_session, "bob", allowed_tools=["web_search"])
             t = self._make_template(db_session, "t2", ["web_search", "execute_ping"])
             r = self._create(c, t.id, target.id)
             assert r.status_code == 200, r.text
-            outcome = r.json()["outcomes"][0]
-            assert outcome["dropped_tools"] == ["execute_ping"]
-            ws = db_session.query(models.Workspace).filter_by(id=outcome["workspace_id"]).one()
-            assert ws.enabled_tools == ["web_search"]
+            body = r.json()
+            assert body["outcomes"] == []
+            assert len(body["rejections"]) == 1
+            rej = body["rejections"][0]
+            assert rej["user_id"] == target.id
+            assert rej["reason"] == "disallowed_tools"
+            # No workspace was created.
+            count = db_session.query(models.Workspace).filter_by(
+                user_id=target.id, slug="t2",
+            ).count()
+            assert count == 0
         finally:
             app.dependency_overrides.clear()
 
