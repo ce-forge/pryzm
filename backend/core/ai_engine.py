@@ -278,9 +278,9 @@ async def stream_chat(
     # `== AVAILABLE TOOLS ==` directive block. Always called — even with an
     # empty `modes` list — because apply_modes runs the gating pass that
     # hides mode-gated tools (web_search) when their mode isn't active.
-    # (Tier hint from modes is captured but not consumed in v1 — no shipped
-    # mode sets one.)
-    tool_set, system_prompt_raw, tier_hint_from_modes = apply_modes(
+    # The tier_hint return value is captured but unused — no shipped mode
+    # currently sets `tier_override`; the seam stays for future modes.
+    tool_set, system_prompt_raw, _tier_hint_unused = apply_modes(
         tool_set, system_prompt_raw, modes or [],
     )
 
@@ -329,6 +329,10 @@ async def stream_chat(
             prompt_len=len(prompt_for_routing),
         )
     else:
+        # Escalation re-entry — tier was passed in explicitly. Mode tier
+        # overrides do NOT apply here: escalation is a stronger signal
+        # ("this turn needs more compute") than a mode's default-model
+        # preference, so we honour the escalated tier verbatim.
         routed_model = router.small if tier is Tier.SMALL else router.large
 
     # Only models tagged `reasoning` in the catalog have their
@@ -582,6 +586,16 @@ async def stream_chat(
                         result = f"Tool execution failed: {str(tool_err)}"
                         had_tool_error = True
 
+                    # Snapshot tool-specific observability stats BEFORE the
+                    # yield. The yield suspends the generator and lets other
+                    # concurrent /analyze requests run their own tool calls,
+                    # which would overwrite a module-level stash like
+                    # tools.web._LAST_STATS before we read it.
+                    _web_stats_snapshot: dict = {}
+                    if func_name == "web_search":
+                        from tools.web import get_last_stats as _web_stats
+                        _web_stats_snapshot = _web_stats()
+
                     yield {"type": "tool_result", "name": func_name, "result": result}
 
                     # Emit specialized audit event per tool — search_knowledge_base
@@ -613,18 +627,20 @@ async def stream_chat(
                             },
                         )
                     elif func_name == "web_search":
-                        result_urls = (
-                            re.findall(r'https?://\S+', result)
-                            if isinstance(result, str)
-                            else []
-                        )
                         _audit_chat_event(
                             user_id, workspace_id, session_id,
                             EventType.CHAT_WEB_SEARCH,
                             {
                                 "query_preview": str(audit_args.get("query", ""))[:200],
-                                "num_results": len(result_urls),
-                                "result_urls": result_urls,
+                                "query_refined": str(_web_stats_snapshot.get("query_refined", ""))[:200],
+                                "k_requested": _web_stats_snapshot.get("k_requested", 0),
+                                "k_returned_by_searxng": _web_stats_snapshot.get("k_returned_by_searxng", 0),
+                                "k_fetched_ok": _web_stats_snapshot.get("k_fetched_ok", 0),
+                                "k_failed": _web_stats_snapshot.get("k_failed", 0),
+                                "failure_reasons": _web_stats_snapshot.get("failure_reasons", {}),
+                                "fetch_wall_clock_ms": _web_stats_snapshot.get("fetch_wall_clock_ms", 0),
+                                "extracted_bytes_total": _web_stats_snapshot.get("extracted_bytes_total", 0),
+                                "synthesis_model_id": routed_model,
                             },
                         )
                     else:

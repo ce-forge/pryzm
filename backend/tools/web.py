@@ -1,16 +1,128 @@
-"""Web search tool — queries a locally-hosted SearxNG instance.
+"""Web search tool — SearxNG + per-page fetch + extraction.
 
-SearxNG runs as a docker-compose service (see infra/searxng/settings.yml). The
-tool calls its JSON API and returns a compact markdown list of the top-N hits
-so the LLM can cite URLs in its reply. Failures degrade to a one-line error
-string rather than raising — the LLM falls back to local knowledge.
+The tool calls a locally-hosted SearxNG instance for the top-K hits, then
+fetches each URL in parallel and extracts main content via trafilatura. Output
+is a sequence of structured `### Source [N]: <title>` blocks for the chat
+model to cite. Per-source failures (timeout, 4xx, 5xx, non-HTML, empty
+extraction) are listed in a `**Failed sources**` footer so the model can
+caveat without aborting the turn.
+
+Wall-clock budget for the *fetch loop* is 25s — under the engine's
+`TOOL_TIMEOUT_SECONDS=30` so the inner budget trips first and the tool returns
+a structured error rather than getting cancelled by the outer guard. The
+SearxNG call runs before the fetch loop and uses its own timeout; a slow
+SearxNG can eat into the engine's outer budget.
 """
 from __future__ import annotations
 
+import asyncio
+import time
+
+import httpx
 import requests
 
 from config import settings
+from tools._web_fetch import FetchResult, fetch_and_extract
+from tools._web_query import refine_query
+from tools._web_rerank import rerank_chunks_by_query, split_into_chunks
+from tools._web_truncate import truncate_to_sentences
 from .registry import tool
+
+
+# Per-call stats stash for the engine's audit emission. Module-level and
+# single-flight by design — the engine reads `get_last_stats()` synchronously
+# right after `web_search` returns (no `await`/`yield` in between) and
+# snapshots into a local. Without that synchronous snapshot, a concurrent
+# /analyze request's `web_search` could overwrite the stash between
+# completion and read. Don't paper over this with a lock — fix the call
+# site to snapshot.
+_LAST_STATS: dict = {}
+
+
+def get_last_stats() -> dict:
+    """Return the stats dict from the most recent web_search call."""
+    return dict(_LAST_STATS)
+
+
+def _set_stats(**kwargs) -> None:
+    _LAST_STATS.clear()
+    _LAST_STATS.update(kwargs)
+
+
+_MAX_RESULTS = 8
+_DEFAULT_RESULTS = 3
+_PER_REQUEST_TIMEOUT_S = 8.0
+_FETCH_WALL_CLOCK_S = 25.0
+_MAX_CHARS_PER_PAGE = 3000
+
+
+# Word list for the SearxNG time_range heuristic. The presence of any of
+# these in the refined query nudges SearxNG to a recency-biased ranking
+# (`time_range=month`).
+#
+# Short-window words ("today", "this week", "yesterday") are INTENTIONALLY
+# excluded. They're already strong keyword signals SearxNG ranks on directly;
+# adding a time_range filter on top double-restricts and excludes evergreen
+# URLs (e.g. nrl.com/draw, a static URL that always carries the current
+# round's fixtures) which are exactly the right answer for those queries.
+#
+# Historical phrasings ("Q1 2025", "March 2023") are also absent — they
+# don't need recency biasing and would be hurt by it.
+_RECENCY_WORDS = (
+    "current", "latest", "recent", "recently", "now",
+    "this month", "upcoming", "new ", "newly", "fresh",
+)
+
+
+def _detect_time_range(query: str) -> str | None:
+    """Return SearxNG `time_range=month` when the query carries a recency
+    signal, else None. Case-insensitive substring match — false positives
+    cost only a slightly more-recent ranking; false negatives cost the
+    freshness signal we wanted."""
+    if not query:
+        return None
+    q = query.lower()
+    if any(w in q for w in _RECENCY_WORDS):
+        return "month"
+    return None
+
+
+WEB_SEARCH_DIRECTIVE = (
+    "Use `web_search` whenever the answer depends on the current date, time, "
+    "or location — not just for facts that are evergreen knowledge from "
+    "training. Weather, traffic, exchange rates, store hours, today's news, "
+    "scheduled events, current prices, sports results, recent vendor releases, "
+    "and newly-published docs all qualify. Do NOT use it for questions "
+    "answerable from local knowledge-base documents or general background "
+    "knowledge.\n"
+    "For comparison or multi-entity questions (\"which is better, A or B\", "
+    "\"A vs B\", \"compare A and B\"):\n"
+    "  1. Start with a single combined search. Raise `num_results` to 5 or "
+    "more to widen the source pool for breadth.\n"
+    "  2. BEFORE writing your final reply, list each entity the user named "
+    "and check that the search results contain at least one authoritative "
+    "source for EACH (canonical wiki / docs / spec page — opinions and "
+    "third-party comparison blogs don't count as authoritative).\n"
+    "  3. If any entity is missing an authoritative source, you MUST issue a "
+    "follow-up `web_search` for that entity specifically — in the SAME turn, "
+    "before writing your reply. You can call `web_search` multiple times per "
+    "turn; do so when the first call left a side uncovered.\n"
+    "  4. Only after every entity has authoritative coverage, synthesise.\n"
+    "Skip steps 3-4 only when the single combined search already produced "
+    "authoritative data on every side. Don't over-search; don't under-search.\n"
+    "Results are returned as one or more `### Source [N]: <title>` blocks, each "
+    "containing the source URL on its own line and an extracted page body below. "
+    "Source numbering restarts at [1] within each `web_search` call — if you "
+    "issue multiple calls in one turn, cite using the source index from the "
+    "call that supplied the fact (e.g. \"the Eye of Ayak wiki page states... [1]\"). "
+    "When writing your reply, cite every factual claim by appending `[N]` "
+    "referring to the source index. Do not cite sources you did not use. The "
+    "user's UI shows the source list separately, so do NOT write a `**Sources**` "
+    "footer or list URLs in your reply — only the inline `[N]` markers. The "
+    "tool output begins with a `**Searched as:**` line and may end with a "
+    "`**Failed sources**` block — both are internal metadata. Do not echo "
+    "them in your reply."
+)
 
 
 @tool(
@@ -21,40 +133,175 @@ from .registry import tool
         },
         "num_results": {
             "type": "integer",
-            "description": "How many top hits to return (default 3, max 5).",
+            "description": (
+                "How many top hits to fetch and read (default 3, max 8). "
+                "Raise this to 5-8 for comparison or deep-dive questions "
+                "where you want more source coverage in a single call. "
+                "Each result adds one page-fetch round to the wall-clock budget."
+            ),
         },
     },
     required=["query"],
     workspaces=["it_copilot", "personal"],
-    system_prompt_directive=(
-        "Use `web_search` only for factual questions whose answer may have "
-        "changed since training (current events, recent vendor releases, "
-        "newly-published docs, news). Do NOT use it for questions answerable "
-        "from local knowledge-base documents or general background knowledge."
-    ),
+    system_prompt_directive=WEB_SEARCH_DIRECTIVE,
 )
-def web_search(query: str, num_results: int = 3) -> str:
-    """Search the web via SearxNG and return the top results as markdown."""
-    capped = max(1, min(num_results, 5))
+async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
+    """Search the web via SearxNG, fetch the top hits, and return their extracted
+    main content as structured per-source blocks ready for the model to cite."""
+    capped = max(1, min(num_results, _MAX_RESULTS))
+
+    # Reset stats to a zero baseline at function entry. The engine reads
+    # get_last_stats() right after this coroutine returns; without the
+    # baseline reset, a tool cancellation (e.g. the engine's outer
+    # TOOL_TIMEOUT_SECONDS firing before we reach any later _set_stats
+    # call) would leave the previous call's stats in the stash and the
+    # audit row would silently misattribute them.
+    _set_stats(
+        k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
+        failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+        query_raw=query, query_refined=query,
+    )
+
+    # Refine the search query via the always-on small model: fixes typos,
+    # strips filler, preserves user intent (including time words). Falls back
+    # to the raw query on any failure — never blocks the tool turn.
+    async with httpx.AsyncClient() as refine_client:
+        refined_query = await refine_query(refine_client, query)
+
+    # SearxNG `time_range` filter when the query carries a recency signal —
+    # heavily improves freshness on currency-sensitive queries ("latest X",
+    # "current Y", "this week's Z"). Historical references ("Q1 2025",
+    # "March 2023") do NOT match these words, so they're left unfiltered.
+    search_params: dict[str, str] = {
+        "q": refined_query, "format": "json", "language": "en",
+    }
+    time_range = _detect_time_range(refined_query)
+    if time_range:
+        search_params["time_range"] = time_range
+
+    # SearxNG call stays synchronous (requests library). It blocks the event
+    # loop until the local SearxNG responds, but Pryzm is single-user and
+    # SearxNG is on the same host — the blocking window is sub-second in
+    # practice. Switching to httpx would make this awaitable but buys no
+    # real concurrency for this single-user workload.
     try:
         resp = requests.get(
             f"{settings.SEARXNG_URL}/search",
-            params={"q": query, "format": "json", "language": "en"},
+            params=search_params,
             timeout=settings.TOOL_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
         payload = resp.json()
     except requests.RequestException as exc:
+        _set_stats(
+            k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
+            failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+            query_raw=query, query_refined=refined_query,
+        )
         return f"Web search failed: {exc}"
 
     hits = (payload.get("results") or [])[:capped]
     if not hits:
-        return f"No results for {query!r}."
+        _set_stats(
+            k_requested=capped, k_returned_by_searxng=len(hits), k_fetched_ok=0, k_failed=0,
+            failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+            query_raw=query, query_refined=refined_query,
+        )
+        return f"No results for {refined_query!r}."
 
-    lines = [f"Top {len(hits)} results for {query!r}:"]
-    for i, hit in enumerate(hits, 1):
-        title = hit.get("title", "(no title)")
-        url = hit.get("url", "")
-        snippet = (hit.get("content") or "").strip()
-        lines.append(f"{i}. **{title}**\n   {url}\n   {snippet}")
-    return "\n\n".join(lines)
+    urls_titles = [(h.get("url", ""), h.get("title", "(no title)")) for h in hits]
+
+    # Fetch all URLs in parallel under a single wall-clock budget. asyncio.wait_for
+    # cancels the gather on timeout, discarding even already-completed fetches —
+    # so a single 25s straggler in a batch of 8 wipes out the other 7. A
+    # shield-based variant could collect partials; v1 accepts the simpler
+    # all-or-timeout shape and marks every URL as `timeout` on cancellation.
+    results: list[FetchResult] = []
+    fetch_t0 = time.monotonic()
+    try:
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                *(fetch_and_extract(url, _PER_REQUEST_TIMEOUT_S) for url, _ in urls_titles)
+            ),
+            timeout=_FETCH_WALL_CLOCK_S,
+        )
+    except asyncio.TimeoutError:
+        results = [FetchResult(url=url, ok=False, failure_reason="timeout") for url, _ in urls_titles]
+    fetch_wall_clock_ms = int((time.monotonic() - fetch_t0) * 1000)
+
+    successes_raw: list[tuple[str, str, str]] = []  # (title, url, raw_body)
+    failures: list[tuple[str, str]] = []  # (url, reason)
+    for (url, title), fr in zip(urls_titles, results):
+        if fr.ok:
+            successes_raw.append((title, url, fr.body))
+        else:
+            failures.append((url, fr.failure_reason or "error"))
+
+    # Embedding-based rerank: per-source, keep only chunks semantically similar
+    # to the query. Drops sidebars / related-articles / off-topic content that
+    # trafilatura preserved. Falls back to raw-body truncation on any embed
+    # failure (network, model unloaded) — never blocks synthesis.
+    successes: list[tuple[str, str, str]] = []
+    if successes_raw:
+        async with httpx.AsyncClient() as embed_client:
+            for title, url, raw_body in successes_raw:
+                chunks = split_into_chunks(raw_body)
+                picked = await rerank_chunks_by_query(
+                    embed_client, chunks, query, char_budget=_MAX_CHARS_PER_PAGE,
+                )
+                body = "\n\n".join(picked)
+                # Sentence-truncate as a final guard — rerank's char_budget is the
+                # primary cap but pathological chunk sizes could overshoot slightly.
+                body = truncate_to_sentences(body, _MAX_CHARS_PER_PAGE)
+                successes.append((title, url, body))
+
+    failure_reasons: dict[str, int] = {}
+    for _, reason in failures:
+        failure_reasons[reason] = failure_reasons.get(reason, 0) + 1
+
+    if not successes:
+        _set_stats(
+            k_requested=capped,
+            k_returned_by_searxng=len(hits),
+            k_fetched_ok=0,
+            k_failed=len(failures),
+            failure_reasons=failure_reasons,
+            fetch_wall_clock_ms=fetch_wall_clock_ms,
+            extracted_bytes_total=0,
+            query_raw=query,
+            query_refined=refined_query,
+        )
+        summary = ", ".join(f"{n}× {r}" for r, n in sorted(failure_reasons.items()))
+        return (
+            f"Web search returned {len(hits)} results but none could be fetched. "
+            f"Reasons: {summary}."
+        )
+
+    extracted_bytes_total = sum(len(body.encode()) for _, _, body in successes)
+    _set_stats(
+        k_requested=capped,
+        k_returned_by_searxng=len(hits),
+        k_fetched_ok=len(successes),
+        k_failed=len(failures),
+        failure_reasons=failure_reasons,
+        fetch_wall_clock_ms=fetch_wall_clock_ms,
+        extracted_bytes_total=extracted_bytes_total,
+        query_raw=query,
+        query_refined=refined_query,
+    )
+
+    blocks: list[str] = []
+    for i, (title, url, body) in enumerate(successes, 1):
+        blocks.append(f"### Source [{i}]: {title}\n{url}\n\n{body}")
+
+    out = "\n\n".join(blocks)
+
+    if failures:
+        failure_lines = "\n".join(f"- {url} — {reason}" for url, reason in failures)
+        out += f"\n\n**Failed sources**\n{failure_lines}"
+
+    # Prepend the actual search query we used (after refinement) so the UI
+    # can surface it in the source pill. The directive already tells the
+    # model to ignore internal metadata; this header is one more such
+    # marker the model should not echo.
+    return f"**Searched as:** {refined_query}\n\n{out}"

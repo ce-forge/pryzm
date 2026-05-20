@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import React, { useRef, useEffect, useState, useCallback, useSyncExternalStore } from "react";
 import { useSessionContext } from "@/context/SessionContext";
 import { useInferenceContext } from "@/context/InferenceContext";
 import { useUploaderContext } from "@/context/UploaderContext";
@@ -23,6 +23,29 @@ import { Message } from "@/types/chat";
 interface ActiveSessionProps {
   isSidebarOpen: boolean;
   setIsSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+// Storage backing for the per-workspace globe toggle. useSyncExternalStore
+// drives the read on every render, so the toggle reflects localStorage from
+// the first paint — no flicker, no useEffect race with the write side.
+const WEB_SEARCH_STORAGE_EVENT = "pryzm:web_search_changed";
+
+function readWebSearchStorage(key: string): boolean {
+  if (typeof window === "undefined" || !key) return false;
+  return window.localStorage.getItem(key) === "true";
+}
+
+function subscribeWebSearchStorage(callback: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+  const onChange = () => callback();
+  // `storage` fires for cross-tab writes; the custom event fires for
+  // same-tab writes (since `storage` is not emitted in the writer tab).
+  window.addEventListener("storage", onChange);
+  window.addEventListener(WEB_SEARCH_STORAGE_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(WEB_SEARCH_STORAGE_EVENT, onChange);
+  };
 }
 
 export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: ActiveSessionProps) {
@@ -56,7 +79,29 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const { scrollRef, bottomRef, onScroll } = useAutoScroll({ messages });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
-  const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+
+  // Globe toggle is persisted per workspace in localStorage so a page refresh
+  // (or returning to a workspace later) preserves the user's choice. Backed
+  // by useSyncExternalStore so reads happen in the render path — no first-paint
+  // flicker, no effect-ordering race with the write side.
+  const webSearchStorageKey = session.workspace
+    ? `pryzm:web_search_enabled:${session.workspace}`
+    : "";
+  const webSearchEnabled = useSyncExternalStore(
+    subscribeWebSearchStorage,
+    () => readWebSearchStorage(webSearchStorageKey),
+    () => false,
+  );
+  const setWebSearchEnabled = useCallback(
+    (next: boolean | ((prev: boolean) => boolean)) => {
+      if (!webSearchStorageKey) return;
+      const current = readWebSearchStorage(webSearchStorageKey);
+      const value = typeof next === "function" ? next(current) : next;
+      localStorage.setItem(webSearchStorageKey, String(value));
+      window.dispatchEvent(new Event(WEB_SEARCH_STORAGE_EVENT));
+    },
+    [webSearchStorageKey],
+  );
 
   useEffect(() => {
     const isDesktopPointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
@@ -104,6 +149,10 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     ai.stopInference(session.currentSession);
   }, [tester, ai, session.currentSession]);
 
+  // Pass the current globe state so rerun / edit-and-rerun re-invoke web_search
+  // when it was active for the original turn. Without this, the modes arg
+  // defaults to [] in useMessageActions and the tool gets silently gated out.
+  const currentModes = (webSearchAvailable && webSearchEnabled) ? ["web_search"] : [];
   const msgActions = useMessageActions(
     session.workspace,
     activeSessionKey,
@@ -112,6 +161,7 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
     ai.sendMessage,
     session.navigateToSession,
     session.notifySessionCreated,
+    currentModes,
   );
 
   const onSubmit = useCallback(

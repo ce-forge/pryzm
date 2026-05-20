@@ -5,6 +5,7 @@ tests). Run after starting the dev stack — see tests/smoke/README.md.
 """
 from __future__ import annotations
 
+import re
 import time
 
 from conftest import (
@@ -123,4 +124,62 @@ def test_autoscroll_disables_on_wheel_up_and_reengages(authed_page) -> None:
     assert s_after["distance"] < 50, (
         f"autoscroll did not re-engage after scrolling to bottom: "
         f"distance={s_after['distance']}"
+    )
+
+
+def test_web_search_globe_pill(authed_page) -> None:
+    """Regression guard for feat/web-search-v2: toggling the globe and asking
+    a research-shaped question produces a collapsed "Searched: N sources" pill
+    that expands to show structured source blocks, and the assistant reply
+    contains [N] citation markers."""
+
+    page = authed_page
+
+    # The globe button renders only when the active workspace has web_search in
+    # enabled_tools. aria-label is "Web search off" when disabled (initial).
+    globe = page.get_by_role("button", name="Web search off")
+    assert globe.count() >= 1, (
+        "globe toggle not found — is web_search in the workspace's enabled_tools?"
+    )
+    globe.first.click()
+    time.sleep(0.3)
+
+    # Confirm the button flipped to "on".
+    assert page.get_by_role("button", name="Web search on").count() >= 1, (
+        "globe toggle did not switch to 'Web search on' after click"
+    )
+
+    send_prompt(
+        page,
+        "What is the latest stable release of Python? Give me the version number.",
+    )
+
+    # web_search fetches multiple pages — allow up to 60s total for the turn.
+    time.sleep(60)
+
+    # --- Pill must be present and collapsed by default ---
+    pill = page.locator("button").filter(has_text="Searched:")
+    assert pill.count() >= 1, "no 'Searched: ...' pill on the assistant turn"
+
+    pill_text = pill.first.inner_text()
+
+    # Source block must be hidden before expansion.
+    assert page.locator("text=### Source [1]:").count() == 0, (
+        "source block is visible before pill expansion — should be collapsed"
+    )
+
+    # --- Expand the pill ---
+    pill.first.click()
+    time.sleep(0.5)
+
+    # Source block must now be visible.
+    assert page.locator("text=### Source [1]:").count() >= 1, (
+        "source block not visible after expanding the pill"
+    )
+
+    # --- Assistant message must contain [N] citation markers ---
+    body = page.locator("body").inner_text()
+    assert re.search(r"\[\d+\]", body), (
+        f"no [N] citation markers in page body — model may not have cited sources. "
+        f"pill was: {pill_text!r}; body tail: {body[-400:]!r}"
     )

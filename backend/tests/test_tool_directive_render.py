@@ -192,3 +192,19 @@ def test_inject_empty_rendered_mid_prompt_placeholder():
     prompt = "SECTION_A_END\n\n{tool_directives}\n\nSECTION_B_START"
     result = _inject_tool_directives(prompt, "")
     assert result == "SECTION_A_END\n\nSECTION_B_START"
+
+
+def test_web_search_directive_includes_citation_rules():
+    """The new web_search tool directive instructs the model to cite each
+    factual claim with [N] and end with a **Sources** footer. Verify both
+    pieces appear in the rendered AVAILABLE TOOLS block."""
+    import tools.web  # noqa: F401 — side-effect: registers web_search in AVAILABLE_TOOLS
+    from tools.registry import build_tool_set, render_tool_directives
+    from types import SimpleNamespace
+
+    workspace = SimpleNamespace(enabled_tools=["web_search"], tool_config={})
+    rendered = render_tool_directives(build_tool_set(workspace))
+
+    assert "web_search" in rendered
+    assert "[N]" in rendered
+    assert "**Sources**" in rendered

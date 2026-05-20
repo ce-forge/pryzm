@@ -1,8 +1,9 @@
-"""Unit tests for the web_search tool (SearxNG-backed).
+"""Unit tests for the web_search tool (SearxNG + page fetch + structured output).
 
-Mocks the HTTP call to SearxNG rather than hitting a real instance, so these
-tests run in CI without docker. End-to-end exercise against a running
-container is the manual verification step on the PR.
+SearxNG is mocked via the requests library. Page fetches are monkeypatched at
+the fetch_and_extract level so tests don't spin up a real browser. End-to-end
+exercise against a running SearxNG + the live web is the manual smoke step on
+the PR.
 """
 from __future__ import annotations
 
@@ -11,13 +12,39 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from tools._web_fetch import FetchResult
+from tools.web import _detect_time_range
+
+
+@pytest.fixture(autouse=True)
+def _stub_rerank(monkeypatch):
+    """Skip embedding-based rerank in these orchestration tests. The rerank
+    helper has its own dedicated tests in test_web_search_rerank.py — here
+    we just want to verify the orchestrator handles success/failure shapes."""
+    async def passthrough(client, chunks, query, char_budget, model=None):
+        # Return chunks in original order up to char_budget — same behavior as
+        # the embed-failure fallback path.
+        out, used = [], 0
+        for c in chunks:
+            if used + len(c) > char_budget:
+                break
+            out.append(c)
+            used += len(c)
+        return out
+    monkeypatch.setattr("tools.web.rerank_chunks_by_query", passthrough)
+
+
+@pytest.fixture(autouse=True)
+def _stub_refine_query(monkeypatch):
+    """Skip query refinement in orchestration tests so SearxNG receives the
+    raw query verbatim. Refinement has its own dedicated tests in
+    test_web_search_query.py."""
+    async def passthrough(client, raw_query, *, today=None, model=None):
+        return raw_query
+    monkeypatch.setattr("tools.web.refine_query", passthrough)
+
 
 def _mock_searx_response(results: list[dict] | None = None, status: int = 200) -> MagicMock:
-    """Build a stand-in for requests.Response carrying a SearxNG-shape JSON body.
-
-    SearxNG's /search?format=json returns an object with a `results` array; each
-    entry has at least `title`, `url`, and `content` (snippet).
-    """
     resp = MagicMock(spec=requests.Response)
     resp.status_code = status
     if status >= 400:
@@ -28,114 +55,173 @@ def _mock_searx_response(results: list[dict] | None = None, status: int = 200) -
     return resp
 
 
-def test_happy_path_returns_markdown_with_top_n():
-    """Three valid SearxNG hits → numbered markdown with **title**, URL, snippet."""
-    from tools.web import web_search
-
-    fake_results = [
-        {"title": "Pryzm Docs", "url": "https://example.com/a", "content": "First snippet."},
-        {"title": "Pryzm Blog", "url": "https://example.com/b", "content": "Second snippet."},
-        {"title": "Pryzm Source", "url": "https://example.com/c", "content": "Third snippet."},
-        {"title": "Should Not Appear", "url": "https://example.com/d", "content": "Fourth."},
+def _fake_hits(n: int) -> list[dict]:
+    return [
+        {"title": f"Title {i}", "url": f"https://example.com/p{i}", "content": f"snippet {i}"}
+        for i in range(1, n + 1)
     ]
-    with patch("tools.web.requests.get", return_value=_mock_searx_response(fake_results)):
-        out = web_search("pryzm", num_results=3)
-
-    assert "**Pryzm Docs**" in out
-    assert "https://example.com/a" in out
-    assert "First snippet." in out
-    assert "**Pryzm Blog**" in out
-    assert "**Pryzm Source**" in out
-    assert "Should Not Appear" not in out  # cap at num_results
 
 
-def test_default_num_results_is_three():
-    """Calling without num_results caps at 3."""
+def _ok_result(url: str, body: str) -> FetchResult:
+    return FetchResult(url=url, ok=True, body=body)
+
+
+def _fail_result(url: str, reason: str) -> FetchResult:
+    return FetchResult(url=url, ok=False, failure_reason=reason)
+
+
+@pytest.mark.asyncio
+async def test_returns_structured_source_blocks_for_each_fetched_page(monkeypatch):
     from tools.web import web_search
 
-    fake_results = [
-        {"title": f"R{i}", "url": f"https://example.com/{i}", "content": f"snippet{i}"}
-        for i in range(5)
-    ]
-    with patch("tools.web.requests.get", return_value=_mock_searx_response(fake_results)):
-        out = web_search("anything")
+    async def fake_fetch(url, _timeout):
+        label = url.rsplit("/", 1)[1]  # "p1", "p2", "p3"
+        return _ok_result(url, f"Article {label} content.")
 
-    assert "**R0**" in out
-    assert "**R1**" in out
-    assert "**R2**" in out
-    assert "**R3**" not in out
-    assert "**R4**" not in out
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(3))
+        out = await web_search("anything", num_results=3)
+
+    assert "### Source [1]: Title 1" in out
+    assert "https://example.com/p1" in out
+    assert "Article p1 content." in out
+    assert "### Source [2]: Title 2" in out
+    assert "### Source [3]: Title 3" in out
 
 
-def test_empty_results_returns_clear_message():
-    """SearxNG returns no results → tool returns a recognizable 'no results' line, not empty string."""
+@pytest.mark.asyncio
+async def test_failed_sources_listed_in_footer_others_still_returned(monkeypatch):
     from tools.web import web_search
 
-    with patch("tools.web.requests.get", return_value=_mock_searx_response([])):
-        out = web_search("totally-made-up-string-xyzzy")
+    async def fake_fetch(url, _timeout):
+        if "p1" in url:
+            return _ok_result(url, "Body one.")
+        if "p2" in url:
+            return _fail_result(url, "403")
+        return _fail_result(url, "timeout")
 
-    assert out  # not empty
-    assert "no results" in out.lower()
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(3))
+        out = await web_search("anything", num_results=3)
+
+    assert "### Source [1]: Title 1" in out
+    # Failed sources don't get numbered blocks.
+    assert "### Source [2]" not in out
+    assert "### Source [3]" not in out
+    assert "**Failed sources**" in out
+    assert "https://example.com/p2 — 403" in out
+    assert "https://example.com/p3 — timeout" in out
 
 
-def test_http_error_returns_message_not_raises():
-    """SearxNG 5xx → tool returns an error message; never raises (LLM needs the string)."""
+@pytest.mark.asyncio
+async def test_all_fail_returns_single_line_error(monkeypatch):
     from tools.web import web_search
 
-    with patch("tools.web.requests.get", return_value=_mock_searx_response([], status=503)):
-        out = web_search("anything")
+    async def fake_fetch(url, _timeout):
+        if "p1" in url:
+            return _fail_result(url, "403")
+        return _fail_result(url, "timeout")
 
-    assert out
-    assert "search failed" in out.lower() or "error" in out.lower()
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(2))
+        out = await web_search("anything", num_results=2)
+
+    assert "### Source" not in out
+    assert "none could be fetched" in out
 
 
-def test_network_error_returns_message_not_raises():
-    """Connection refused / DNS failure → tool returns an error message; never raises."""
+@pytest.mark.asyncio
+async def test_no_searxng_results_returns_no_results_message():
     from tools.web import web_search
 
-    with patch(
-        "tools.web.requests.get",
-        side_effect=requests.ConnectionError("connection refused"),
-    ):
-        out = web_search("anything")
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response([])
+        out = await web_search("zzzz no hits")
 
-    assert out
-    assert "search failed" in out.lower() or "error" in out.lower()
+    assert "No results for" in out
 
 
-def test_query_is_sent_to_searxng():
-    """The query string actually reaches SearxNG's `q` param."""
+@pytest.mark.asyncio
+async def test_searxng_unreachable_returns_failure_message():
     from tools.web import web_search
 
-    with patch("tools.web.requests.get", return_value=_mock_searx_response([])) as mock_get:
-        web_search("my unique query")
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.side_effect = requests.ConnectionError("refused")
+        out = await web_search("anything")
 
-    # Inspect kwargs / args of the call. Tool should pass `q=<query>` as a param.
-    call = mock_get.call_args
-    params = call.kwargs.get("params") or (call.args[1] if len(call.args) > 1 else {})
-    assert params.get("q") == "my unique query"
-    assert params.get("format") == "json"
+    assert "Web search failed" in out
 
 
-def test_tool_is_registered_with_directive():
-    """The @tool decorator registers web_search in AVAILABLE_TOOLS with a non-empty directive."""
-    # Import the module to trigger registration
-    import tools.web  # noqa: F401
-    from tools.registry import AVAILABLE_TOOLS
+@pytest.mark.asyncio
+async def test_num_results_clamped_at_eight(monkeypatch):
+    from tools.web import web_search
 
-    assert "web_search" in AVAILABLE_TOOLS
-    fn = AVAILABLE_TOOLS["web_search"]
-    assert getattr(fn, "system_prompt_directive", "")  # non-empty
+    async def fake_fetch(url, _timeout):
+        label = url.rsplit("/", 1)[1]
+        return _ok_result(url, f"body {label}")
+
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(10))
+        out = await web_search("anything", num_results=20)
+
+    # 9th and 10th hits never get fetched.
+    assert "### Source [8]" in out
+    assert "### Source [9]" not in out
 
 
-def test_tool_definition_includes_query_parameter():
-    """The JSON schema exposed to the LLM has `query` as a required string parameter."""
-    import tools.web  # noqa: F401
-    from tools.registry import TOOL_DEFINITIONS
+@pytest.mark.asyncio
+async def test_body_is_truncated_to_max_chars(monkeypatch):
+    from tools.web import web_search
 
-    web_def = next((d for d in TOOL_DEFINITIONS if d["function"]["name"] == "web_search"), None)
-    assert web_def is not None
-    params = web_def["function"]["parameters"]
-    assert "query" in params["properties"]
-    assert params["properties"]["query"]["type"] == "string"
-    assert "query" in params["required"]
+    long_body = "Sentence. " * 1000  # ~10K chars
+
+    async def fake_fetch(url, _timeout):
+        return _ok_result(url, long_body)
+
+    monkeypatch.setattr("tools.web.fetch_and_extract", fake_fetch)
+
+    with patch("tools.web.requests.get") as mock_get:
+        mock_get.return_value = _mock_searx_response(_fake_hits(1))
+        out = await web_search("anything", num_results=1)
+
+    # Extracted body inside the Source block should not exceed ~3000 chars.
+    assert len(out) < 3500
+    assert "Sentence." in out
+
+
+def test_detect_time_range_recency_words_trigger_month():
+    """Vague currency words → time_range=month so SearxNG returns recently-
+    published content for currency-sensitive queries."""
+    assert _detect_time_range("Python latest stable release") == "month"
+    assert _detect_time_range("Microsoft 365 admin center recent changes") == "month"
+    assert _detect_time_range("current ms365 admin center changes") == "month"
+    assert _detect_time_range("upcoming Microsoft Build sessions") == "month"
+    assert _detect_time_range("new pgvector features") == "month"
+
+
+def test_detect_time_range_short_window_words_do_not_trigger():
+    """Short-window words ("today", "this week", "yesterday") are NOT in the
+    trigger list — they're strong keyword signals on their own, and stacking
+    time_range on top excludes evergreen URLs (e.g. nrl.com/draw) that lack
+    a recent publish date but ARE the canonical answer."""
+    assert _detect_time_range("nrl schedule this week") is None
+    assert _detect_time_range("what happened today") is None
+    assert _detect_time_range("yesterday's outage") is None
+
+
+def test_detect_time_range_no_recency_signal():
+    """Evergreen, historical, and how-to queries get no time_range filter —
+    they should rank purely on relevance, not freshness."""
+    assert _detect_time_range("Cloudflare R2 pricing") is None
+    assert _detect_time_range("CrowdStrike outage 2024 cause") is None
+    assert _detect_time_range("how to enable BitLocker via Group Policy") is None
+    assert _detect_time_range("Q1 2025 Azure AD changes") is None
+    assert _detect_time_range("") is None

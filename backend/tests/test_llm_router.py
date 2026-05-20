@@ -201,3 +201,5 @@ def test_get_router_raises_when_uninitialised(monkeypatch):
     monkeypatch.setattr(mod, "_router_singleton", None)
     with pytest.raises(RuntimeError, match="not initialised"):
         get_router()
+
+
