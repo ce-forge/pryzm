@@ -134,15 +134,15 @@ Behavior:
 
 1. Call SearxNG for top-K hits (K capped at 8, default 5).
 2. Fetch all URLs in parallel via `httpx.AsyncClient` inside `asyncio.wait_for(..., timeout=25)`. Per-request timeout 8s. The 25s ceiling sits under the engine's `TOOL_TIMEOUT_SECONDS=30` so the inner budget always trips first and the tool can return a partial result rather than getting cancelled by the outer guard.
-3. For each successful fetch (HTTP 2xx, content-type `text/html*` or `application/xhtml+xml`), extract main content with `trafilatura.extract(html, include_comments=False, include_tables=True)`.
-4. Truncate each extracted body to 6000 chars at a sentence boundary. A small helper walks the body, accumulates whole sentences, and stops before exceeding the cap — `textwrap.shorten` is too aggressive on prose where one sentence can run past the limit on its own.
+3. For each successful fetch (HTTP 2xx, content-type `text/html*` or `application/xhtml+xml`), extract main content with `trafilatura.extract(html, include_comments=False, include_tables=False, favor_precision=True)`. Precision over recall keeps cookie banners, related-articles, and sidebars out of the model's context; `include_tables=False` drops ASCII-table grids that corrupt the synthesis prompt.
+4. Truncate each extracted body to 3000 chars at a sentence boundary. A small helper walks the body, accumulates whole sentences, and stops before exceeding the cap — `textwrap.shorten` is too aggressive on prose where one sentence can run past the limit on its own.
 5. Assemble output:
 
    ```
    ### Source [1]: <title from SearxNG>
    <URL>
 
-   <extracted body, ≤6000 chars>
+   <extracted body, ≤3000 chars>
 
    ### Source [2]: ...
    ```
