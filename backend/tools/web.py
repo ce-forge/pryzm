@@ -23,6 +23,7 @@ import requests
 
 from config import settings
 from tools._web_fetch import FetchResult, fetch_and_extract
+from tools._web_query import refine_query
 from tools._web_rerank import rerank_chunks_by_query, split_into_chunks
 from tools._web_truncate import truncate_to_sentences
 from .registry import tool
@@ -103,7 +104,16 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     _set_stats(
         k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
         failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+        query_raw=query, query_refined=query,
     )
+
+    # Refine the search query via the always-on small model: normalises
+    # phrasing, fixes typos, and injects today's date so time-bound questions
+    # like "this week" produce a year/month-anchored query. Falls back to the
+    # raw query on any failure — never blocks the tool turn.
+    async with httpx.AsyncClient() as refine_client:
+        refined_query = await refine_query(refine_client, query)
+    _LAST_STATS["query_refined"] = refined_query
 
     # SearxNG call stays synchronous (requests library). It blocks the event
     # loop until the local SearxNG responds, but Pryzm is single-user and
@@ -113,7 +123,7 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
     try:
         resp = requests.get(
             f"{settings.SEARXNG_URL}/search",
-            params={"q": query, "format": "json", "language": "en"},
+            params={"q": refined_query, "format": "json", "language": "en"},
             timeout=settings.TOOL_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
@@ -122,6 +132,7 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         _set_stats(
             k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
             failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+            query_raw=query, query_refined=refined_query,
         )
         return f"Web search failed: {exc}"
 
@@ -130,8 +141,9 @@ async def web_search(query: str, num_results: int = _DEFAULT_RESULTS) -> str:
         _set_stats(
             k_requested=capped, k_returned_by_searxng=0, k_fetched_ok=0, k_failed=0,
             failure_reasons={}, fetch_wall_clock_ms=0, extracted_bytes_total=0,
+            query_raw=query, query_refined=refined_query,
         )
-        return f"No results for {query!r}."
+        return f"No results for {refined_query!r}."
 
     urls_titles = [(h.get("url", ""), h.get("title", "(no title)")) for h in hits]
 

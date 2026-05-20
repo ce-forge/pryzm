@@ -33,6 +33,16 @@ def _stub_rerank(monkeypatch):
     monkeypatch.setattr("tools.web.rerank_chunks_by_query", passthrough)
 
 
+@pytest.fixture(autouse=True)
+def _stub_refine_query(monkeypatch):
+    """Skip query refinement in orchestration tests so SearxNG receives the
+    raw query verbatim. Refinement has its own dedicated tests in
+    test_web_search_query.py."""
+    async def passthrough(client, raw_query, *, today=None, model=None):
+        return raw_query
+    monkeypatch.setattr("tools.web.refine_query", passthrough)
+
+
 def _mock_searx_response(results: list[dict] | None = None, status: int = 200) -> MagicMock:
     resp = MagicMock(spec=requests.Response)
     resp.status_code = status

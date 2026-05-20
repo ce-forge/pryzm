@@ -152,7 +152,8 @@ def test_audit_chat_event_writes_web_search(db_session, redirect_session_local):
         user.id, ws.id, None,
         EventType.CHAT_WEB_SEARCH,
         {
-            "query_preview": "kubernetes load balancer",
+            "query_preview": "k8s lb",
+            "query_refined": "kubernetes load balancer setup guide",
             "k_requested": 5,
             "k_returned_by_searxng": 5,
             "k_fetched_ok": 3,
@@ -167,7 +168,8 @@ def test_audit_chat_event_writes_web_search(db_session, redirect_session_local):
         event_type="chat.web_search", user_id=user.id,
     ).all()
     assert len(events) == 1
-    assert events[0].payload["query_preview"] == "kubernetes load balancer"
+    assert events[0].payload["query_preview"] == "k8s lb"
+    assert events[0].payload["query_refined"] == "kubernetes load balancer setup guide"
     assert events[0].payload["k_requested"] == 5
     assert events[0].payload["k_fetched_ok"] == 3
     assert events[0].payload["k_failed"] == 2

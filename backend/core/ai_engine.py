@@ -663,6 +663,7 @@ async def stream_chat(
                             EventType.CHAT_WEB_SEARCH,
                             {
                                 "query_preview": str(audit_args.get("query", ""))[:200],
+                                "query_refined": str(_web_stats_snapshot.get("query_refined", ""))[:200],
                                 "k_requested": _web_stats_snapshot.get("k_requested", 0),
                                 "k_returned_by_searxng": _web_stats_snapshot.get("k_returned_by_searxng", 0),
                                 "k_fetched_ok": _web_stats_snapshot.get("k_fetched_ok", 0),
