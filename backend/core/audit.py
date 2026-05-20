@@ -32,7 +32,6 @@ class EventType:
     AUTH_LOGOUT = "auth.logout"
     AUTH_PASSWORD_CHANGED = "auth.password_changed"
     AUTH_PASSWORD_RESET_BY_ADMIN = "auth.password_reset_by_admin"
-    AUTH_SESSION_EXPIRED = "auth.session_expired"
 
     # admin.user.*
     ADMIN_USER_CREATED = "admin.user.created"

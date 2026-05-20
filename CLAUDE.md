@@ -113,7 +113,7 @@ AppProviders                     ← always mounted; just AuthProvider
 
 ### Admin dashboard (`src/app/admin/`)
 
-Six tabs under a shared layout with admin-only gate: Users, Workspaces, System, Engine, Audit, Bug reports. Dynamic routes for per-user (`/admin/users/[id]`) and per-session (`/admin/sessions/[id]`) detail pages. Engine tab iframes llama-swap via the backend reverse proxy.
+Six tabs under a shared layout with admin-only gate: Users, Workspaces, System, Engine, Audit, Alerts. Dynamic routes for per-user (`/admin/users/[id]`) and per-session (`/admin/sessions/[id]`) detail pages. Engine tab iframes llama-swap via the backend reverse proxy.
 
 ### Streaming (`hooks/useInference.ts`)
 
