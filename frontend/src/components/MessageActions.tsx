@@ -63,6 +63,21 @@ export default function MessageActions({ content, timestamp, onEdit, onDelete, o
         {copied ? <CheckIcon className="w-3.5 h-3.5" /> : <CopyIcon className="w-3.5 h-3.5" />}
       </button>
 
+      {onThumbsDown && (
+        <button
+          onClick={reportThumbsDown}
+          className={`${btnClass} ${reported ? "text-red-400 hover:text-red-400" : ""}`}
+          title={reported ? "Reported" : "Flag this reply for the admin"}
+          aria-label={reported ? "Reply reported" : "Flag this reply"}
+          aria-pressed={reported}
+        >
+          <ThumbsDownIcon
+            className="w-3.5 h-3.5"
+            fill={reported ? "currentColor" : "none"}
+          />
+        </button>
+      )}
+
       {isUser && (
         <button onClick={onEdit} className={btnClass}>
           <EditIcon className="w-3.5 h-3.5" />
@@ -82,21 +97,6 @@ export default function MessageActions({ content, timestamp, onEdit, onDelete, o
       <button onClick={onDelete} className={btnClass}>
         <TrashIcon className="w-3.5 h-3.5" />
       </button>
-
-      {onThumbsDown && (
-        <button
-          onClick={reportThumbsDown}
-          className={`${btnClass} ${reported ? "text-red-400 hover:text-red-400" : ""}`}
-          title={reported ? "Reported" : "Flag this reply for the admin"}
-          aria-label={reported ? "Reply reported" : "Flag this reply"}
-          aria-pressed={reported}
-        >
-          <ThumbsDownIcon
-            className="w-3.5 h-3.5"
-            fill={reported ? "currentColor" : "none"}
-          />
-        </button>
-      )}
     </div>
   );
 }
