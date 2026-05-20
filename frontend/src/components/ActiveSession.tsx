@@ -56,7 +56,27 @@ export default function ActiveSession({ isSidebarOpen, setIsSidebarOpen }: Activ
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const { scrollRef, bottomRef, onScroll } = useAutoScroll({ messages });
   const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; index: number } | null>(null);
+
+  // Globe toggle is persisted per workspace in localStorage so a page refresh
+  // (or returning to a workspace later) preserves the user's choice. Without
+  // this, the toggle resets to off and the next message — including reruns —
+  // silently fires without web_search.
+  const webSearchStorageKey = session.workspace
+    ? `pryzm:web_search_enabled:${session.workspace}`
+    : "";
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
+  useEffect(() => {
+    // Read on mount + whenever the workspace changes. The set-state-in-effect
+    // warning is a false positive here: we're hydrating UI state from an
+    // external persistence layer (localStorage), not driving a re-render loop.
+    if (!webSearchStorageKey) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWebSearchEnabled(localStorage.getItem(webSearchStorageKey) === "true");
+  }, [webSearchStorageKey]);
+  useEffect(() => {
+    if (!webSearchStorageKey) return;
+    localStorage.setItem(webSearchStorageKey, String(webSearchEnabled));
+  }, [webSearchStorageKey, webSearchEnabled]);
 
   useEffect(() => {
     const isDesktopPointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
